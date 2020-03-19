@@ -5,7 +5,7 @@
 void event_send_start(ProcessTracking * procp,
                       uid_t            uid,
                       int              start_action,
-                      ProcessContext * context);
+                      ProcessContext  *context);
 
 void event_send_last_exit(PCB_EVENT        event,
                           ProcessContext  *context);

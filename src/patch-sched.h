@@ -6,7 +6,7 @@
 #include "priv.h"
 #include <linux/sched.h>
 
-bool patch_sched(ProcessContext * context);
+bool patch_sched(ProcessContext *context);
 void restore_sched(ProcessContext *context);
 bool sched_changed(ProcessContext *context);
 

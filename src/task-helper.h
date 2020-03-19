@@ -10,7 +10,7 @@
 //
 // Task helpers
 //
-extern bool task_initialize(ProcessContext * context);
+extern bool task_initialize(ProcessContext *context);
 extern void task_shutdown(ProcessContext *context);
 
 extern pid_t getcurrentpid(void);

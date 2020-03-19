@@ -4,7 +4,7 @@
 #include "priv.h"
 #include "cb-spinlock.h"
 
-static void _send_process_discovery(void *data, void *priv, ProcessContext * context);
+static void _send_process_discovery(void *data, void *priv, ProcessContext *context);
 
 void process_tracking_send_process_discovery(ProcessContext *context)
 {

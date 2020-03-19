@@ -5,7 +5,7 @@
 bool ${MODULE_NAME}_disable(char *src_module_name, char **failure_reason)
 {
     DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+
     return disable_if_not_connected(&context, src_module_name, failure_reason);
 }
-
 EXPORT_SYMBOL(${MODULE_NAME}_disable);

@@ -2,7 +2,7 @@
 #include "cb-test.h"
 #include "task-helper.h"
 
-static void _show_process_tracking_table(void *data, void *priv, ProcessContext * context);
+static void _show_process_tracking_table(void *data, void *priv, ProcessContext *context);
 
 int cb_proc_track_show_table(struct seq_file *m, void *v)
 {
