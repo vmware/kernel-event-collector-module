@@ -1,6 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 // This is a set of helper macros simplify all the nested if statements in code.
-#ifndef _CB_TEST_H_
-#define _CB_TEST_H_
+
+#pragma once
 
 // checkpatch-ignore: MACRO_WITH_FLOW_CONTROL
 #define XSET      { xcode = val; }
@@ -57,5 +60,3 @@ do { \
 } while (false)
 
 #define ATOMIC64_DEC__CHECK_NEG(counter) IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(counter, {})
-
-#endif //_CB_TEST_H_

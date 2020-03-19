@@ -1,11 +1,6 @@
-///
-/// @file    findsyms.c
-///
-/// @brief   Implementation of routines for finding the addresses of global
-///          function tables that will be hooked by the proxy.
-///
-/// @copyright (c) 2016 Carbon Black, Inc. All rights reserved.
-///
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include <linux/fs.h>
 #include <linux/kernel.h>

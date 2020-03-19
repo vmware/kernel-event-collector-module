@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
 #include "hook-tracking.h"
 #include "cb-spinlock.h"
 #include "process-context.h"

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
 #include "priv.h"
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #include <linux/binfmts.h>

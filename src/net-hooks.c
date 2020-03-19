@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
 #include "priv.h"
 #include "net-helper.h"
 #include "network-tracking.h"
@@ -1479,7 +1483,7 @@ asmlinkage long cb_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
         // Initial value of sk_rcvtimeo_dlta should be restored after peeking because socket timeout is used in recvmsg()
         // which is called by recvmmsg() internally in a loop and it should be the same value for all recvmsg() calls.
         // PEEK() calls TIMED_RECV() which adjusts sk_rcvtimeo_dlta, that's why we use sk_rcvtimeo_dlta_peek here to
-        // preserve initial value of sk_rcvtimeo_dlta that will be passed to the non-peeking system call below.
+        // preserved.nitial value of sk_rcvtimeo_dlta that will be passed to the non-peeking system call below.
         sk_rcvtimeo_dlta_peek = sk_rcvtimeo_dlta;
 
         // If the caller provided timeout value we need to use our kernel space copy of it for peeking because
