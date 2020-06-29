@@ -1,0 +1,58 @@
+name:            kerne-event-collector-module
+build-rules:     ${UTIL_DIR}/build-module.sh
+source-version:  1.11.0
+
+builders:
+    - redhat6-gcc48-debug
+    - redhat6-gcc48-relwithdebinfo
+
+service-env:
+    PROJECT_VERSION:     $${SOURCE_VERSION}.${BUILD_VERSION}
+    UTIL_DIR:            ${UTIL_DIR}
+    JOBS:                1
+    BUILD_TYPE:          release
+    BUILD_VERBOSE:       no
+    BULLSEYE_KEY:
+
+options:
+    - module_name=event_collector
+    - module_name=cbsensor
+
+file-replacements:
+    KERNEL_API_VERSION: CB_EVENT_API_2_1
+    CONAN_UTIL_VERSION:
+    CPPUTEST_VERSION:
+    KERNEL_HEADERS_VERSION: # Note, this is needed here for proper dependency tracking
+    KERNEL_RHEL_6_2_VERSION:
+    KERNEL_RHEL_6_3_VERSION:
+    KERNEL_RHEL_6_4_VERSION:
+    KERNEL_RHEL_6_5_VERSION:
+    KERNEL_RHEL_6_6_VERSION:
+    KERNEL_RHEL_6_7_VERSION:
+    KERNEL_RHEL_6_8_VERSION:
+    KERNEL_RHEL_6_9_VERSION:
+    KERNEL_RHEL_6_10_VERSION:
+    KERNEL_RHEL_7_0_VERSION:
+    KERNEL_RHEL_7_1_VERSION:
+    KERNEL_RHEL_7_2_VERSION:
+    KERNEL_RHEL_7_3_VERSION:
+    KERNEL_RHEL_7_4_VERSION:
+    KERNEL_RHEL_7_5_VERSION:
+    KERNEL_RHEL_7_6_VERSION:
+    KERNEL_RHEL_7_7_VERSION:
+    KERNEL_RHEL_7_8_VERSION:
+    # Override the kernel versions
+    #  This should be a comma seperated list of kernel versions to match.  (This
+    #  is a simple match in the string.)
+    #  I.e.  "2.6.32-754,3.10.0-957" would build 6.9 and 7.6
+    #        "754,957" would build 6.9 and 7.6
+    #        "3.10.0" would build all 7.x versions
+    #  NOTE: It is ok to inclued kernels from only one platform.
+    KERNEL_OVERRIDE_LIST: ""
+    BUILD_VERSION:
+
+env:
+    UTIL_CHANNEL: ${DEFAULT_CHANNEL}
+    VENDOR_CHANNEL: ${DEFAULT_CHANNEL}
+    COMMON_CHANNEL: ${DEFAULT_CHANNEL}
+    UTIL_DIR: /src/util

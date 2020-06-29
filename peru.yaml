@@ -1,0 +1,6 @@
+imports:
+    build-util: build-util
+
+git module build-util:
+    url:  git@gitlab.bit9.local:cbsensor/cb-build-util.git
+    rev:  dbozzuto-linear-build2
