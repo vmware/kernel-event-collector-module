@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+# Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
+# Include gitlab-ci-base.yml from cb-build-util.
+#  Update the git hash to use a newer version of the base yaml
+#  Note: This can be a branch name for testing but should be a git hash/tag for reproducability
+include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/raw/56783c034d28fb812642fe7012c6539c2daa25d0/gitlab-ci-base.yml'
+
+# Gitlab CI configuration script for event-collector-app.
+variables:
+  ARTIFACTORY_PATH: https://${ARTIFACTORY_URL}/artifactory
+  BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
+  # Tells the  cb-build-util scripts that this isn't a conan package and it needs to be built like a project
+  IS_PROJECT_REPO: 1
+
+
+stages:
+  - build_project
+  - build_downstream
+  - deploy
+
+# Build project
+build_triggered:
+  extends: .build_triggered_template
+  stage: build_project
+
+build_branch:
+  extends: .build_branch_template
+  stage: build_project
+
+build_release:
+  extends: .build_release_template
+  stage: build_project
+
+# Build downstream
+build_endpoint_common:
+  extends: .build_downstream_template
+  stage: build_downstream
+  variables:
+    GIT_STRATEGY: none
+    DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
+
+# Deploy
+deploy_release:
+  extends: .deploy_release_template
+  stage: deploy
+  when: on_success
+
+deploy_branch:
+  extends: .deploy_branch_template
+  stage: deploy
+  when: manual
