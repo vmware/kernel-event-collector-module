@@ -1,5 +1,8 @@
-#if !defined(__PRIV_H__)
-#define __PRIV_H__
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
+#pragma once
 
 // Defining __KERNEL__ and MODULE allows us to access kernel-level code not usually available to userspace programs.
 #undef __KERNEL__
@@ -506,5 +509,3 @@ extern uint64_t g_enableHooks;
 
 
 #undef _C
-
-#endif // __PRIV_H__

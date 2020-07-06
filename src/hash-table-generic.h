@@ -1,5 +1,9 @@
-#ifndef __HASH_TBL__EXT
-#define __HASH_TBL__EXT
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
+#pragma once
+
 #include <linux/hash.h>
 #include <linux/list.h>
 
@@ -72,4 +76,3 @@ size_t hashtbl_get_memory(ProcessContext *context);
 void hash_table_test(void);
 void debug_on(void);
 void debug_off(void);
-#endif

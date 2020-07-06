@@ -1,6 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
-#ifndef __CB_ISOLATION_H__
-#define __CB_ISOLATION_H__
+#pragma once
 
 typedef uint32_t DWORD;
 typedef uint32_t ULONG;
@@ -108,5 +110,3 @@ VOID CbIsolationInterceptByAddrProtoPort(
     CB_ISOLATION_INTERCEPT_RESULT *isolationResult);
 
 extern CB_ISOLATION_STATS g_cbIsolationStats;
-
-#endif // __CB_ISOLATION_H__

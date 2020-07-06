@@ -1,11 +1,13 @@
-// Copyright 2018 Carbon Black Inc.  All rights reserved.
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "priv.h"
 
 bool ${MODULE_NAME}_disable(char *src_module_name, char **failure_reason)
 {
     DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+
     return disable_if_not_connected(&context, src_module_name, failure_reason);
 }
-
 EXPORT_SYMBOL(${MODULE_NAME}_disable);

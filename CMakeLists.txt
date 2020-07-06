@@ -1,4 +1,6 @@
-# Copyright 2018 Carbon Black Inc.  All rights reserved.
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+# Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 cmake_minimum_required(VERSION 2.8.7)
 project (KernelEventCollectorModule)
@@ -21,8 +23,12 @@ cb_check_kernel_files(
                             LINUX_VERSION_CODE
                             NEW_TYPEDEFS
                             OPEN_BRACE
-                            SPDX_LICENSE_TAG
                             SUSPECT_CODE_INDENT
                             TRAILING_STATEMENTS
+        # checkpatch.pl does not like new typedefs.  We possibly should list all the typedefs we add here, but for now
+        #  I am only listing the ones that are giving me issues.
+        #  If you get the error `need consistent spacing around "*"` then add the type here.
+        NEW_TYPES           CB_FILE_TYPE
+                            ProcessContext
         SOURCE_FILES        ${SRC_FILES}
 )

@@ -1,3 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
 #pragma once
 
 #include "process-tracking.h"
@@ -5,7 +9,7 @@
 void event_send_start(ProcessTracking * procp,
                       uid_t            uid,
                       int              start_action,
-                      ProcessContext * context);
+                      ProcessContext  *context);
 
 void event_send_last_exit(PCB_EVENT        event,
                           ProcessContext  *context);

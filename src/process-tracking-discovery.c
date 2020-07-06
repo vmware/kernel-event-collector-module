@@ -1,10 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
 #include "process-tracking-private.h"
 #include "cb-test.h"
 #include "event-factory.h"
 #include "priv.h"
 #include "cb-spinlock.h"
 
-static void _send_process_discovery(void *data, void *priv, ProcessContext * context);
+static void _send_process_discovery(void *data, void *priv, ProcessContext *context);
 
 void process_tracking_send_process_discovery(ProcessContext *context)
 {

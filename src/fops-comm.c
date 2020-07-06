@@ -1,8 +1,7 @@
-//
-/// \file fops-comm.c
-/// \desc This file is designed to replace the old netlink communications
-/// which was under the GPL.
-//
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include <linux/slab.h>
@@ -434,7 +433,7 @@ static bool try_to_gain_capacity(struct list_head *tx_queue)
     //  only more important than P1 because our tracking logic depends on it.  In
     //  reality the events in P1 are more important to the customer, because these
     //  represent the "interesting" events.  The events in P2 are really just informational,
-    //  so we do not take special care to preserve them.
+    //  so we do not take special care to preserved.hem.
     //
     // The legacy logic for CbR requires the Fork events to be at the P0 priority
     //  for its tracking purpose.  In reality these events are not very interesting,

@@ -1,9 +1,8 @@
-//
-// Copyright (c) 2018 Carbon Black. All rights reserved.
-//
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
-#ifndef CBR_LINUX_INODESTATE_H
-#define CBR_LINUX_INODESTATE_H
+#pragma once
 
 #ifdef __cplusplus
 extern "C"
@@ -19,5 +18,3 @@ extern "C"
 #ifdef __cplusplus
 }
 #endif
-
-#endif //CBR_LINUX_INODESTATE_H
