@@ -16,7 +16,7 @@
 #include "cb-spinlock.h"
 #include "task-helper.h"
 
-static void cb_exit_hook(struct task_struct *task, ProcessContext * context);
+static void cb_exit_hook(struct task_struct *task, ProcessContext *context);
 
 bool task_initialize(ProcessContext *context)
 {
