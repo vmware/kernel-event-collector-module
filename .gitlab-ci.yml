@@ -19,6 +19,7 @@ stages:
   - build_project
   - build_downstream
   - deploy
+  - publish
 
 # Build project
 build_triggered:
@@ -51,3 +52,21 @@ deploy_branch:
   extends: .deploy_branch_template
   stage: deploy
   when: manual
+
+publish_to_github:
+  stage: publish
+  tags:
+    - web-access
+  before_script:
+    - echo "Overriding global build script" > /dev/null
+  script:
+    - echo "Branch is ${CI_COMMIT_REF_NAME}"
+    - git branch -D "${CI_COMMIT_REF_NAME}" &> /dev/null || true
+    - git fetch --prune &> /dev/null || true
+    - git checkout -B "${CI_BUILD_REF_NAME}" "${CI_BUILD_REF}"
+    - git remote add upstream https://github.com/vmware/kernel-event-collector-module.git
+    - git config credential.https://github.com.helper "${GITHUB_CREDENTIAL_HELPER}"
+    - git push upstream "${CI_BUILD_REF_NAME}"
+  only:
+    - master
+    - /^release-/
