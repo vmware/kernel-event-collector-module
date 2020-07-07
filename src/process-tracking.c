@@ -13,7 +13,7 @@
 #include "path-buffers.h"
 #include "cb-spinlock.h"
 
-static void hashtbl_delete_callback(void *procp, ProcessContext * context);
+static void hashtbl_delete_callback(void *procp, ProcessContext *context);
 static void shareddata_print_callback(void *data, ProcessContext *context);
 
 static SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context);
