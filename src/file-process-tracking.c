@@ -64,6 +64,7 @@ FILE_PROCESS_VALUE *file_process_status_open(
     FILE_PROCESS_VALUE *value = NULL;
     FILE_TREE_HANDLE tree_handle;
     FILE_PROCESS_KEY key = { device, inode };
+    const char *process_path = "<unknown>";
 
     TRY(process_tracking_get_file_tree(pid, &tree_handle, context));
 
@@ -85,7 +86,13 @@ FILE_PROCESS_VALUE *file_process_status_open(
         {
             file_process_free(value, context);
             value = NULL;
-            TRACE(DL_ERROR, "Fail to add [%llu:%llu] pid:%u into file tracking table", device, inode, pid);
+            if (tree_handle.shared_data)
+            {
+                process_path = process_tracking_get_path(tree_handle.shared_data);
+            }
+
+            TRACE(DL_ERROR, "Fail to add %s [%llu:%llu] pid:%u (%s) into file tracking table",
+                  path ? path : "(path unknown)", device, inode, pid, process_path);
             goto CATCH_DEFAULT;
         }
         if (path)
