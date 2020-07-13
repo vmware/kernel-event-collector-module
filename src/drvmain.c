@@ -480,8 +480,8 @@ static int _cb_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
     DECLARE_ATOMIC_CONTEXT(atomic_context, getpid(current));
 
+    TRY_STEP(DEFAULT,   disable_peer_modules(context));
     TRY_STEP(DEFAULT,   path_buffers_init(context));
-    TRY_STEP(BUFFERS,   disable_peer_modules(context));
     TRY_STEP(BUFFERS,   cb_proc_initialize(context));
     TRY_STEP(PROC_DIR,  user_comm_initialize(context));
     TRY_STEP(USER_COMM, logger_initialize(context));
