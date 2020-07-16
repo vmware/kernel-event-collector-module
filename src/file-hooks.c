@@ -12,6 +12,7 @@
 #include "event-factory.h"
 
 #include <linux/file.h>
+#include <linux/namei.h>
 
 static FILE_PROCESS_KEY g_log_messages_file_id = {0, 0};
 
@@ -45,7 +46,8 @@ typedef struct file_data_t_ {
     char            *generic_path_buffer; // on the GENERIC cache
 } file_data_t;
 
-static file_data_t *get_file_data(ProcessContext *context, const char __user *filename);
+static file_data_t *get_file_data_from_name(ProcessContext *context, const char __user *filename);
+static file_data_t *get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
 static void put_file_data(ProcessContext *context, file_data_t *file_data);
 
 #define ENABLE_SPECIAL_FILE_SETUP(x)   {x, sizeof(x)-1, 1}
@@ -185,17 +187,15 @@ char *event_type_to_str(CB_EVENT_TYPE event_type)
 }
 
 //
-// IMPORTANT: get_file_data/put_file_data MUST work regardless of whether the module is enabled
+// IMPORTANT: get_file_data_*/put_file_data MUST work regardless of whether the module is enabled
 // or disabled. We call these functions from outside the active call hook tracking that prevents
 // the module from disabling.
 //
 
-static file_data_t *get_file_data(ProcessContext *context, const char __user *filename)
+// Allocates a file_data_t and sets file_data->file_s to a kernelspace filename string
+static file_data_t *file_data_alloc(ProcessContext *context, const char __user *filename)
 {
-    file_data_t *file_data = NULL;
-    struct file *file      = NULL;
-    char *pathname         = NULL;
-    char *generic_path_buffer    = NULL;
+    file_data_t *file_data           = NULL;
 
     TRY(filename);
 
@@ -203,17 +203,22 @@ static file_data_t *get_file_data(ProcessContext *context, const char __user *fi
     TRY(file_data);
 
     file_data->generic_path_buffer = NULL;
-    file_data->name = NULL;
+    file_data->name                = NULL;
 
     file_data->file_s = CB_RESOLVED(getname)(filename);
     TRY(!IS_ERR_OR_NULL(file_data->file_s));
+    return file_data;
 
-    // O_NONBLOCK is needed here in case the file is a named pipe.  Otherwise we
-    //   could deadlock waiting for a writer that may never come.
-    file = filp_open(file_data->file_s->name, O_RDONLY|O_NONBLOCK, 0);
-    TRY(!IS_ERR_OR_NULL(file));
+CATCH_DEFAULT:
+    put_file_data(context, file_data);
+    return NULL;
+}
 
-    get_devinfo_from_file(file, &file_data->device, &file_data->inode);
+// Initializes file_data members from a file struct
+static void file_data_init(ProcessContext *context, file_data_t *file_data, struct file *file)
+{
+    char *pathname            = NULL;
+    char *generic_path_buffer = NULL;
 
     // if the path begins with a / we know it is already absolute so we dont need to do a lookup
     // prepare to do a lookup by allocating a buffer
@@ -239,7 +244,45 @@ static file_data_t *get_file_data(ProcessContext *context, const char __user *fi
         file_data->name = file_data->file_s->name;
     }
 
+    get_devinfo_from_file(file, &file_data->device, &file_data->inode);
+}
+
+static file_data_t *get_file_data_from_name(ProcessContext *context, const char __user *filename)
+{
+    struct file *file      = NULL;
+    file_data_t *file_data = file_data_alloc(context, filename);
+
+    TRY(file_data);
+
+    // O_NONBLOCK is needed here in case the file is a named pipe.  Otherwise we
+    //   could deadlock waiting for a writer that may never come.
+    file = filp_open(file_data->file_s->name, O_RDONLY|O_NONBLOCK, 0);
+    TRY(!IS_ERR_OR_NULL(file));
+
+    file_data_init(context, file_data, file);
+
     filp_close(file, NULL);
+
+    return file_data;
+
+CATCH_DEFAULT:
+    put_file_data(context, file_data);
+    return NULL;
+}
+
+static file_data_t *get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd)
+{
+    struct file *file      = NULL;
+    file_data_t *file_data = file_data_alloc(context, filename);
+
+    TRY(file_data);
+
+    file = fget(fd);
+    TRY(!IS_ERR_OR_NULL(file));
+
+    file_data_init(context, file_data, file);
+
+    fput(file);
 
     return file_data;
 
@@ -253,18 +296,17 @@ CATCH_DEFAULT:
 //
 static void put_file_data(ProcessContext *context, file_data_t *file_data)
 {
-    if (file_data)
+    CANCEL_VOID(file_data);
+
+    if (!IS_ERR_OR_NULL(file_data->file_s))
     {
-        if (!IS_ERR_OR_NULL(file_data->file_s))
-        {
-            CB_RESOLVED(putname)(file_data->file_s);
-        }
-        if (file_data->generic_path_buffer)
-        {
-            cb_mem_cache_free_generic(file_data->generic_path_buffer);
-        }
-        cb_mem_cache_free_generic(file_data);
+        CB_RESOLVED(putname)(file_data->file_s);
     }
+    if (file_data->generic_path_buffer)
+    {
+        cb_mem_cache_free_generic(file_data->generic_path_buffer);
+    }
+    cb_mem_cache_free_generic(file_data);
 }
 
 static void do_generic_file_event(ProcessContext *context,
@@ -303,7 +345,6 @@ static void do_generic_file_event(ProcessContext *context,
 
 CATCH_DEFAULT:
     process_tracking_put_process(procp, context);
-    put_file_data(context, file_data);
 }
 
 static void do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
@@ -500,6 +541,8 @@ asmlinkage long cb_sys_write(unsigned int fd, const char __user *buf, size_t cou
 
     do_file_event(&context, file, CB_EVENT_TYPE_FILE_WRITE);
 
+    TRY(S_ISREG(get_mode_from_file(file)));
+
     get_devinfo_from_file(file, &device, &inode);
 
     fileProcess = file_process_status(device, inode, getpid(current), &context);
@@ -572,7 +615,6 @@ asmlinkage long cb_sys_close(unsigned int fd)
 
     do_file_event(&context, file, CB_EVENT_TYPE_FILE_CLOSE);
 
-
 CATCH_DEFAULT:
     if (file)
     {
@@ -585,8 +627,6 @@ CATCH_DEFAULT:
     return ret;
 }
 
-
-
 asmlinkage long cb_sys_open(const char __user *filename, int flags, umode_t mode)
 {
     long                ret;
@@ -594,7 +634,7 @@ asmlinkage long cb_sys_open(const char __user *filename, int flags, umode_t mode
 
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
-    MODULE_GET();
+    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
     if ((flags & O_CREAT) && !file_exists(filename))
     {
@@ -606,13 +646,17 @@ asmlinkage long cb_sys_open(const char __user *filename, int flags, umode_t mode
         eventType = CB_EVENT_TYPE_FILE_OPEN;
     }
 
+CATCH_DISABLED:
     ret = cb_orig_sys_open(filename, flags, mode);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     if (!IS_ERR_VALUE(ret) && eventType)
     {
-        do_generic_file_event(&context, get_file_data(&context, filename), eventType);
+        file_data_t *file_data = get_file_data_from_fd(&context, filename, ret);
+
+        do_generic_file_event(&context, file_data, eventType);
+        put_file_data(&context, file_data);
     }
 
 CATCH_DEFAULT:
@@ -627,7 +671,7 @@ asmlinkage long cb_sys_openat(int dfd, const char __user *filename, int flags, u
 
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
-    MODULE_GET();
+    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
     if ((flags & O_CREAT) && !file_exists(filename))
     {
@@ -639,13 +683,17 @@ asmlinkage long cb_sys_openat(int dfd, const char __user *filename, int flags, u
         eventType = CB_EVENT_TYPE_FILE_OPEN;
     }
 
+CATCH_DISABLED:
     ret = cb_orig_sys_openat(dfd, filename, flags, mode);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     if (!IS_ERR_VALUE(ret) && eventType)
     {
-        do_generic_file_event(&context, get_file_data(&context, filename), eventType);
+        file_data_t *file_data = get_file_data_from_fd(&context, filename, ret);
+
+        do_generic_file_event(&context, file_data, eventType);
+        put_file_data(&context, file_data);
     }
 
 CATCH_DEFAULT:
@@ -660,19 +708,23 @@ asmlinkage long cb_sys_creat(const char __user *filename, umode_t mode)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
-    MODULE_GET();
+    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
     // If this is opened with create mode AND it does not already exist we
     //  will report an event
     report_create = (!file_exists(filename));
 
+CATCH_DISABLED:
     ret = cb_orig_sys_creat(filename, mode);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     if (!IS_ERR_VALUE(ret) && report_create)
     {
-        do_generic_file_event(&context, get_file_data(&context, filename), CB_EVENT_TYPE_FILE_CREATE);
+        file_data_t *file_data = get_file_data_from_fd(&context, filename, ret);
+
+        do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_CREATE);
+        put_file_data(&context, file_data);
     }
 
 CATCH_DEFAULT:
@@ -687,33 +739,29 @@ asmlinkage long cb_sys_unlink(const char __user *filename)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
-    // get_file_data can block if the device is unavailable (e.g. network timeout)
+    // get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, to avoid blocking module disable
     MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
-    file_data = get_file_data(&context, filename);
+    file_data = get_file_data_from_name(&context, filename);
 
 CATCH_DISABLED:
     ret = cb_orig_sys_unlink(filename);
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_FINISH);
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && file_data)
     {
         do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_DELETE);
-        file_data = NULL;
     }
 
-CATCH_FINISH:
-    if (file_data)
-    {
-        // Note: file_data is destroyed by do_generic_file_event
-        put_file_data(&context, file_data);
-    }
+CATCH_DEFAULT:
+    // Note: file_data is destroyed by do_generic_file_event
+    put_file_data(&context, file_data);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
@@ -726,33 +774,29 @@ asmlinkage long cb_sys_unlinkat(int dfd, const char __user *filename, int flag)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
-    // get_file_data can block if the device is unavailable (e.g. network timeout)
+    // get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, since that can block module disable
     MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
-    file_data = get_file_data(&context, filename);
+    file_data = get_file_data_from_name(&context, filename);
 
 CATCH_DISABLED:
     ret = cb_orig_sys_unlinkat(dfd, filename, flag);
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_FINISH);
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && file_data)
     {
         do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_DELETE);
-        file_data = NULL;
     }
 
-CATCH_FINISH:
-    if (file_data)
-    {
-        // Note: file_data is destroyed by do_generic_file_event
-        put_file_data(&context, file_data);
-    }
+CATCH_DEFAULT:
+    // Note: file_data is destroyed by do_generic_file_event
+    put_file_data(&context, file_data);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
@@ -766,47 +810,38 @@ asmlinkage long cb_sys_rename(const char __user *oldname, const char __user *new
 
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
-    // get_file_data can block if the device is unavailable (e.g. network timeout)
+    // get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, since that can block module disable
     MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
-    old_file_data = get_file_data(&context, oldname);
+    old_file_data = get_file_data_from_name(&context, oldname);
 
 CATCH_DISABLED:
     ret = cb_orig_sys_rename(oldname, newname);
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_FINISH);
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && old_file_data)
     {
         do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
-        old_file_data = NULL;
 
         FINISH_MODULE_DISABLE_CHECK(&context);
 
         // This could block so call it outside the disable tracking
-        new_file_data = get_file_data(&context, newname);
+        new_file_data = get_file_data_from_name(&context, newname);
 
-        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_FINISH);
+        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
         do_generic_file_event(&context, new_file_data, CB_EVENT_TYPE_FILE_CREATE);
-        new_file_data = NULL;
     }
 
-CATCH_FINISH:
-    if (old_file_data)
-    {
-        put_file_data(&context, old_file_data);
-    }
-
-    if (new_file_data)
-    {
-        put_file_data(&context, new_file_data);
-    }
+CATCH_DEFAULT:
+    put_file_data(&context, old_file_data);
+    put_file_data(&context, new_file_data);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
@@ -815,29 +850,17 @@ CATCH_FINISH:
 static bool file_exists(const char __user *filename)
 {
     bool         exists     = false;
-    struct file *file       = NULL;
-    struct filename *file_s = NULL;
+    struct path path;
 
     TRY(filename);
 
-    file_s = CB_RESOLVED(getname)(filename);
-    TRY(!IS_ERR_OR_NULL(file_s));
-
-    // O_NONBLOCK is needed here in case the file is a named pipe.  Otherwise we
-    //   could deadlock waiting for a writer that may never come.
-    file = filp_open(file_s->name, O_RDONLY|O_NONBLOCK, 0);
-    TRY(!IS_ERR_OR_NULL(file));
-
-    exists = true;
+    exists = user_path(filename, &path) == 0;
 
 CATCH_DEFAULT:
-    if (!IS_ERR_OR_NULL(file))
+    if (exists)
     {
-        filp_close(file, NULL);
+        path_put(&path);
     }
-    if (!IS_ERR_OR_NULL(file_s))
-    {
-        CB_RESOLVED(putname)(file_s);
-    }
+
     return exists;
 }
