@@ -4,14 +4,14 @@
 
 name:            KernelEventCollectorModule
 build-rules:     ${UTIL_DIR}/build-module.sh
-source-version:  2.0.0
+source-version:  ${KERNEL_MAJOR_VERSION}.${KERNEL_MINOR_VERSION}.${KERNEL_PATCH_VERSION}
 allow-sub-docker-builds:
 builders:
     - redhat6-gcc48-debug
     - redhat6-gcc48-relwithdebinfo
 
 service-env:
-    PROJECT_VERSION:     $${SOURCE_VERSION}.${BUILD_VERSION}
+    PROJECT_VERSION:     $${SOURCE_VERSION}
     UTIL_DIR:            ${UTIL_DIR}
     JOBS:                1
     BUILD_TYPE:          release
@@ -54,6 +54,10 @@ conan-replacements:
     PROJECT_VERSION:
 
 env:
+    KERNEL_MAJOR_VERSION: 2
+    KERNEL_MINOR_VERSION: 0
+    KERNEL_PATCH_VERSION: ${BUILD_VERSION}
+
     UTIL_CHANNEL: ${DEFAULT_CHANNEL}
     VENDOR_CHANNEL: ${DEFAULT_CHANNEL}
     COMMON_CHANNEL: ${DEFAULT_CHANNEL}
