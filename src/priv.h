@@ -434,7 +434,6 @@ file_ctx, *pfile_ctx;
 // CB_RESOLV_FUNCTION_310 will only resolve the function when built for kernel >= 3.10
 // checkpatch-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON
 #define CB_RESOLV_SYMBOLS \
-CB_RESOLV_FUNCTION(unsigned long, kallsyms_lookup_name, const char *name) \
 CB_RESOLV_FUNCTION(int, access_process_vm, struct task_struct *tsk _C unsigned long addr _C void *buf _C int len _C int write) \
 CB_RESOLV_FUNCTION(char *, dentry_path, struct dentry *dentry _C char *buf _C int buflen) \
 CB_RESOLV_FUNCTION_310(bool, current_chrooted, void) \

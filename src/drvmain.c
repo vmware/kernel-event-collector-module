@@ -142,13 +142,7 @@ const char *PROC_STATE_FILENAME = CB_APP_MODULE_NAME "_state";
 static int __init cbsensor_init(void)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
-
     // Here we look up symbols at runtime to fill in the CB_RESOLVED_SYMS struct.
-    //  As a special case, we use lookup_symbol_by_name to find kallsyms_lookup_name first, and then
-    //  use it to find the rest of the symbols.
-    //  lookup_symbol_by_name works by reading /proc/kallsyms to find the global symbols.  This could
-    //  be used to find every symbol we want, but it is very slow.  kallsyms_lookup_name is much faster,
-    //  and it will return NULL if no symbol is found.  (lookup_symbol_by_name will hang forever.)
 #undef CB_RESOLV_VARIABLE
 #undef CB_RESOLV_FUNCTION
 #undef CB_RESOLV_FUNCTION_310
