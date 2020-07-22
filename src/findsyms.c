@@ -3,6 +3,7 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include <linux/fs.h>
+#include <linux/kallsyms.h>
 #include <linux/kernel.h>
 #include <linux/security.h>
 #include <linux/version.h>
@@ -11,20 +12,37 @@
 #include "findsyms.h"
 #include "mem-cache.h"
 
-
 #define CB_APP_NAME CB_APP_PROC_DIR
-
-#define CB_KALLSYMS_BUFFER   2048
 
 // kptr_restrict contains 0, 1 or 2
 #define KPTR_RESTRICT_LEN 1
 #define KPTR_RESTRICT_PATH "/proc/sys/kernel/kptr_restrict"
 
-static void trim_module_name_suffix(char *pName);
 static bool parse_module_name(char *line, char **module_name);
 static bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules);
 static int get_kptr_restrict(void);
 static void set_kptr_restrict(int new_kptr_restrict);
+
+
+int set_symbol_address_if_matches(void *data, const char *namebuf, struct module *module, unsigned long address)
+{
+    struct symbols_s *p_symbols = (struct symbols_s *) data;
+    struct symbols_s *curr_symbol;
+    int symbol_name_len = strlen(namebuf);
+
+    for (curr_symbol = p_symbols; curr_symbol->name[0]; ++curr_symbol) {
+        if (!*curr_symbol->addr &&  // not yet found
+            symbol_name_len == curr_symbol->len && // length matches
+            0 == strcmp(namebuf, curr_symbol->name))  // not yet found
+        {
+            TRACE(DL_INFO, "Discovered address of %s (0x%lx)", namebuf, address);
+            *curr_symbol->addr = address;
+            break;
+        }
+    }
+
+    return 0;
+}
 
 /*
  * NOTE: This will not currently work on RHEL 8, vfs_read()/vfs_write()
@@ -41,12 +59,6 @@ static void set_kptr_restrict(int new_kptr_restrict);
  */
 void lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
 {
-    struct file *pFile  = NULL;
-    char *buffer = NULL;
-    int               ret    = 0;
-    loff_t            offset = 0;
-    mm_segment_t      oldfs = get_fs();
-    unsigned int l_pfx = 0;  // length of *pSubStr memmove()d from end to beginning
     struct symbols_s *curr_symbol;
     unsigned int n_unk = 0;  // number of unknown symbols
     int current_kptr_restrict = get_kptr_restrict();
@@ -72,135 +84,21 @@ void lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
         *curr_symbol->addr = 0;
         ++n_unk;
     }
+    TRACE(DL_INFO, "Searching for %d symbols...", n_unk);
 
-    // Open /proc/kallsyms
-    set_fs(get_ds());
-    pFile = filp_open("/proc/kallsyms", O_RDONLY, 0);
-    TRY(!IS_ERR(pFile));
+    kallsyms_on_each_symbol(set_symbol_address_if_matches, (void *)p_symbols);
 
-    // Allocate a buffer to read data into
-    PUSH_GFP_MODE(context, GFP_MODE(context) | __GFP_ZERO);
-    buffer = (char *)cb_mem_cache_alloc_generic(CB_KALLSYMS_BUFFER*sizeof(unsigned char), context);
-    POP_GFP_MODE(context);
-    TRY_STEP_MSG(CLOSE_EXIT, buffer, DL_ERROR, "Out of memory.");
-
-    // Read the file until the end or all symbols found.
-    while (0 < (ret = vfs_read(pFile, &buffer[l_pfx], CB_KALLSYMS_BUFFER-1 - l_pfx, &offset)))
-    {
-        char *pBuffer = buffer;  // strsep() pointer
-
-        // Make sure the buffer is NULL terminated
-        buffer[l_pfx + ret] = '\0';
-        l_pfx = 0;  // no prefix yet
-
-        // We will tokenize the data by '\n' using strsep.  This will eventually consume the
-        //  contents of pBuffer until it is NULL.  At that point we will read in more data from
-        //  /proc/kallsyms
-        while (pBuffer != NULL) {
-            // Grab the next token ending with '\n'  (The last line in the file does have '\n'.)
-            char *pSubStr = strsep(&pBuffer, "\n");
-
-            if (pSubStr == NULL) {
-                // pSubStr is NULL so bail.  This should never happen
-                continue;
-            }
-            // If pBuffer is NULL, we assume that we do not have a full token.
-            //  Move *pSubStr back to the beginning of buffer, and remember its length
-            //  so that we can concatentate a vfs_read().  [The alternate method
-            //  of decrementing 'offset' then re-reading the bytes now in *pSubStr
-            //  into &buffer[0] is expensive because seq_file implements backwards
-            //  lseek() by re-setting the file position to 0, then moving forward
-            //  to the desired offset.]
-            // Then exit this inner loop.
-            if (pBuffer == NULL) {
-                memmove(&buffer[0], pSubStr, l_pfx = strlen(pSubStr));
-                break;
-            }
-
-            // We will now further tokenize the data to get the address and symbol name
-            {
-                int len = 0;
-                char *pAddr = strsep(&pSubStr, " ");
-                char *pJunk = strsep(&pSubStr, " "); // symbol classification
-                char *pName = strsep(&pSubStr, " ");
-                (void)pJunk;
-                if (NULL == pAddr || NULL == pName) {
-                    // pAddr and pName is NULL so bail on this iteration.  This should never happen
-                    continue;
-                }
-
-                // Use as pre-check to avoid useless calls to strcmp.
-                // memcmp(dst, src, 1+ strlen(src)) would be nice instead of strcmp();
-                // but memcmp does not stop at the first '\0' in dst, so might SIGSEGV.
-
-                // The lines that have symbols exported by event_collectors have a suffix,
-                // that the following function will drop.
-                // e.g.
-                // ffffffffa0335040 r __kcrctab_event_collector_1_6_12350_disable	[event_collector_1_6_12350]
-                //
-
-                trim_module_name_suffix(pName);
-
-                len = strlen(pName);
-
-                // Loop over all of the symbols we are looking for.
-                // Skip those already found; the list is short.
-                for (curr_symbol = p_symbols; curr_symbol->name[0]; ++curr_symbol) {
-
-                    if (!*curr_symbol->addr  // not yet found
-                    &&  len == curr_symbol->len  // length matches
-                    &&  0 == strcmp(pName, curr_symbol->name)  // full string matches
-                    ) {
-                        unsigned long addr = 0;
-                        #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 18, 0)
-                            #define kstrtoul strict_strtoul
-                        #endif
-                        ret = kstrtoul(pAddr, 16, &addr);
-                        if (ret != 0) {
-                            TRACE(DL_ERROR, "Failed to convert address string for %s. Error %d", pName, ret);
-                        } else {
-                            TRACE(DL_INFO, "Discovered address of %s (0x%lx)", pName, addr);
-                            *curr_symbol->addr = addr;
-                            TRY_STEP(CLOSE_EXIT, --n_unk);
-                        }
-                        break;
-                    }
-                } // for curr_symbol
-            } // block
-        } // while pBuffer
-    } // while not EOF
-
-CATCH_CLOSE_EXIT:
-    if (buffer != NULL) {
-        cb_mem_cache_free_generic(buffer);
-        buffer = NULL;
+    for (curr_symbol = p_symbols; curr_symbol->name[0]; ++curr_symbol) {
+        if (curr_symbol->addr)
+            --n_unk;
     }
-    if (pFile != NULL) {
-        filp_close(pFile, NULL);
-        pFile = NULL;
-    }
+    if (n_unk != 0)
+        TRACE(DL_INFO, "Unable to find %d symbols", n_unk);
+
 CATCH_DEFAULT:
     if (current_kptr_restrict > 0)
     {
         set_kptr_restrict(current_kptr_restrict);
-    }
-    set_fs(oldfs);
-}
-
-static void trim_module_name_suffix(char *pName)
-{
-    char *substrStart = strstr(pName, "["CB_APP_PROC_DIR);
-
-    if (substrStart)
-    {
-        *substrStart = 0;
-        substrStart--;
-        // Trim the trailing spaces.
-        while (*substrStart == ' ' || *substrStart == '\t')
-        {
-            *substrStart = 0;
-            substrStart--;
-        }
     }
 }
 
@@ -267,7 +165,6 @@ bool lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_
         symbols[i].len = (char) strlen(symbols[i].name);
         symbols[i].addr = (unsigned long *) &elem->disable_fn;
         i++;
-
     }
 
     lookup_symbols(context, symbols);

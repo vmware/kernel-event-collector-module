@@ -601,4 +601,4 @@ static void cb_proc_shutdown(ProcessContext *context)
 module_init(cbsensor_init);
 module_exit(cbsensor_cleanup);
 
-MODULE_LICENSE("Proprietary");
+MODULE_LICENSE("GPL");
