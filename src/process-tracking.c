@@ -460,17 +460,24 @@ static ProcessTracking *process_tracking_add_process(ProcessTracking *procp, Pro
 bool process_tracking_report_exit(pid_t pid, ProcessContext *context)
 {
     bool was_last_active_process = false;
+    bool warn_on_negative_active_count = LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0);
     ProcessTracking *procp = process_tracking_get_process(pid, context);
 
     TRY(procp);
 
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&procp->shared_data->active_process_count, { was_last_active_process = true; });
+    // There's an issue with our 2.6 exit hook that results in two exit events
+    // for the same process at the same time. This silently ignores the second event.
+    IF_ATOMIC64_DEC_AND_TEST__TRY_NEG(&procp->shared_data->active_process_count,
+                                { was_last_active_process = true; },
+                                      warn_on_negative_active_count);
+
     event_send_exit(procp, was_last_active_process, context);
     process_tracking_remove_process(procp, context);
     process_tracking_put_process(procp, context);
     return true;
 
 CATCH_DEFAULT:
+    process_tracking_put_process(procp, context);
     return false;
 }
 

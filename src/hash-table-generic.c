@@ -17,8 +17,8 @@ static LIST_HEAD(g_hashtbl_generic);
 
 #define HASHTBL_PRINT(fmt, ...)    do { if (debug) pr_err("hash-tbl: " fmt, ##__VA_ARGS__); } while (0)
 
-static void hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
-static int  hashtbl_add_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
+static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
+static int hashtbl_add_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
 
 void debug_on(void)
 {
@@ -245,20 +245,6 @@ static int hash_key(void *key, int len, int bucket_num)
     return hash % bucket_num;
 }
 
-int hashtbl_mv_generic(HashTbl *hashTblp, void *datap, void *key, ProcessContext *context)
-{
-    int ret = 0;
-
-    CANCEL(atomic64_read(&(hashTblp->tableShutdown)) != 1, -1);
-
-    cb_write_lock(&(hashTblp->tableSpinlock), context);
-    hashtbl_del_generic_lockheld(hashTblp, datap, context);
-    memcpy(get_key_ptr(hashTblp, datap), key, hashTblp->key_len);
-    ret = hashtbl_add_generic_lockheld(hashTblp, datap, context);
-    cb_write_unlock(&(hashTblp->tableSpinlock), context);
-    return ret;
-}
-
 static int hashtbl_add_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     uint64_t bucket_indx;
@@ -357,15 +343,14 @@ ng_exit:
     return NULL;
 }
 
-static void hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
+static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     HashTableNode *nodep = get_nodep(hashTblp, datap);
 
-    // We saw some problems with this pointer being NULL.  I want to check it just in case.
+    // This protects against hashtbl_del_generic being called twice for the same datap
     if ((&nodep->link)->pprev != NULL)
     {
-        hlist_del(&nodep->link);
-
+        hlist_del_init(&nodep->link);
 
         if (atomic64_read(&(hashTblp->tableInstance)) == 0)
         {
@@ -374,58 +359,38 @@ static void hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, Process
         {
             atomic64_dec(&(hashTblp->tableInstance));
         }
+
+        // The only reason this should happen is if hashtbl_del_generic and
+        // hashtbl_put_generic are called out of order,
+        // e.g. hashtbl_put_generic -> hashtbl_del_generic
+        if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
+        {
+            WARN(atomic64_read(get_refcountp(hashTblp, datap)) == 1, "hashtbl will free while lock held");
+        }
+
+        hashtbl_put_generic(hashTblp, datap, context);
+
+        return 0;
     } else
     {
         pr_err("Attempt to delete a NULL object from the hash table");
     }
+
+    return -1;
 }
 
 void *hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
 {
-    uint64_t bucket_indx;
-    struct hlist_head *bucketp;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-    struct hlist_node *_nodep;
-#endif
-    HashTableNode *nodep;
-    struct hlist_node *tmp;
-    char *key_str;
+    void *datap = hashtbl_get_generic(hashTblp, key, context);
 
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
+    if (datap)
     {
-        goto ndbk_exit;
+        // We remove the item from the table, and remove the reference held by the table.
+        // The item will not be freed because the reference count was incremented by get.
+        hashtbl_del_generic(hashTblp, datap, context);
     }
-
-    bucket_indx = hash_key(key, hashTblp->key_len, hashTblp->numberOfBuckets);
-    bucketp = &(hashTblp->tablePtr[bucket_indx]);
-
-    if (debug)
-    {
-        key_str = key_in_hex(context, key, hashTblp->key_len);
-        HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        cb_mem_cache_free_generic(key_str);
-    }
-
-    cb_write_lock(&(hashTblp->tableSpinlock), context);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    hlist_for_each_entry_safe(nodep, tmp, bucketp, link)
-#else
-    hlist_for_each_entry_safe(nodep, _nodep, tmp, bucketp, link)
-#endif
-    {
-        void *datap = get_datap(hashTblp, nodep);
-
-        if (memcmp(key, get_key_ptr(hashTblp, datap), hashTblp->key_len) == 0)
-        {
-            hashtbl_del_generic_lockheld(hashTblp, datap, context);
-            cb_write_unlock(&(hashTblp->tableSpinlock), context);
-            return datap;
-        }
-    }
-    cb_write_unlock(&(hashTblp->tableSpinlock), context);
-
-ndbk_exit:
-    return NULL;
+    // caller must put or free (if no reference count)
+    return datap;
 }
 
 void hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
@@ -435,9 +400,7 @@ void hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *context
     cb_write_lock(&(hashTblp->tableSpinlock), context);
     hashtbl_del_generic_lockheld(hashTblp, datap, context);
     cb_write_unlock(&(hashTblp->tableSpinlock), context);
-    hashtbl_put_generic(hashTblp, datap, context);
 }
-
 
 void *hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
 {
@@ -493,114 +456,4 @@ size_t hashtbl_get_memory(ProcessContext *context)
     cb_read_unlock(&g_hashtbl_generic_lock, context);
 
     return size;
-}
-
-
-struct table_key {
-    char a[16];
-};
-
-struct table_value {
-    char a[16];
-};
-
-struct entry {
-    struct hlist_node link;
-    struct table_key key;
-    struct table_value value;
-};
-
-void hash_table_test(void)
-{
-    DECLARE_ATOMIC_CONTEXT(context, 0);
-
-    HashTbl *table = hashtbl_init_generic(&context,
-                                          1024,
-                                          sizeof(struct entry),
-                                          sizeof(struct entry),
-                                          "hash_table_testing",
-                                          sizeof(struct table_key),
-                                          offsetof(struct entry, key),
-                                          offsetof(struct entry, link),
-                                          HASHTBL_DISABLE_REF_COUNT,
-                                          NULL);
-    int size = 102400;
-    int i, result;
-    struct table_key *keys = (struct table_key *)cb_mem_cache_alloc_generic(sizeof(struct table_key) * size, &context);
-    struct table_value *values = (struct table_value *)cb_mem_cache_alloc_generic(sizeof(struct table_key) * size, &context);
-    struct entry *entry_ptr;
-    //Test hashtbl_alloc and hashtbl_add
-    for (i = 0; i < size; i++)
-    {
-        get_random_bytes(&keys[i], sizeof(struct table_key));
-        get_random_bytes(&values[i], sizeof(struct table_value));
-        entry_ptr = (struct entry *) hashtbl_alloc_generic(table, &context);
-        if (entry_ptr == NULL)
-        {
-            pr_alert("Failt to alloc %d\n", i);
-            goto test_exit;
-        }
-        memcpy(&entry_ptr->key, &keys[i], sizeof(struct table_key));
-        memcpy(&entry_ptr->value, &values[i], sizeof(struct table_value));
-        result = hashtbl_add_generic(table, entry_ptr, &context);
-        if (result != 0)
-        {
-            hashtbl_free_generic(table, entry_ptr, &context);
-            pr_alert("Add fails %d\n", i);
-            goto test_exit;
-        }
-    }
-    //Add repeative key
-    for (i = 0; i < size; i++)
-    {
-        entry_ptr = (struct entry *) hashtbl_alloc_generic(table, &context);
-        memcpy(&entry_ptr->key, &keys[i], sizeof(struct table_key));
-        memcpy(&entry_ptr->value, &values[i], sizeof(struct table_value));
-        result = hashtbl_add_generic(table, entry_ptr, &context);
-
-        if (result == 0)
-        {
-            pr_alert("Fail to detect repeative key %d\n", i);
-            goto test_exit;
-        } else
-        {
-            hashtbl_free_generic(table, entry_ptr, &context);
-        }
-    }
-    //Test hashtbl_get
-    for (i = 0; i < size; i++)
-    {
-        entry_ptr = hashtbl_get_generic(table, &keys[i], &context);
-        if (memcmp(&entry_ptr->value, &values[i], sizeof(struct table_key)) != 0)
-        {
-            pr_alert("Get fails %d\n", i);
-            goto test_exit;
-        }
-    }
-
-    //Test hastbl_del and hashtbl_free
-    for (i = 0; i < size; i++)
-    {
-        entry_ptr = hashtbl_del_by_key_generic(table, &keys[i], &context);
-        if (entry_ptr == NULL)
-        {
-            pr_alert("Fail to find the element to be deleted\n");
-            goto test_exit;
-        }
-
-        hashtbl_free_generic(table, entry_ptr, &context);
-
-        entry_ptr = hashtbl_get_generic(table, &keys[i], &context);
-        if (entry_ptr != NULL)
-        {
-            pr_alert("Delete fails %d\n", i);
-            goto test_exit;
-        }
-    }
-
-    pr_alert("Hash table tests all passed.\n");
-test_exit:
-    cb_mem_cache_free_generic(keys);
-    cb_mem_cache_free_generic(values);
-    hashtbl_shutdown_generic(table, &context);
 }

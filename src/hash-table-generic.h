@@ -61,11 +61,20 @@ HashTbl *hashtbl_init_generic(ProcessContext *context,
                               hashtbl_delete_cb delete_callback);
 void *hashtbl_alloc_generic(HashTbl *tblp, ProcessContext *context);
 int hashtbl_add_generic(HashTbl *tblp, void *datap, ProcessContext *context);
+
+// Finds and removes data for key from hash table. Caller must put or free return.
 void *hashtbl_del_by_key_generic(HashTbl *tblp, void *key, ProcessContext *context);
+
+// Removes datap from hash table but does not free it
+// Free with hashtbl_put_generic (for ref counted hashtbl) or hashtbl_free_generic
 void hashtbl_del_generic(HashTbl *tblp, void *datap, ProcessContext *context);
-int hashtbl_mv_generic(HashTbl *tblp, void *datap, void *key, ProcessContext *context);
+
 void *hashtbl_get_generic(HashTbl *tblp, void *key, ProcessContext *context);
+
+// Decrements reference count and frees datap if reference count is 0
+// Only for reference counted hash tables
 void hashtbl_put_generic(HashTbl *tblp, void *datap, ProcessContext *context);
+
 void hashtbl_free_generic(HashTbl *tblp, void *datap, ProcessContext *context);
 void hashtbl_shutdown_generic(HashTbl *tblp, ProcessContext *context);
 void hashtbl_clear_generic(HashTbl *tblp, ProcessContext *context);
@@ -73,6 +82,5 @@ void hashtbl_write_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_
 void hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context);
 int hashtbl_show_proc_cache(struct seq_file *m, void *v);
 size_t hashtbl_get_memory(ProcessContext *context);
-void hash_table_test(void);
 void debug_on(void);
 void debug_off(void);
