@@ -38,7 +38,6 @@ set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -DPRODVER=${NAME_SFX}")
 #if("${CMAKE_BUILD_TYPE}" STREQUAL "Veracode" )
 #    set(VERACODE_FLAGS ${CMAKE_C_FLAGS_VERACODE})
 #endif()
-
 set (MODULE_NAME ${MODULE_NAME}_${MODULE_VERSION_SUFFIX})
 
 configure_file(${INCLUDE_DIR}/version.h.in ${INCLUDE_DIR}/version.h)
@@ -92,5 +91,8 @@ foreach(kernel_name ${KERNEL_LIST})
                             module-hooks.c
                             event-factory.c
                             cb-module-state-export.c
+                            tests/run-tests.c
+                            tests/hashtabl-tests.c
+                            tests/process-tracking-tests.c
         USE_NATIVE_COMPILER)
 endforeach()
