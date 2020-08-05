@@ -177,7 +177,7 @@ CATCH_DEFAULT:
 
 static bool _delete_callback_called __initdata;
 
-static void _hashtbl_delete_callback(void *data, ProcessContext *context)
+static void __init _hashtbl_delete_callback(void *data, ProcessContext *context)
 {
     _delete_callback_called = true;
 }
