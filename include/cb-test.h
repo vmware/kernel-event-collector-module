@@ -59,4 +59,14 @@ do { \
     } \
 } while (false)
 
+#define IF_ATOMIC64_DEC_AND_TEST__TRY_NEG(counter, stmt, should_warn) \
+do { \
+    int64_t count = atomic64_dec_return(counter); \
+    WARN(should_warn && count < 0, "Decremented past zero: %lld", count); \
+    TRY(count >= 0); \
+    if (count == 0) { \
+        stmt \
+    } \
+} while (false)
+
 #define ATOMIC64_DEC__CHECK_NEG(counter) IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(counter, {})

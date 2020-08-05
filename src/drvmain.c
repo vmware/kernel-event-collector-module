@@ -14,6 +14,7 @@
 #include "cb-spinlock.h"
 #include "cb-banning.h"
 #include "hook-tracking.h"
+#include "tests/run-tests.h"
 
 #ifdef HOOK_SELECTOR
 #define HOOK_MASK  0x0000000000000000
@@ -32,6 +33,7 @@ bool     g_exiting;
 uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
 uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
 uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
+bool     g_run_self_tests;
 
 CB_DRIVER_CONFIG g_driver_config = {
     ALL_FORKS_AND_EXITS,
@@ -45,6 +47,8 @@ module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
 #ifdef HOOK_SELECTOR
 module_param(g_enableHooks, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 #endif
@@ -61,6 +65,8 @@ static bool module_state_info_initialize(ProcessContext *context);
 static void module_state_info_shutdown(ProcessContext *context);
 
 static int _cb_sensor_enable_module_initialize_memory(ProcessContext *context);
+
+static void _cb_sensor_disable_module_shutdown(ProcessContext *context);
 
 static void set_module_state(ProcessContext *context, ModuleState newState);
 
@@ -181,6 +187,27 @@ static int __init cbsensor_init(void)
     TRY_STEP(LSM,        syscall_initialize(&context, g_enableHooks));
     TRY_STEP(SYSCALL,    user_devnode_init(&context));
     TRY_STEP(USER_DEV_NODE,  hook_tracking_initialize(&context));
+
+    if (g_run_self_tests)
+    {
+        bool passed = false;
+
+        DISABLE_SEND_EVENTS(&context);
+        DISABLE_WAKE_UP(&context);
+
+        // We need everything initialized for running the self-tests but we don't
+        // want the hooks enabled so we do a separate init/shutdown just for the
+        // tests. The shutdown here will warn if we fail to free anything.
+        // Everything will be re-inited by cbsensor_enable_module().
+        _cb_sensor_enable_module_initialize_memory(&context);
+        passed = run_tests(&context);
+        _cb_sensor_disable_module_shutdown(&context);
+
+        ENABLE_SEND_EVENTS(&context);
+        ENABLE_WAKE_UP(&context);
+
+        TRY_STEP(USER_DEV_NODE, passed);
+    }
 
     /**
      * Setup the module to come up as enabled when its loaded. Enabling the module, means it will
@@ -354,21 +381,7 @@ int cbsensor_disable_module(ProcessContext *context)
 
     DISABLE_WAKE_UP(context);
 
-    /**
-     * Shutdown the different subsystems, note order is important here.
-     * Need to shutdown subsystems in the reverse order of dependency.
-     */
-    cb_stats_proc_shutdown(context);
-    task_shutdown(context);
-    CbDestroyNetworkIsolation(context);
-    cbBanningShutdown(context);
-    user_comm_shutdown(context);
-    network_tracking_shutdown(context);
-    process_tracking_shutdown(context);
-    logger_shutdown(context);
-    file_process_tracking_shutdown(context);
-    path_buffers_shutdown(context);
-    cb_proc_shutdown(context);
+    _cb_sensor_disable_module_shutdown(context);
 
     set_module_state(context, ModuleStateDisabled);
 
@@ -447,6 +460,8 @@ int cbsensor_enable_module(ProcessContext *context)
             cb_write_unlock(&g_module_state_info.module_state_lock, context);
 
             {
+                DECLARE_ATOMIC_CONTEXT(atomic_context, getpid(current));
+
                 int result = _cb_sensor_enable_module_initialize_memory(context);
 
                 if (result != 0)
@@ -458,6 +473,8 @@ int cbsensor_enable_module(ProcessContext *context)
                     set_module_state(context, ModuleStateDisabled);
                     return result;
                 }
+
+                enumerate_and_track_all_tasks(&atomic_context);
             }
 
             set_module_state(context, ModuleStateEnabled);
@@ -472,8 +489,6 @@ int cbsensor_enable_module(ProcessContext *context)
 
 static int _cb_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
-    DECLARE_ATOMIC_CONTEXT(atomic_context, getpid(current));
-
     TRY_STEP(DEFAULT,   disable_peer_modules(context));
     TRY_STEP(DEFAULT,   path_buffers_init(context));
     TRY_STEP(BUFFERS,   cb_proc_initialize(context));
@@ -487,8 +502,6 @@ static int _cb_sensor_enable_module_initialize_memory(ProcessContext *context)
     TRY_STEP(NET_IS,    task_initialize(context));
     TRY_STEP(TASK,      file_process_tracking_init(context));
     TRY_STEP(FILE_PROC, cb_stats_proc_initialize(context));
-
-    enumerate_and_track_all_tasks(&atomic_context);
 
     return 0;
 
@@ -514,6 +527,25 @@ CATCH_BUFFERS:
     path_buffers_shutdown(context);
 CATCH_DEFAULT:
     return -ENOMEM;
+}
+
+static void _cb_sensor_disable_module_shutdown(ProcessContext *context)
+{
+    /**
+     * Shutdown the different subsystems, note order is important here.
+     * Need to shutdown subsystems in the reverse order of dependency.
+     */
+    cb_stats_proc_shutdown(context);
+    task_shutdown(context);
+    CbDestroyNetworkIsolation(context);
+    cbBanningShutdown(context);
+    user_comm_shutdown(context);
+    network_tracking_shutdown(context);
+    process_tracking_shutdown(context);
+    logger_shutdown(context);
+    file_process_tracking_shutdown(context);
+    path_buffers_shutdown(context);
+    cb_proc_shutdown(context);
 }
 
 static bool disable_peer_modules(ProcessContext *context)
