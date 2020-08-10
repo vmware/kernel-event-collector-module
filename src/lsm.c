@@ -31,7 +31,6 @@ extern void cb_inet_conn_established(struct sock *sk, struct sk_buff *skb);
 extern int cb_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrlen);
 extern int cb_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_sock *req);
 extern int on_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags);
-extern int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb);
 extern int socket_sendmsg(struct socket *sock,
 struct msghdr *msg, int size);
 extern int socket_recvmsg(struct socket *sock,
@@ -68,7 +67,6 @@ bool lsm_initialize(ProcessContext *context, uint64_t enableHooks)
 #endif
     if (enableHooks & CB__LSM_socket_connect) g_combined_ops.socket_connect = cb_socket_connect_hook;            // outgoing connects (pre)
     if (enableHooks & CB__LSM_inet_conn_request) g_combined_ops.inet_conn_request = cb_inet_conn_request;           // incoming accept (pre)
-    if (enableHooks & CB__LSM_socket_sock_rcv_skb) g_combined_ops.socket_sock_rcv_skb = on_sock_rcv_skb;              // incoming UDP/DNS
     if (enableHooks & CB__LSM_socket_post_create) g_combined_ops.socket_post_create = socket_post_create;
     if (enableHooks & CB__LSM_socket_sendmsg) g_combined_ops.socket_sendmsg = socket_sendmsg;
     if (enableHooks & CB__LSM_socket_recvmsg) g_combined_ops.socket_recvmsg = socket_recvmsg;                    // incoming UDP/DNS - where we get the
@@ -100,7 +98,6 @@ bool lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
 #endif
     if (enableHooks & CB__LSM_socket_connect) changed |= secops->socket_connect != cb_socket_connect_hook;
     if (enableHooks & CB__LSM_inet_conn_request) changed |= secops->inet_conn_request != cb_inet_conn_request;
-    if (enableHooks & CB__LSM_socket_sock_rcv_skb) changed |= secops->socket_sock_rcv_skb != on_sock_rcv_skb;
     if (enableHooks & CB__LSM_socket_post_create) changed |= secops->socket_post_create != socket_post_create;
     if (enableHooks & CB__LSM_socket_sendmsg) changed |= secops->socket_sendmsg != socket_sendmsg;
     if (enableHooks & CB__LSM_socket_recvmsg) changed |= secops->socket_recvmsg != socket_recvmsg;
@@ -153,7 +150,6 @@ int cb_lsm_task_free_get(struct seq_file *m, void *v) { return getHook(CB__LSM_t
 int cb_lsm_file_permission_get(struct seq_file *m, void *v) { return getHook(CB__LSM_file_permission, m); }
 int cb_lsm_socket_connect_get(struct seq_file *m, void *v) { return getHook(CB__LSM_socket_connect, m); }
 int cb_lsm_inet_conn_request_get(struct seq_file *m, void *v) { return getHook(CB__LSM_inet_conn_request, m); }
-int cb_lsm_socket_sock_rcv_skb_get(struct seq_file *m, void *v) { return getHook(CB__LSM_socket_sock_rcv_skb, m); }
 int cb_lsm_socket_post_create_get(struct seq_file *m, void *v) { return getHook(CB__LSM_socket_post_create, m); }
 int cb_lsm_socket_sendmsg_get(struct seq_file *m, void *v) { return getHook(CB__LSM_socket_sendmsg, m); }
 int cb_lsm_socket_recvmsg_get(struct seq_file *m, void *v) { return getHook(CB__LSM_socket_recvmsg, m); }
@@ -180,7 +176,6 @@ LSM_HOOK(task_wait, "task_wait",            cb_task_wait)
 LSM_HOOK(task_free, "task_free",            cb_task_free)
 LSM_HOOK(socket_connect, "socket_connect",       cb_socket_connect_hook)
 LSM_HOOK(inet_conn_request, "inet_conn_request",    cb_inet_conn_request)
-LSM_HOOK(socket_sock_rcv_skb, "socket_sock_rcv_skb",  on_sock_rcv_skb)
 LSM_HOOK(socket_post_create, "socket_post_create",   socket_post_create)
 LSM_HOOK(socket_sendmsg, "socket_sendmsg",       socket_sendmsg)
 LSM_HOOK(socket_recvmsg, "socket_recvmsg",       socket_recvmsg)

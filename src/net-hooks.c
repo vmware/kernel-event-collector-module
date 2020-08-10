@@ -1215,7 +1215,7 @@ int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Only handle IPv4 UDP packets
-    TRY(CHECK_SK_FAMILY(sk) && CHECK_SK_PROTO(sk));
+    TRY(CHECK_SK_FAMILY(sk) && CHECK_SK_PROTO_UDP(sk));
 
     // Copy the packet for inspection
     TRY_MSG(!skb_copy_bits(skb, 0, &udphdr, sizeof(udphdr)),

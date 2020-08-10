@@ -10,6 +10,12 @@
 #define CHECK_SK_PROTO(sk)         ((sk) && \
                                      ((sk)->sk_protocol == IPPROTO_UDP || (sk)->sk_protocol == IPPROTO_TCP) \
                                    )
+#define CHECK_SK_PROTO_UDP(sk)     ((sk) && \
+                                     (sk)->sk_protocol == IPPROTO_UDP \
+                                   )
+#define CHECK_SK_PROTO_TCP(sk)     ((sk) && \
+                                     (sk)->sk_protocol == IPPROTO_TCP \
+                                   )
 #define CHECK_SOCKET_TYPE(sock)    ((sock) && \
                                      ((sock)->type == SOCK_DGRAM || (sock)->type == SOCK_STREAM) \
                                    )
