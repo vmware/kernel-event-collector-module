@@ -118,7 +118,8 @@ set(SOURCE_FILES drvmain.c
         cb-module-state-export.c
         tests/run-tests.c
         tests/hashtabl-tests.c
-        tests/process-tracking-tests.c)
+        tests/process-tracking-tests.c
+        tests/module-state-tests.c)
 
 message("Building kernel module for target kernel(s): ${KERNEL_LIST}")
 foreach(kernel_name ${KERNEL_LIST})

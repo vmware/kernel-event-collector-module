@@ -3,9 +3,9 @@
 #include "process-tracking.h"
 #include "run-tests.h"
 
-// NOTE: On kernel 3.10 and up this test produces a warning because we don't
-// expect this scenario to happen, but it's worth exercising the code path in
-// case somehow it does.
+// NOTE: On kernel 3.10 and up this test produces a WARN because we don't
+// expect this scenario to happen, but it's worth exercising the code path to
+// check that the code handles the failure path in case somehow we do hit it.
 // With the pre-3.10 exit hook it's possible to see a multiple exit event for the
 // same pid. We warn on 3.10 because we don't expect to see this scenario.
 // This test verifies:
