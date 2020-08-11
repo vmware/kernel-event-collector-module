@@ -75,10 +75,11 @@ file(REMOVE ${CONFIGURED_VERSION_FILE}
             ${CONFIGURED_STATE_EXPORT_FILE}
             ${CONFIGURED_KBUILD_FILE})
 
+set(MODULE_NAME ${MODULE_NAME}_${MODULE_VERSION_SUFFIX})
+
 configure_file(${INCLUDE_DIR}/version.h.in ${CONFIGURED_VERSION_FILE})
 configure_file(cb-module-state-export.c.in ${CONFIGURED_STATE_EXPORT_FILE})
 
-set(MODULE_NAME ${MODULE_NAME}_${MODULE_VERSION_SUFFIX})
 set(SOURCE_FILES drvmain.c
         hook-tracking.c
         findsyms.c
