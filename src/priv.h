@@ -110,6 +110,7 @@ do {                                                                            
     if (g_module_state_info.module_state != ModuleStateEnabled)                     \
     {                                                                               \
         cb_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
+        (CONTEXT)->decr_active_call_count_on_exit = false;                          \
         goto pass_through_label;                                                    \
     }                                                                               \
     else                                                                            \

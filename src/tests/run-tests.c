@@ -32,6 +32,8 @@ bool __init run_tests(ProcessContext *context)
 
     RUN_TEST(test__proc_track_report_double_exit(context));
 
+    RUN_TEST(test__begin_finish_macros(context));
+
     g_traceLevel = origTraceLevel;
     return all_passed;
 }

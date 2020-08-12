@@ -28,5 +28,7 @@ bool test__hashtbl_refcount(ProcessContext *context) __init;
 
 bool test__proc_track_report_double_exit(ProcessContext *context) __init;
 
+bool test__begin_finish_macros(ProcessContext *context) __init;
+
 
 #define ASSERT_TRY(stmt) TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED %s:%d -- %s", __FILE__, __LINE__, #stmt)
