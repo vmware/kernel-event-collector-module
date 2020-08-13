@@ -148,7 +148,7 @@ void cb_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
     //
     // http://lkml.iu.edu/hypermail/linux/kernel/1403.1/04340.html
     // https://patchwork.ozlabs.org/patch/303498/
-    #define CHECK_GFP(CONTEXT)  GFP_ATOMIC
+    #define CHECK_GFP(CONTEXT)  CB_ATOMIC
 #else
     #define CHECK_GFP(CONTEXT)  GFP_MODE(CONTEXT)
 #endif

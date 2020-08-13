@@ -28,8 +28,10 @@ extern struct timespec get_current_timespec(void);
 
 #define MAX_GFP_STACK    10
 
+#define CB_ATOMIC        (GFP_ATOMIC | GFP_NOWAIT)
+
 #define DECLARE_ATOMIC_CONTEXT(name, pid)                                      \
-    ProcessContext name = __CONTEXT_INITIALIZER(name, GFP_ATOMIC, pid)
+    ProcessContext name = __CONTEXT_INITIALIZER(name, CB_ATOMIC, pid)
 
 #define DECLARE_NON_ATOMIC_CONTEXT(name, pid)                                  \
     ProcessContext name = __CONTEXT_INITIALIZER(name, GFP_KERNEL, pid)

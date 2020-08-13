@@ -126,7 +126,7 @@ void cb_write_lock(uint64_t *sp, ProcessContext *context)
     });
 
     WRITE_LOCK(&spinlockp->sp, spinlockp->flags, context);
-    PUSH_GFP_MODE(context, GFP_ATOMIC);
+    PUSH_GFP_MODE(context, CB_ATOMIC);
 
     if (spinlockp->owner_pid == 0)
     {
@@ -165,7 +165,7 @@ void cb_read_lock(uint64_t *sp, ProcessContext *context)
     });
 
     READ_LOCK(&spinlockp->sp, spinlockp->flags, context);
-    PUSH_GFP_MODE(context, GFP_ATOMIC);
+    PUSH_GFP_MODE(context, CB_ATOMIC);
 
     if (spinlockp->owner_pid == 0)
     {
