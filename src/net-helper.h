@@ -7,6 +7,12 @@
 #define CHECK_SK_FAMILY(sk)        ((sk) && \
                                      ((sk)->sk_family == PF_INET || (sk)->sk_family == PF_INET6) \
                                    )
+#define CHECK_SK_FAMILY_INET(sk)   ((sk) && \
+                                     (sk)->sk_family == PF_INET \
+                                   )
+#define CHECK_SK_FAMILY_INET6(sk)  ((sk) && \
+                                     (sk)->sk_family == PF_INET6 \
+                                   )
 #define CHECK_SK_PROTO(sk)         ((sk) && \
                                      ((sk)->sk_protocol == IPPROTO_UDP || (sk)->sk_protocol == IPPROTO_TCP) \
                                    )

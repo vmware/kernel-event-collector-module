@@ -1215,7 +1215,7 @@ int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Only handle IPv4 UDP packets
-    TRY(CHECK_SK_FAMILY(sk) && CHECK_SK_PROTO_UDP(sk));
+    TRY(CHECK_SK_FAMILY_INET(sk) && CHECK_SK_PROTO_UDP(sk));
 
     // Copy the packet for inspection
     TRY_MSG(!skb_copy_bits(skb, 0, &udphdr, sizeof(udphdr)),
@@ -1228,7 +1228,7 @@ int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
         //
         // This is a DNS response, log it
         //
-        uint32_t       len   = ntohs(udp->len) - sizeof(struct udphdr);
+        int32_t       len   = ntohs(udp->len) - sizeof(struct udphdr);
 
         TRY_MSG(len > 0, DL_WARNING, "invalid length:%d for UDP response", len);
 
