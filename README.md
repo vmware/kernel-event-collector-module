@@ -4,7 +4,10 @@
 ## Overview
 This repo contains the source for the Carbon Black Cloud kernel module.
 The module is responsible for collecting a variety of events related to 
-processes, files, network connections, etc. 
+processes, files, network connections, etc. All releases of the Carbon
+Black Cloud Linux agent since version 2.9.0 are built with this 
+open-source kernel module (2.8 and earlier are built with a proprietary
+version of the module). 
 
 ## Try it out
 Installing the kernel module will expose some of the collected information in
