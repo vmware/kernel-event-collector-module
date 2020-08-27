@@ -11,7 +11,7 @@ base = python_requires("CONAN_UTIL_VERSION")
 class KernelEventCollectorModule(base.CbConanFile):
     name     = "KernelEventCollectorModule"
     version  = "PROJECT_VERSION"
-    settings = "os", "compiler", "build_type", "arch"
+    settings = "os", "build_type", "arch"
     generators = "cmake"
     build_requires = "CPPUTEST_VERSION"
     options = {
