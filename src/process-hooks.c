@@ -268,6 +268,13 @@ int cb_bprm_check_security(struct linux_binprm *bprm)
 
                 procp->shared_data->is_interpreter = true;
                 procp->shared_data->path = cb_mem_cache_strdup(path, &context);
+
+                // also need to update the file information
+                procp->shared_data->exec_details.inode = inode;
+                procp->shared_data->exec_details.device = device;
+
+                procp->posix_details.inode = inode;
+                procp->posix_details.device = device;
             }
         }
     }
