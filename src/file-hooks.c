@@ -332,7 +332,11 @@ static void do_generic_file_event(ProcessContext *context,
 
     procp = get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
 
-    TRY(eventType != CB_EVENT_TYPE_FILE_OPEN || (procp && procp->shared_data->is_interpreter));
+    TRY(eventType != CB_EVENT_TYPE_FILE_OPEN ||
+        (procp &&
+         procp->shared_data && // this shouldnt ever be null but we got a segfault here so
+                               // i added this check for safety
+         procp->shared_data->is_interpreter));
 
     event_send_file(
         procp,
