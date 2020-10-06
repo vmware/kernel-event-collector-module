@@ -92,6 +92,7 @@ void process_tracking_set_parent_shared_data(ProcessTracking *procp, SharedTrack
 void process_tracking_set_event_info(ProcessTracking *procp, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
 {
     TRY(procp && event);
+    TRY(procp->shared_data);
 
     event->procInfo.all_process_details.array[FORK]             = procp->posix_details;
     event->procInfo.all_process_details.array[FORK_PARENT]      = procp->posix_parent_details;
