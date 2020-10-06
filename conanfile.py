@@ -27,7 +27,7 @@ class KernelEventCollectorModule(base.CbConanFile):
         "KERNEL_RHEL_7_2_VERSION", "KERNEL_RHEL_7_3_VERSION",
         "KERNEL_RHEL_7_4_VERSION", "KERNEL_RHEL_7_5_VERSION",
         "KERNEL_RHEL_7_6_VERSION", "KERNEL_RHEL_7_7_VERSION",
-        "KERNEL_RHEL_7_8_VERSION"
+        "KERNEL_RHEL_7_8_VERSION", "KERNEL_RHEL_7_9_VERSION"
     ]
     override_list = "KERNEL_OVERRIDE_LIST"
 
