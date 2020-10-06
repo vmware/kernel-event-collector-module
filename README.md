@@ -1,4 +1,3 @@
-
 # kernel-event-collector-module
 
 ## Overview
@@ -39,6 +38,7 @@ officially supported kernel modules are listed below.
  * `3.10.0-957` (7.6)
  * `3.10.0-1062` (7.7)
  * `3.10.0-1127` (7.8)
+ * `3.10.0-1160` (7.9)
  
 ### Prerequisites
 GCC, CMake, and the kernel headers for your target system must be installed
