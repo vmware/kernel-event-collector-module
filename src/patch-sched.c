@@ -54,7 +54,7 @@ static bool _sched_changed(const struct sched_class *sched);
  * supported versions) by the pointer size (8).
  */
 
-#if RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7, 8)
+#if RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7, 9)
 // When we support a new kernel version we should manually increment this version.
 // This is because this offset could theoretically change and we want to make sure
 // that we always confirm it is correct.

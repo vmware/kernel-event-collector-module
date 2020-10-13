@@ -27,21 +27,23 @@ conan-replacements:
     CONAN_UTIL_VERSION: ConanUtil/[~=1.6.x]@${UTIL_CHANNEL}
     CPPUTEST_VERSION: CppUTest/3.8.731+731@${VENDOR_CHANNEL}
     KERNEL_HEADERS_VERSION: # Note, this is needed here for proper dependency tracking
-    KERNEL_RHEL_6_6_VERSION: Kernel_2.6.32-504.el6.x86_64/cb-734@re/develop  # 6.6
-    KERNEL_RHEL_6_7_VERSION: Kernel_2.6.32-573.el6.x86_64/cb-734@re/develop  # 6.7
-    KERNEL_RHEL_6_8_VERSION: Kernel_2.6.32-642.el6.x86_64/cb-734@re/develop  # 6.8
-    KERNEL_RHEL_6_9_VERSION: Kernel_2.6.32-696.el6.x86_64/cb-734@re/develop  # 6.9
-    KERNEL_RHEL_6_10_VERSION: Kernel_2.6.32-754.el6.x86_64/cb-734@re/develop # 6.10
-    KERNEL_RHEL_7_0_VERSION: Kernel_3.10.0-123.el7.x86_64/cb-734@re/develop  # 7.0
-    KERNEL_RHEL_7_1_VERSION: Kernel_3.10.0-229.el7.x86_64/cb-734@re/develop  # 7.1
-    KERNEL_RHEL_7_2_VERSION: Kernel_3.10.0-327.el7.x86_64/cb-734@re/develop  # 7.2
-    KERNEL_RHEL_7_3_VERSION: Kernel_3.10.0-514.el7.x86_64/cb-734@re/develop  # 7.3
-    KERNEL_RHEL_7_4_VERSION: Kernel_3.10.0-693.el7.x86_64/cb-734@re/develop  # 7.4
-    KERNEL_RHEL_7_5_VERSION: Kernel_3.10.0-862.el7.x86_64/cb-734@re/develop  # 7.5
-    KERNEL_RHEL_7_6_VERSION: Kernel_3.10.0-957.el7.x86_64/cb-734@re/develop  # 7.6
-    KERNEL_RHEL_7_7_VERSION: Kernel_3.10.0-1062.el7.x86_64/cb-734@re/develop # 7.7
-    KERNEL_RHEL_7_8_VERSION: Kernel_3.10.0-1127.el7.x86_64/cb-734@re/develop # 7.8
-    KERNEL_RHEL_8_0_VERSION: Kernel_4.18.0-80.el8.x86_64/cb-734@re/develop  # 8.0
+    KERNEL_RHEL_6_6_VERSION: Kernel_2.6.32-504.el6.x86_64/cb-876@re/develop  # 6.6
+    KERNEL_RHEL_6_7_VERSION: Kernel_2.6.32-573.el6.x86_64/cb-876@re/develop  # 6.7
+    KERNEL_RHEL_6_8_VERSION: Kernel_2.6.32-642.el6.x86_64/cb-876@re/develop  # 6.8
+    KERNEL_RHEL_6_9_VERSION: Kernel_2.6.32-696.el6.x86_64/cb-876@re/develop  # 6.9
+    KERNEL_RHEL_6_10_VERSION: Kernel_2.6.32-754.el6.x86_64/cb-876@re/develop # 6.10
+    KERNEL_RHEL_7_0_VERSION: Kernel_3.10.0-123.el7.x86_64/cb-876@re/develop  # 7.0
+    KERNEL_RHEL_7_1_VERSION: Kernel_3.10.0-229.el7.x86_64/cb-876@re/develop  # 7.1
+    KERNEL_RHEL_7_2_VERSION: Kernel_3.10.0-327.el7.x86_64/cb-876@re/develop  # 7.2
+    KERNEL_RHEL_7_3_VERSION: Kernel_3.10.0-514.el7.x86_64/cb-876@re/develop  # 7.3
+    KERNEL_RHEL_7_4_VERSION: Kernel_3.10.0-693.el7.x86_64/cb-876@re/develop  # 7.4
+    KERNEL_RHEL_7_5_VERSION: Kernel_3.10.0-862.el7.x86_64/cb-876@re/develop  # 7.5
+    KERNEL_RHEL_7_6_VERSION: Kernel_3.10.0-957.el7.x86_64/cb-876@re/develop  # 7.6
+    KERNEL_RHEL_7_7_VERSION: Kernel_3.10.0-1062.el7.x86_64/cb-876@re/develop # 7.7
+    KERNEL_RHEL_7_8_VERSION: Kernel_3.10.0-1127.el7.x86_64/cb-876@re/develop # 7.8
+    KERNEL_RHEL_7_9_VERSION: Kernel_3.10.0-1160.el7.x86_64/cb-876@re/develop # 7.9
+    KERNEL_RHEL_8_0_VERSION: Kernel_4.18.0-80.el8.x86_64/cb-876@re/develop  # 8.0
+
     # Override the kernel versions
     #  This should be a comma seperated list of kernel versions to match.  (This
     #  is a simple match in the string.)
