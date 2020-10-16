@@ -373,9 +373,11 @@ extern struct inode *get_inode_from_file(struct file *file);
 extern void get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode);
 extern struct inode *get_inode_from_dentry(struct dentry *dentry);
 umode_t get_mode_from_file(struct file *file);
+extern struct super_block *get_sb_from_file(struct file *file);
 extern bool is_interesting_file(struct file *file);
 extern bool is_excluded_file(uint64_t device, uint64_t inode);
 extern int is_special_file(char *pathname, int len);
+extern bool may_skip_unsafe_vfs_calls(struct file *file);
 
 // schedulers
 extern const struct sched_class idle_sched_class;
