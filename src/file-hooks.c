@@ -545,6 +545,8 @@ asmlinkage long cb_sys_write(unsigned int fd, const char __user *buf, size_t cou
 
     do_file_event(&context, file, CB_EVENT_TYPE_FILE_WRITE);
 
+    TRY(!may_skip_unsafe_vfs_calls(file));
+
     TRY(S_ISREG(get_mode_from_file(file)));
 
     get_devinfo_from_file(file, &device, &inode);
