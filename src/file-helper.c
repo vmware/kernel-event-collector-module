@@ -4,6 +4,7 @@
 
 #include "priv.h"
 #include "cb-banning.h"
+#include <linux/magic.h>
 
 bool file_helper_init(ProcessContext *context)
 {
@@ -213,4 +214,87 @@ umode_t get_mode_from_file(struct file *file)
     }
 
     return mode;
+}
+
+static struct super_block *get_sb_from_dentry(struct dentry *dentry)
+{
+    struct super_block *sb = NULL;
+
+    if (dentry)
+    {
+        // Get super_block from inode first
+        struct inode *inode = get_inode_from_dentry(dentry);
+
+        if (inode)
+        {
+            sb = inode->i_sb;
+        }
+
+        // Get super_block from dentry last.
+        if (!sb)
+        {
+            sb = dentry->d_sb;
+        }
+    }
+    return sb;
+}
+
+struct super_block *get_sb_from_file(struct file *file)
+{
+    struct super_block *sb = NULL;
+
+    if (file)
+    {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+        struct inode *inode = get_inode_from_file(file);
+
+        if (inode)
+        {
+            sb = inode->i_sb;
+        }
+#endif
+        if (!sb)
+        {
+            sb = get_sb_from_dentry(file->f_path.dentry);
+        }
+    }
+    return sb;
+}
+
+static bool is_network_filesystem(struct super_block *sb)
+{
+    if (!sb)
+    {
+        return false;
+    }
+
+    // Check magic numbers
+    switch (sb->s_magic)
+    {
+    case NFS_SUPER_MAGIC:
+        return true;
+
+    default:
+        return false;
+    }
+
+    return false;
+}
+
+bool may_skip_unsafe_vfs_calls(struct file *file)
+{
+    struct super_block *sb = get_sb_from_file(file);
+
+    // Since we still don't know the file system type
+    // it's safer to not perform any VFS ops on the file.
+    if (!sb)
+    {
+        return true;
+    }
+
+    // We may want to check if a file's inode lock is held
+    // before trying to do a vfs operation.
+
+    // Eventually expand to stacked file systems
+    return is_network_filesystem(sb);
 }
