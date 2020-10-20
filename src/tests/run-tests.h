@@ -25,6 +25,7 @@ bool test__hash_table(ProcessContext *context) __init;
 bool test__hashtbl_double_del(ProcessContext *context) __init;
 bool test__hashtbl_refcount_double_del(ProcessContext *context) __init;
 bool test__hashtbl_refcount(ProcessContext *context) __init;
+bool test__hashtbl_add_duplicate(ProcessContext *context) __init;
 
 bool test__proc_track_report_double_exit(ProcessContext *context) __init;
 

@@ -62,6 +62,10 @@ HashTbl *hashtbl_init_generic(ProcessContext *context,
 void *hashtbl_alloc_generic(HashTbl *tblp, ProcessContext *context);
 int hashtbl_add_generic(HashTbl *tblp, void *datap, ProcessContext *context);
 
+// Like hashtbl_add_generic but returns -EEXIST on a duplicate entry.
+// Caller responsible for freeing on failure to add entry.
+int hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *context);
+
 // Finds and removes data for key from hash table. Caller must put or free return.
 void *hashtbl_del_by_key_generic(HashTbl *tblp, void *key, ProcessContext *context);
 
