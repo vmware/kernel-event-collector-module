@@ -12,7 +12,7 @@ typedef struct table_value {
 } TableValue;
 
 typedef struct entry {
-    struct hlist_node  link;
+    HashTableNode      link;
     struct table_key   key;
     atomic64_t         reference_count;
     struct table_value value;
@@ -235,3 +235,42 @@ CATCH_DEFAULT:
     return passed;
 }
 
+// Attempt to add two entries and verify -EEXIST is returned
+bool __init test__hashtbl_add_duplicate(ProcessContext *context)
+{
+    bool passed = false;
+    Entry *tdata   = NULL;
+    Entry *tdata2  = NULL;
+    HashTbl *table = init_hashtbl(context, HASHTBL_DISABLE_REF_COUNT, NULL);
+
+    ASSERT_TRY(table);
+
+    tdata = (Entry *)hashtbl_alloc_generic(table, context);
+    tdata2 = (Entry *)hashtbl_alloc_generic(table, context);
+    ASSERT_TRY(tdata);
+    ASSERT_TRY(tdata2);
+
+    tdata->key.id = 1;
+    tdata2->key.id = 1;
+
+    ASSERT_TRY(hashtbl_add_generic(table, tdata, context) == 0);
+    ASSERT_TRY(hashtbl_add_generic_safe(table, tdata2, context) == -EEXIST);
+    passed = true;
+
+CATCH_DEFAULT:
+    if (table)
+    {
+        if(tdata)
+        {
+            hashtbl_del_generic(table, tdata, context);
+            hashtbl_free_generic(table, tdata, context);
+        }
+        if(tdata2)
+        {
+            hashtbl_del_by_key_generic(table, &tdata2->key, context);
+            hashtbl_free_generic(table, tdata2, context);
+        }
+        hashtbl_shutdown_generic(table, context);
+    }
+    return passed;
+}
