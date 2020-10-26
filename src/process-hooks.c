@@ -9,6 +9,8 @@
 #endif
 #include <linux/proc_fs.h>
 #include <linux/mm.h>
+#include <trace/events/sched.h>
+
 #include "process-tracking.h"
 #include "cb-banning.h"
 #include "event-factory.h"
@@ -18,13 +20,30 @@
 
 static void cb_exit_hook(struct task_struct *task, ProcessContext *context);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    static void sched_process_fork_probe(void *data, struct task_struct *parent, struct task_struct *child);
+#else
+    static void sched_process_fork_probe(struct task_struct *parent, struct task_struct *child);
+#endif
+
 bool task_initialize(ProcessContext *context)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    register_trace_sched_process_fork(sched_process_fork_probe, NULL);
+#else
+    register_trace_sched_process_fork(sched_process_fork_probe);
+#endif
+
     return true;
 }
 
 void task_shutdown(ProcessContext *context)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    unregister_trace_sched_process_fork(sched_process_fork_probe, NULL);
+#else
+    unregister_trace_sched_process_fork(sched_process_fork_probe);
+#endif
 }
 
 // RHEL 7 has an optomized code path for exits when a process can not be reaped.
@@ -93,6 +112,33 @@ static void cb_exit_hook(struct task_struct *task, ProcessContext *context)
 
     CANCEL_VOID_MSG(process_tracking_report_exit(pid, context),
         DL_PROC_TRACKING, "remove process failed to find pid=%d\n", pid);
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+void sched_process_fork_probe(void *data, struct task_struct *parent, struct task_struct *child)
+#else
+void sched_process_fork_probe(struct task_struct *parent, struct task_struct *child)
+#endif
+{
+    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+
+    MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+    // ignore kernel tasks (swapper, migrate, etc)
+    // this is critial because path lookups for these functions will schedule
+    // and deadlock the system
+    TRY(child->mm != NULL);
+
+    // only hook for tasks which are new and have not yet run
+    TRY(child->se.sum_exec_runtime == 0);
+
+    // Do not allow any calls to schedule tasks
+    DISABLE_WAKE_UP(&context);
+
+    cb_clone_hook(&context, child);
+
+CATCH_DEFAULT:
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
 }
 
 void cb_clone_hook(ProcessContext *context, struct task_struct *task)
