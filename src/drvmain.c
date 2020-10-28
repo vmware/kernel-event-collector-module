@@ -4,7 +4,6 @@
 
 #include "priv.h"
 #include "findsyms.h"
-#include "patch-sched.h"
 #include "process-tracking.h"
 #include "network-tracking.h"
 #include "file-process-tracking.h"
@@ -181,8 +180,7 @@ static int __init cbsensor_init(void)
     reader_init();
 
     TRY_STEP(DEFAULT,    module_state_info_initialize(&context));
-    TRY_STEP(STATE_INFO, patch_sched(&context));
-    TRY_STEP(SCHED,      netfilter_initialize(&context, g_enableHooks));
+    TRY_STEP(STATE_INFO, netfilter_initialize(&context, g_enableHooks));
     TRY_STEP(NET_FIL,    lsm_initialize(&context, g_enableHooks));
     TRY_STEP(LSM,        syscall_initialize(&context, g_enableHooks));
     TRY_STEP(SYSCALL,    user_devnode_init(&context));
@@ -235,8 +233,6 @@ CATCH_LSM:
     lsm_shutdown(&context);
 CATCH_NET_FIL:
     netfilter_cleanup(&context, g_enableHooks);
-CATCH_SCHED:
-    restore_sched(&context);
 CATCH_STATE_INFO:
     module_state_info_shutdown(&context);
 CATCH_DEFAULT:
@@ -247,7 +243,8 @@ CATCH_DEFAULT:
 void cbsensor_shutdown(ProcessContext *context)
 {
     // If the hooks have been modified abort the shutdown.
-    CANCEL_VOID(!(syscall_hooks_changed(context, g_enableHooks) || lsm_hooks_changed(context, g_enableHooks) || sched_changed(context)));
+    CANCEL_VOID_MSG(!(syscall_hooks_changed(context, g_enableHooks) || lsm_hooks_changed(context, g_enableHooks)),
+                    DL_WARNING, "Hooks have changed, unable to shutdown");
 
     /**
      *
@@ -255,9 +252,6 @@ void cbsensor_shutdown(ProcessContext *context)
      * Refer to function header for cbsensor_disable_module, to get more details.
      */
     CANCEL_VOID((cbsensor_disable_module(context) == 0));
-
-    // unpatch the scheduler
-    restore_sched(context);
 
     // Remove hooks
     syscall_shutdown(context, g_enableHooks);
@@ -289,6 +283,8 @@ static void __exit cbsensor_cleanup(void)
     module_state_info_shutdown(&context);
     hashtbl_generic_destoy(&context);
     cb_mem_cache_shutdown(&context);
+
+    tracepoint_synchronize_unregister();
 
     TRACE(DL_SHUTDOWN, "%s driver cleanup complete.", CB_APP_MODULE_NAME);
 }
