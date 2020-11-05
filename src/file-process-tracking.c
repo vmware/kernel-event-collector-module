@@ -80,10 +80,23 @@ FILE_PROCESS_VALUE *file_process_status_open(
         value->isSpecialFile = isSpecialFile;
         value->fileType      = filetypeUnknown;
         value->didReadType   = false;
+        value->status = OPENED;
 
+        if (path && *path)
+        {
+            size_t len = strlen(path);
+
+            value->path = cb_mem_cache_alloc_generic(len + 1, context);
+            if (value->path)
+            {
+                value->path[0] = 0;
+                strncat(value->path, path, len);
+            }
+        }
 
         if (!cb_rbtree_insert(tree_handle.tree, value, context))
         {
+            // Will also free path
             file_process_free(value, context);
             value = NULL;
             if (tree_handle.shared_data)
@@ -91,24 +104,12 @@ FILE_PROCESS_VALUE *file_process_status_open(
                 process_path = process_tracking_get_path(tree_handle.shared_data);
             }
 
-            TRACE(DL_ERROR, "Fail to add %s [%llu:%llu] pid:%u (%s) into file tracking table",
-                  path ? path : "(path unknown)", device, inode, pid, process_path);
-            goto CATCH_DEFAULT;
-        }
-        if (path)
-        {
-            size_t len = strlen(path);
-
-            value->path = cb_mem_cache_alloc_generic(len + 1, context);
-            if (value->path)
-            {
-                value->path[0]   = 0;
-                strncat(value->path, path, len);
-            }
+            // We are racing against other threads or processes
+            // to insert a similar entry on the same rb_tree.
+            TRACE(DL_INFO, "File entry already exists: [%llu:%llu] %s pid:%u (%s)",
+                device, inode, path ? path : "(path unknown)", pid, process_path);
         }
     }
-
-    value->status = OPENED;
 
 CATCH_DEFAULT:
     process_tracking_put_file_tree(&tree_handle, context);

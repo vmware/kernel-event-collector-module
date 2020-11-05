@@ -21,7 +21,7 @@ static const char *StartAction_ToString(int start_action)
     return "??";
 }
 
-static PCB_EVENT factory_alloc_event(ProcessTracking *procp,
+PCB_EVENT factory_alloc_event(ProcessTracking *procp,
                                      CB_EVENT_TYPE   eventType,
                                      int             trace_level,
                                      const char *type_msg,
@@ -194,21 +194,26 @@ void event_send_file(
 {
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
+    char *status_msgp = NULL;
 
-    snprintf(status_message,
+    if (MAY_TRACE_LEVEL(DL_FILE))
+    {
+        status_msgp = status_message;
+        snprintf(status_msgp,
              MSG_SIZE,
              " [%llu:%llu] %s by",
              device,
              inode,
              path);
-    status_message[MSG_SIZE] = 0;
+        status_msgp[MSG_SIZE] = 0;
+    }
 
     event = factory_alloc_event(
         procp,
         event_type,
         DL_FILE,
         event_type_to_str(event_type),
-        status_message,
+        status_msgp,
         context);
 
     CANCEL_VOID(event);
@@ -238,6 +243,7 @@ void event_send_modload(
 {
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
+    char *status_msgp = NULL;
 
     // JANK ALERT: there is a special case where we will try to send a modload for
     // the currently execing binary in the middle of our 2 exec hooks. this results in
@@ -249,19 +255,23 @@ void event_send_modload(
     // responsible for freeing the parent shared data.
     CANCEL_VOID(!procp->parent_shared_data);
 
-    snprintf(status_message,
+    if (MAY_TRACE_LEVEL(DL_MODLOAD))
+    {
+        status_msgp = status_message;
+        snprintf(status_msgp,
              MSG_SIZE,
              " [%llu:%llu]",
              device,
              inode);
-    status_message[MSG_SIZE] = 0;
+        status_msgp[MSG_SIZE] = 0;
+    }
 
     event = factory_alloc_event(
         procp,
         event_type,
         DL_MODLOAD,
         "MODLOAD",
-        status_message,
+        status_msgp,
         context);
 
     CANCEL_VOID(event);
