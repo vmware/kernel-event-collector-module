@@ -28,5 +28,6 @@
 #include "version.h"
 extern uint32_t g_traceLevel;
 
-#define TRACE(level, fmt, ...)    do { if (g_traceLevel & level) pr_info(CB_APP_MODULE_NAME ": " fmt "\n", ##__VA_ARGS__); } while (0)
+#define MAY_TRACE_LEVEL(level) ((g_traceLevel & (level)))
+#define TRACE(level, fmt, ...)    do { if (MAY_TRACE_LEVEL(level)) pr_info(CB_APP_MODULE_NAME ": " fmt "\n", ##__VA_ARGS__); } while (0)
 #endif // LINUX_VERSION_CODE
