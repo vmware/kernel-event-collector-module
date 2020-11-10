@@ -89,7 +89,6 @@ set(SOURCE_FILES drvmain.c
         rbtree-helper.c
         file-helper.c
         file-hooks.c
-        patch-sched.c
         logger.c
         lsm.c
         modules.c
