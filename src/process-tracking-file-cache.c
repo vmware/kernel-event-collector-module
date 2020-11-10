@@ -74,8 +74,15 @@ static int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep,
     ProcessTracking *procp      = NULL;
     struct for_each_priv *local_priv = NULL;
 
+    // NULL when hashtbl iterator has signal a stop.
+    // No harm in returning ACTION_STOP here.
+    if (NULL == nodep)
+    {
+        return ACTION_STOP;
+    }
+
     // Saftey first
-    if (NULL == nodep || NULL == priv)
+    if (NULL == priv)
     {
         TRACE(DL_ERROR, "%s:%d NULL ptr provided as function argument [%p=nodep %p=priv]. Bailing...\n",
                          __func__, __LINE__, nodep, priv);

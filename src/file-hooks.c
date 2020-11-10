@@ -543,9 +543,9 @@ asmlinkage long cb_sys_write(unsigned int fd, const char __user *buf, size_t cou
     file = fget(fd);
     TRY(file != NULL);
 
-    do_file_event(&context, file, CB_EVENT_TYPE_FILE_WRITE);
-
     TRY(!may_skip_unsafe_vfs_calls(file));
+
+    do_file_event(&context, file, CB_EVENT_TYPE_FILE_WRITE);
 
     TRY(S_ISREG(get_mode_from_file(file)));
 
