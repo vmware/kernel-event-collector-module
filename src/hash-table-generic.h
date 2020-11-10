@@ -28,11 +28,16 @@
 //
 typedef void (*hashtbl_delete_cb)(void *datap, ProcessContext *context);
 
+typedef struct hashbtl_bkt {
+    uint64_t lock;
+    struct hlist_head head;
+} HashTableBkt;
+
 typedef struct hashtbl {
-    struct hlist_head *tablePtr;
+    HashTableBkt *tablePtr;
     struct list_head   genTables;
     uint64_t   numberOfBuckets;
-    uint64_t   tableSpinlock;
+    uint32_t   secret;
     atomic64_t tableInstance;
     atomic64_t tableShutdown;  // shutting down = 1 running = 0
     int key_len;
@@ -41,12 +46,13 @@ typedef struct hashtbl {
     int key_offset;
     int node_offset;
     int refcount_offset;
-    bool base_size;
+    size_t base_size;
     hashtbl_delete_cb delete_callback;
 } HashTbl;
 
 typedef struct hash_table_node {
     struct hlist_node link;
+    u32 hash;
 } HashTableNode;
 
 void hashtbl_generic_init(ProcessContext *context);
