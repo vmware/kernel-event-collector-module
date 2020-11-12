@@ -351,7 +351,7 @@ CATCH_DEFAULT:
     process_tracking_put_process(procp, context);
 }
 
-static void do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
+void do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
 {
     uint64_t            device        = 0;
     uint64_t            inode         = 0;
