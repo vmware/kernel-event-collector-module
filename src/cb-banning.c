@@ -96,7 +96,7 @@ bool cbSetBannedProcessInodeWithoutKillingProcs(ProcessContext *context, uint64_
     bep->device = device;
     bep->inode = ino;
 
-    if (hashtbl_add_generic(g_banning_table, bep, context) < 0)
+    if (hashtbl_add_generic_safe(g_banning_table, bep, context) < 0)
     {
         hashtbl_free_generic(g_banning_table, bep, context);
         return false;
