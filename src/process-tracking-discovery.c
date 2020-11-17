@@ -42,7 +42,7 @@ CATCH_DEFAULT:
 
 static void _send_process_discovery(void *data, void *priv, ProcessContext *context)
 {
-    ProcessTracking *procp = sorted_tracking_table_get_process(data);
+    ProcessTracking *procp = sorted_tracking_table_get_process(data, context);
 
     TRY(procp);
 
@@ -52,5 +52,6 @@ static void _send_process_discovery(void *data, void *priv, ProcessContext *cont
                     context);
 
 CATCH_DEFAULT:
+    process_tracking_put_process(procp, context);
     return;
 }
