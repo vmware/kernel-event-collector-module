@@ -42,7 +42,7 @@ const char *process_tracking_get_proc_name(const char *path)
 static void _show_process_tracking_table(void *data, void *priv, ProcessContext *context)
 {
     struct seq_file    *seq_file     = (struct seq_file *)priv;
-    ProcessTracking    *procp        = sorted_tracking_table_get_process(data);
+    ProcessTracking    *procp        = sorted_tracking_table_get_process(data, context);
     const char         *proc_name    = NULL;
     struct task_struct *task         = NULL;
     uint64_t            shared_count = 0;
@@ -67,6 +67,7 @@ static void _show_process_tracking_table(void *data, void *priv, ProcessContext 
                   (is_task_alive(task) ? "yes" : "no"));
 
 CATCH_DEFAULT:
+    process_tracking_put_process(procp, context);
     return;
 }
 
