@@ -22,7 +22,7 @@ extern process_tracking_data g_process_tracking_data;
 
 void process_tracking_update_op_cnts(ProcessTracking *procp, CB_EVENT_TYPE event_type, int action);
 void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, ProcessContext *context);
-ProcessTracking *sorted_tracking_table_get_process(void *data);
+ProcessTracking *sorted_tracking_table_get_process(void *data, ProcessContext *context);
 const char *process_tracking_get_proc_name(const char *path);
 
 void process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
