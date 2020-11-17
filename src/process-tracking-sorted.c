@@ -16,7 +16,7 @@ typedef struct SORTED_PROCESS_TREE {
 typedef struct SORTED_PROCESS {
     struct rb_node     node;
     time_t             start_time;
-    ProcessTracking *procp;
+    pid_t              pid;
 } SORTED_PROCESS;
 
 static int _rbtree_compare_process_start_time(void *left, void *right);
@@ -42,11 +42,11 @@ void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, Pro
     cb_rbtree_destroy(&data.tree, context);
 }
 
-ProcessTracking *sorted_tracking_table_get_process(void *data)
+ProcessTracking *sorted_tracking_table_get_process(void *data, ProcessContext *context)
 {
     if (data)
     {
-        return ((SORTED_PROCESS *)data)->procp;
+        return process_tracking_get_process(((SORTED_PROCESS *)data)->pid, context);
     }
     return NULL;
 }
@@ -69,7 +69,7 @@ static int _sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep,
         {
             RB_CLEAR_NODE(&value->node);
             value->start_time = procp->posix_details.start_time;
-            value->procp      = procp;
+            value->pid        = procp->pt_key.pid;
             if (!cb_rbtree_insert(&data->tree, value, context))
             {
                 cb_mem_cache_free_generic(value);
