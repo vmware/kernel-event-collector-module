@@ -10,6 +10,7 @@
 
 static int _file_process_tree_compare(void *left, void *right);
 static void _file_process_tree_free(void *data, ProcessContext *context);
+static void _file_process_tree_copy(void *dest, void *src);
 
 static CB_MEM_CACHE s_file_process_cache;
 
@@ -133,6 +134,22 @@ CATCH_DEFAULT:
     return value;
 }
 
+bool file_process_status_update(uint64_t device, uint64_t inode, uint32_t pid, FILE_PROCESS_VALUE *processValue, ProcessContext *context)
+{
+    FILE_TREE_HANDLE tree_handle;
+    FILE_PROCESS_KEY key = {device, inode};
+    bool updated = false;
+
+    TRY(process_tracking_get_file_tree(pid, &tree_handle, context));
+
+    updated = cb_rbtree_update(tree_handle.tree, &key, processValue, context);
+
+CATCH_DEFAULT:
+    process_tracking_put_file_tree(&tree_handle, context);
+
+    return updated;
+}
+
 void file_process_status_close(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context)
 {
     FILE_TREE_HANDLE tree_handle;
@@ -167,6 +184,7 @@ void file_process_tree_init(void **tree, ProcessContext *context)
                            offsetof(FILE_PROCESS_VALUE, node),
                            _file_process_tree_compare,
                            _file_process_tree_free,
+                           _file_process_tree_copy,
                            context);
         }
     }
@@ -204,6 +222,16 @@ static int _file_process_tree_compare(void *left, void *right)
         }
     }
     return -2;
+}
+
+static void _file_process_tree_copy(void *dest, void *src)
+{
+    FILE_PROCESS_VALUE *fp_dest = (FILE_PROCESS_VALUE *)dest;
+    FILE_PROCESS_VALUE *fp_src = (FILE_PROCESS_VALUE *)src;
+
+    // only updateable fields are copied
+    fp_dest->fileType = fp_src->fileType;
+    fp_dest->didReadType = fp_src->didReadType;
 }
 
 static void _file_process_tree_free(void *data, ProcessContext *context)
