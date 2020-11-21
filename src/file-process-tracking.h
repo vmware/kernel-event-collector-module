@@ -33,6 +33,7 @@ typedef struct FILE_PROCESS_VALUE {
 bool file_process_tracking_init(ProcessContext *context);
 void file_process_tracking_shutdown(ProcessContext *context);
 FILE_PROCESS_VALUE *file_process_status(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context);
+bool file_process_status_update(uint64_t device, uint64_t inode, uint32_t pid, FILE_PROCESS_VALUE *processValue, ProcessContext *context);
 FILE_PROCESS_VALUE *file_process_status_open(uint64_t       device,
                                              uint64_t       inode,
                                              uint32_t       pid,

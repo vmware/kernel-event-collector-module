@@ -35,6 +35,7 @@ void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, Pro
                    offsetof(SORTED_PROCESS, node),
                    _rbtree_compare_process_start_time,
                    _rbtree_free,
+                   NULL,
                    context);
 
     hashtbl_read_for_each_generic(g_process_tracking_data.table, _sort_process_tracking_table, &data, context);
