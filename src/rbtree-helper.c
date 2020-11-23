@@ -26,6 +26,7 @@ bool cb_rbtree_init(CB_RBTREE *tree,
                     int                  node_offset,
                     cb_compare_callback  compare_cb,
                     cb_free_callback     free_cb,
+                    cb_copy_callback     copy_cb,
                     ProcessContext *context)
 {
     if (tree && compare_cb && free_cb)
@@ -36,6 +37,7 @@ bool cb_rbtree_init(CB_RBTREE *tree,
         tree->node_offset = node_offset;
         tree->compare     = compare_cb;
         tree->free        = free_cb;
+        tree->copy_cb     = copy_cb;
         cb_spinlock_init(&tree->lock, context);
         atomic64_set(&tree->count, 0);
         return true;
@@ -161,6 +163,30 @@ bool cb_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
     }
 
     return didInsert;
+}
+
+bool cb_rbtree_update(CB_RBTREE *tree, void *key, void *src_data, ProcessContext *context)
+{
+    bool didUpdate = false;
+
+    if (__is_valid_tree(tree) && tree->copy_cb && src_data)
+    {
+        void *data = NULL;
+
+        cb_write_lock(&tree->lock, context);
+
+        data = cb_rbtree_search_locked(tree, key);
+
+        if (data)
+        {
+            tree->copy_cb(data, src_data);
+            didUpdate = true;
+        }
+
+        cb_write_unlock(&tree->lock, context);
+    }
+
+    return didUpdate;
 }
 
 bool cb_rbtree_delete_by_key(CB_RBTREE *tree, void *key, ProcessContext *context)
