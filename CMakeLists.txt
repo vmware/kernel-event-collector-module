@@ -2,7 +2,16 @@
 # Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
 # Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
-cmake_minimum_required(VERSION 2.8.7)
+cmake_minimum_required(VERSION 3.12.3)
+# CMake 2.x (the default in CentOS7) does not grok 'cmake_parse_arguments'.
+# CMake3 is available for CentOS7 as:
+#   sudo yum install epel-release
+#   sudo yum install cmake3
+#   sudo yum remove cmake
+#   sudo ln -s /usr/bin/cmake3 /usr/bin/cmake
+#   sudo ln -s /usr/bin/cpack3 /usr/bin/cpack
+#   sudo ln -s /usr/bin/ctest3 /usr/bin/ctest
+
 project (KernelEventCollectorModule)
 
 FIND_PACKAGE(CbUtil REQUIRED)

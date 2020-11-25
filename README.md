@@ -42,8 +42,9 @@ officially supported kernel modules are listed below.
  
 ### Prerequisites
 GCC, CMake, and the kernel headers for your target system must be installed
+CMake version at least 3.12 is required; cmake-2.x in CentOS7 will fail.
 ```shell script
-yum install gcc cmake kernel-devel
+yum install gcc cmake3 kernel-devel
 ```
 
 ### Build & Run
