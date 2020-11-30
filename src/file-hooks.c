@@ -586,10 +586,13 @@ asmlinkage long cb_sys_write(unsigned int fd, const char __user *buf, size_t cou
 
             if (size > 0)
             {
+                FILE_PROCESS_VALUE updateFileProcess;
+
                 determine_file_type(buffer, size, &fileType, true);
-                TRACE(DL_VERBOSE, "Detected file %s of type %s", fileProcess->path, file_type_str(fileType));
-                fileProcess->fileType    = fileType;
-                fileProcess->didReadType = true;
+                updateFileProcess.fileType    = fileType;
+                updateFileProcess.didReadType = true;
+
+                file_process_status_update(device, inode, getpid(current), &updateFileProcess, &context);
             }
 
             // Seek back to where the file was be so that the next write will work
