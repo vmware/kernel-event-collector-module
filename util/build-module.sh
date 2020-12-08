@@ -91,38 +91,63 @@ function tdd_build_kernel_event_collector_module
 
 source ${BUILD_UTIL_DIR}/sh-utils/build-tdd.sh
 
+function build_kernel
+{
+    ${CMD_PREFIX} conan build --build-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}
+    RET=$?
+    if [[ $RET = 0 && "${SKIP_PACKAGING}" != "True" ]]; then
+        if [ "$QUIET_PACKAGING" == "yes" ]; then
+            QMSG="(quiet)"
+            exec 3>/dev/null
+        else
+            exec 3>&1
+        fi
+        # Export the package into the local cache
+        echo "# Packaging... $QMSG"
+        flock ${BUILD_DIR} ${CMD_PREFIX} conan export-pkg -f \
+              --build-folder ${PLATFORM_BUILD} \
+              ${PLATFORM_BUILD} \
+              ${PACKAGE_CHANNEL} >&3
+
+        if [ "$ENABLE_COVERAGE" = "yes" ]
+        then
+            echo "Coverage is not currently supported for this project"
+        else
+            echo "Coverage Not Enabled"
+        fi
+    fi
+}
+
+function tdd_build_kernel
+{
+    sync_source_files
+    build_kernel
+}
+
+function sync_source_files
+{
+    sync_directory ${PLATFORM_BUILD}/include ${TOP_DIR}/include
+    sync_directory ${PLATFORM_BUILD}/src ${TOP_DIR}/src
+    rsync -ru --inplace --include="conanfile.py" ${opts} --include="*/" --exclude="*" ${TOP_DIR}/ ${PLATFORM_BUILD}
+    rsync -ru --inplace --include="CMakeLists.txt" ${opts} --include="*/" --exclude="*" ${TOP_DIR}/ ${PLATFORM_BUILD}
+
+    # Replace the version string
+    find ${PLATFORM_BUILD} -type f -iname conanfile.py -print0 | while IFS= read -r -d $'\0' file; do
+        apply_file_replacements $file
+    done
+}
+
 function do_build_step
 {
     echo "Doing build step for kernel module..."
 
     echo "--Creating directory: ${PLATFORM_BUILD}"
-    mkdir -p ${PLATFORM_BUILD}
+    mkdir -p ${PLATFORM_BUILD}/include ${PLATFORM_BUILD}/src
 
-    echo "--Creating a project src dir to avoid recursive syncs with build"
-    local project_src_dir="${PLATFORM_BUILD}/project-src"
-    mkdir -p "${project_src_dir}"
-
-    echo "--Copying all build files in ${TOP_DIR} to ${project_src_dir}"
-    find ${TOP_DIR} -maxdepth 1 -type f -exec cp {} ${project_src_dir} \;
-    cp -r ${TOP_DIR}/include ${project_src_dir}
-    cp -r ${TOP_DIR}/src ${project_src_dir}
-
-    local platform_src=${PLATFORM_BUILD}
-    sync_directory ${platform_src} ${project_src_dir}
-
-        # Replace the version string
-    echo "--Beginning find for conanfile..."
-    find ${PLATFORM_BUILD} -type f -iname conanfile.py -print0 | while IFS= read -r -d $'\0' file; do
-        echo "--Applying replacements to ${file}..."
-        apply_file_replacements $file
-        echo "--Applied replacements to ${file}"
-    done
-    echo "--Finished find for conanfile."
+    sync_source_files
 
     # Call the source method
-    echo "--Calling conan source --source-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}..."
     conan source --source-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}
-    echo "--Called conan source --source-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}."
 
     echo "# Building in ${BUILD_DIR}..."
 
@@ -155,22 +180,16 @@ function do_build_step
         fi
 
         # Build the package
-        ${CMD_PREFIX} conan build --build-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}
-        RET=$?
-        if [[ $RET = 0 && "${SKIP_PACKAGING}" != "True" ]]; then
-            # Export the package into the local cache
-            echo "# Packaging..."
-            flock ${BUILD_DIR} ${CMD_PREFIX} conan export-pkg -f \
-                  --build-folder ${PLATFORM_BUILD} \
-                  ${PLATFORM_BUILD} \
-                  ${PACKAGE_CHANNEL}
-
-            if [ "$ENABLE_COVERAGE" = "yes" ]
-            then
-                echo "Coverage is not currently supported for this project"
-            else
-                echo "Coverage Not Enabled"
-            fi
+        if [ "${TDD_MODE}" = "yes" ]; then
+            # We need to watch some individual directoris and files.
+            #   Do not allow the wait logic to sync.  We will do that in tdd_build_kernel
+            (watch_for_changes ${TOP_DIR}/conanfile.py - tdd_build_kernel   - ${BUILD_DIR} - "skip_initial") &
+            (watch_for_changes ${TOP_DIR}/CMakeLists.txt - tdd_build_kernel   - ${BUILD_DIR} - "skip_initial") &
+            (watch_for_changes ${TOP_DIR}/include - tdd_build_kernel   - ${BUILD_DIR} - "skip_initial") &
+            (watch_for_changes ${TOP_DIR}/src - tdd_build_kernel   - ${BUILD_DIR} -) &
+            wait
+        else
+            build_kernel
         fi
     fi
 
