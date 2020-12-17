@@ -7,7 +7,6 @@ build-rules:     ${UTIL_DIR}/build-module.sh
 source-version:  ${KERNEL_MAJOR_VERSION}.${KERNEL_MINOR_VERSION}.${KERNEL_PATCH_VERSION}
 allow-sub-docker-builds:
 builders:
-    - redhat6-gcc48-debug
     - redhat6-gcc48-relwithdebinfo
 
 service-env:
