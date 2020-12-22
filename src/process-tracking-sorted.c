@@ -20,7 +20,8 @@ typedef struct SORTED_PROCESS {
 } SORTED_PROCESS;
 
 static int _rbtree_compare_process_start_time(void *left, void *right);
-static void _rbtree_free(void *data, ProcessContext *context);
+static void _rbtree_get_ref(void *data, ProcessContext *context);
+static void _rbtree_put_ref(void *data, ProcessContext *context);
 static int _sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
 void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, ProcessContext *context)
@@ -34,8 +35,8 @@ void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, Pro
                    offsetof(SORTED_PROCESS, start_time),
                    offsetof(SORTED_PROCESS, node),
                    _rbtree_compare_process_start_time,
-                   _rbtree_free,
-                   NULL,
+                   _rbtree_get_ref,
+                   _rbtree_put_ref,
                    context);
 
     hashtbl_read_for_each_generic(g_process_tracking_data.table, _sort_process_tracking_table, &data, context);
@@ -110,7 +111,11 @@ static int _rbtree_compare_process_start_time(void *left, void *right)
     return -2;
 }
 
-static void _rbtree_free(void *data, ProcessContext *context)
+static void _rbtree_get_ref(void *data, ProcessContext *context)
+{
+}
+
+static void _rbtree_put_ref(void *data, ProcessContext *context)
 {
     cb_mem_cache_free_generic(data);
 }

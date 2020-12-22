@@ -26,14 +26,16 @@ typedef struct FILE_PROCESS_VALUE {
     CB_FILE_TYPE        fileType;
     bool                didReadType;
     bool                isSpecialFile;
-    char *path;
+    char               *path;
+    atomic64_t          reference_count;
 } FILE_PROCESS_VALUE;
 
+void file_process_get_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
+void file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
 
 bool file_process_tracking_init(ProcessContext *context);
 void file_process_tracking_shutdown(ProcessContext *context);
 FILE_PROCESS_VALUE *file_process_status(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context);
-bool file_process_status_update(uint64_t device, uint64_t inode, uint32_t pid, FILE_PROCESS_VALUE *processValue, ProcessContext *context);
 FILE_PROCESS_VALUE *file_process_status_open(uint64_t       device,
                                              uint64_t       inode,
                                              uint32_t       pid,
