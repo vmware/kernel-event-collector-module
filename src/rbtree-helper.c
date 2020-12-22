@@ -25,19 +25,19 @@ bool cb_rbtree_init(CB_RBTREE *tree,
                     int                  key_offset,
                     int                  node_offset,
                     cb_compare_callback  compare_cb,
-                    cb_free_callback     free_cb,
-                    cb_copy_callback     copy_cb,
+                    cb_ref_callback      get_ref,
+                    cb_ref_callback      put_ref,
                     ProcessContext *context)
 {
-    if (tree && compare_cb && free_cb)
+    if (tree && compare_cb && get_ref && put_ref)
     {
         tree->root        = RB_ROOT;
         tree->valid       = true;
         tree->key_offset  = key_offset;
         tree->node_offset = node_offset;
         tree->compare     = compare_cb;
-        tree->free        = free_cb;
-        tree->copy_cb     = copy_cb;
+        tree->get_ref     = get_ref;
+        tree->put_ref     = put_ref;
         cb_spinlock_init(&tree->lock, context);
         atomic64_set(&tree->count, 0);
         return true;
@@ -54,7 +54,8 @@ void cb_rbtree_destroy(CB_RBTREE *tree, ProcessContext *context)
         tree->valid   = false;
         tree->root    = RB_ROOT;
         tree->compare = NULL;
-        tree->free    = NULL;
+        tree->get_ref = NULL;
+        tree->put_ref = NULL;
         cb_spinlock_destroy(&tree->lock, context);
         atomic64_set(&tree->count, 0);
     }
@@ -70,6 +71,7 @@ void *cb_rbtree_search(CB_RBTREE *tree, void *key, ProcessContext *context)
     {
         cb_read_lock(&tree->lock, context);
         data = cb_rbtree_search_locked(tree, key);
+        tree->get_ref(data, context);
         cb_read_unlock(&tree->lock, context);
     }
 
@@ -156,6 +158,7 @@ bool cb_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
             rb_link_node(new_node, parent, insert_point);
             rb_insert_color(new_node, &(tree->root));
             atomic64_inc(&tree->count);
+            tree->get_ref(new_data, context);
 
             didInsert = true;
         }
@@ -163,30 +166,6 @@ bool cb_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
     }
 
     return didInsert;
-}
-
-bool cb_rbtree_update(CB_RBTREE *tree, void *key, void *src_data, ProcessContext *context)
-{
-    bool didUpdate = false;
-
-    if (__is_valid_tree(tree) && tree->copy_cb && src_data)
-    {
-        void *data = NULL;
-
-        cb_write_lock(&tree->lock, context);
-
-        data = cb_rbtree_search_locked(tree, key);
-
-        if (data)
-        {
-            tree->copy_cb(data, src_data);
-            didUpdate = true;
-        }
-
-        cb_write_unlock(&tree->lock, context);
-    }
-
-    return didUpdate;
 }
 
 bool cb_rbtree_delete_by_key(CB_RBTREE *tree, void *key, ProcessContext *context)
@@ -203,6 +182,11 @@ bool cb_rbtree_delete_by_key(CB_RBTREE *tree, void *key, ProcessContext *context
         didDelete = __cb_rbtree_delete_locked(tree, data, context);
 
         cb_write_unlock(&tree->lock, context);
+
+        // Release the reference outside the lock just in case cleanup code does something
+        //  stupid (like scheduling).  This is safe because no other thread can now find
+        //  this object.
+        tree->put_ref(data, context);
     }
 
     return didDelete;
@@ -219,6 +203,11 @@ bool cb_rbtree_delete(CB_RBTREE *tree, void *data, ProcessContext *context)
         didDelete = __cb_rbtree_delete_locked(tree, data, context);
 
         cb_write_unlock(&tree->lock, context);
+
+        // Release the reference outside the lock just in case cleanup code does something
+        //  stupid (like scheduling).  This is safe because no other thread can now find
+        //  this object.
+        tree->put_ref(data, context);
     }
 
     return didDelete;
@@ -239,7 +228,6 @@ static bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContex
 
             didDelete = true;
         }
-        tree->free(data, context);
     }
 
     return didDelete;
@@ -317,7 +305,7 @@ void cb_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
 
                 // Decrement the counter and delete the node
                 ATOMIC64_DEC__CHECK_NEG(&tree->count);
-                tree->free(data, context);
+                tree->put_ref(data, context);
             }
         }
 
