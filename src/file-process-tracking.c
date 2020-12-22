@@ -9,8 +9,8 @@
 #include "rbtree-helper.h"
 
 static int _file_process_tree_compare(void *left, void *right);
-static void _file_process_tree_free(void *data, ProcessContext *context);
-static void _file_process_tree_copy(void *dest, void *src);
+static void _file_process_tree_put_ref(void *data, ProcessContext *context);
+static void _file_process_tree_get_ref(void *data, ProcessContext *context);
 
 static CB_MEM_CACHE s_file_process_cache;
 
@@ -34,7 +34,6 @@ static FILE_PROCESS_VALUE *file_process_alloc(ProcessContext *context)
     if (value)
     {
         RB_CLEAR_NODE(&value->node);
-        value->path = NULL;
     }
 
     return value;
@@ -69,11 +68,15 @@ FILE_PROCESS_VALUE *file_process_status_open(
 
     TRY(process_tracking_get_file_tree(pid, &tree_handle, context));
 
+    // This will increase the ref count
     value = cb_rbtree_search(tree_handle.tree, &key, context);
     if (!value)
     {
         value = file_process_alloc(context);
         TRY(value);
+
+        // Initialize the reference count
+        atomic64_set(&value->reference_count, 1);
 
         value->key.device    = device;
         value->key.inode     = inode;
@@ -81,7 +84,8 @@ FILE_PROCESS_VALUE *file_process_status_open(
         value->isSpecialFile = isSpecialFile;
         value->fileType      = filetypeUnknown;
         value->didReadType   = false;
-        value->status = OPENED;
+        value->status        = OPENED;
+        value->path          = NULL;
 
         if (path && *path)
         {
@@ -95,10 +99,12 @@ FILE_PROCESS_VALUE *file_process_status_open(
             }
         }
 
+        // The insert will take a reference
         if (!cb_rbtree_insert(tree_handle.tree, value, context))
         {
-            // Will also free path
-            file_process_free(value, context);
+            // If the insert failed we free the local reference and clear
+            //  value
+            file_process_put_ref(value, context);
             value = NULL;
             if (tree_handle.shared_data)
             {
@@ -115,6 +121,7 @@ FILE_PROCESS_VALUE *file_process_status_open(
 CATCH_DEFAULT:
     process_tracking_put_file_tree(&tree_handle, context);
 
+    // Return holding a reference
     return value;
 }
 
@@ -126,28 +133,13 @@ FILE_PROCESS_VALUE *file_process_status(uint64_t device, uint64_t inode, uint32_
 
     TRY(process_tracking_get_file_tree(pid, &tree_handle, context));
 
+    // This take a local reference and return it below
     value = cb_rbtree_search(tree_handle.tree, &key, context);
 
 CATCH_DEFAULT:
     process_tracking_put_file_tree(&tree_handle, context);
 
     return value;
-}
-
-bool file_process_status_update(uint64_t device, uint64_t inode, uint32_t pid, FILE_PROCESS_VALUE *processValue, ProcessContext *context)
-{
-    FILE_TREE_HANDLE tree_handle;
-    FILE_PROCESS_KEY key = {device, inode};
-    bool updated = false;
-
-    TRY(process_tracking_get_file_tree(pid, &tree_handle, context));
-
-    updated = cb_rbtree_update(tree_handle.tree, &key, processValue, context);
-
-CATCH_DEFAULT:
-    process_tracking_put_file_tree(&tree_handle, context);
-
-    return updated;
 }
 
 void file_process_status_close(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context)
@@ -160,6 +152,23 @@ void file_process_status_close(uint64_t device, uint64_t inode, uint32_t pid, Pr
     cb_rbtree_delete_by_key(tree_handle.tree, &key, context);
 
     process_tracking_put_file_tree(&tree_handle, context);
+}
+
+void file_process_get_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
+{
+    if (value)
+    {
+        atomic64_inc(&value->reference_count);
+    }
+}
+
+void file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
+{
+    CANCEL_VOID(value);
+
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&value->reference_count, {
+        file_process_free(value, context);
+    });
 }
 
 // When a process exits we want to go over the list of open files that it owns and
@@ -183,8 +192,8 @@ void file_process_tree_init(void **tree, ProcessContext *context)
                            offsetof(FILE_PROCESS_VALUE, key),
                            offsetof(FILE_PROCESS_VALUE, node),
                            _file_process_tree_compare,
-                           _file_process_tree_free,
-                           _file_process_tree_copy,
+                           _file_process_tree_get_ref,
+                           _file_process_tree_put_ref,
                            context);
         }
     }
@@ -224,19 +233,14 @@ static int _file_process_tree_compare(void *left, void *right)
     return -2;
 }
 
-static void _file_process_tree_copy(void *dest, void *src)
+static void _file_process_tree_get_ref(void *data, ProcessContext *context)
 {
-    FILE_PROCESS_VALUE *fp_dest = (FILE_PROCESS_VALUE *)dest;
-    FILE_PROCESS_VALUE *fp_src = (FILE_PROCESS_VALUE *)src;
-
-    // only updateable fields are copied
-    fp_dest->fileType = fp_src->fileType;
-    fp_dest->didReadType = fp_src->didReadType;
+    file_process_get_ref(data, context);
 }
 
-static void _file_process_tree_free(void *data, ProcessContext *context)
+static void _file_process_tree_put_ref(void *data, ProcessContext *context)
 {
-    file_process_free(data, context);
+    file_process_put_ref(data, context);
 }
 
 static void _for_each_file_tree(void *tree, void *priv, ProcessContext *context);
