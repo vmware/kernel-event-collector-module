@@ -8,13 +8,13 @@
 #include "priv.h"
 #include "rbtree-helper.h"
 
-static int _file_process_tree_compare(void *left, void *right);
-static void _file_process_tree_put_ref(void *data, ProcessContext *context);
-static void _file_process_tree_get_ref(void *data, ProcessContext *context);
+int _file_process_tree_compare(void *left, void *right);
+void _file_process_tree_put_ref(void *data, ProcessContext *context);
+void _file_process_tree_get_ref(void *data, ProcessContext *context);
 
 static CB_MEM_CACHE s_file_process_cache;
 
-static FILE_PROCESS_VALUE *file_process_alloc(ProcessContext *context);
+FILE_PROCESS_VALUE *file_process_alloc(ProcessContext *context);
 
 
 bool file_process_tracking_init(ProcessContext *context)
@@ -27,7 +27,7 @@ void file_process_tracking_shutdown(ProcessContext *context)
     cb_mem_cache_destroy(&s_file_process_cache, context, NULL);
 }
 
-static FILE_PROCESS_VALUE *file_process_alloc(ProcessContext *context)
+FILE_PROCESS_VALUE *file_process_alloc(ProcessContext *context)
 {
     FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)cb_mem_cache_alloc(&s_file_process_cache, context);
 
@@ -39,7 +39,7 @@ static FILE_PROCESS_VALUE *file_process_alloc(ProcessContext *context)
     return value;
 }
 
-static void file_process_free(FILE_PROCESS_VALUE *value, ProcessContext *context)
+void file_process_free(FILE_PROCESS_VALUE *value, ProcessContext *context)
 {
     if (value)
     {
@@ -210,7 +210,7 @@ void file_process_tree_destroy(void **tree, ProcessContext *context)
 }
 
 // This helper function is used by the rbtree to find nodes
-static int _file_process_tree_compare(void *left, void *right)
+int _file_process_tree_compare(void *left, void *right)
 {
     FILE_PROCESS_KEY *left_key  = (FILE_PROCESS_KEY *)left;
     FILE_PROCESS_KEY *right_key = (FILE_PROCESS_KEY *)right;
@@ -233,19 +233,19 @@ static int _file_process_tree_compare(void *left, void *right)
     return -2;
 }
 
-static void _file_process_tree_get_ref(void *data, ProcessContext *context)
+void _file_process_tree_get_ref(void *data, ProcessContext *context)
 {
     file_process_get_ref(data, context);
 }
 
-static void _file_process_tree_put_ref(void *data, ProcessContext *context)
+void _file_process_tree_put_ref(void *data, ProcessContext *context)
 {
     file_process_put_ref(data, context);
 }
 
-static void _for_each_file_tree(void *tree, void *priv, ProcessContext *context);
-static void _show_file_tracking_table(void *data, void *priv, ProcessContext *context);
-static char *getTypeStr(CB_FILE_TYPE type);
+void _for_each_file_tree(void *tree, void *priv, ProcessContext *context);
+void _show_file_tracking_table(void *data, void *priv, ProcessContext *context);
+char *getTypeStr(CB_FILE_TYPE type);
 
 struct _tree_priv {
     struct seq_file *m;
@@ -265,7 +265,7 @@ int cb_file_track_show_table(struct seq_file *m, void *v)
     return 0;
 }
 
-static void _for_each_file_tree(void *tree, void *priv, ProcessContext *context)
+void _for_each_file_tree(void *tree, void *priv, ProcessContext *context)
 {
     if (tree)
     {
@@ -275,7 +275,7 @@ static void _for_each_file_tree(void *tree, void *priv, ProcessContext *context)
     }
 }
 
-static void _show_file_tracking_table(void *data, void *priv, ProcessContext *context)
+void _show_file_tracking_table(void *data, void *priv, ProcessContext *context)
 {
     if (data && priv)
     {
@@ -293,7 +293,7 @@ static void _show_file_tracking_table(void *data, void *priv, ProcessContext *co
     }
 }
 
-static char *getTypeStr(CB_FILE_TYPE type)
+char *getTypeStr(CB_FILE_TYPE type)
 {
     char *str = "unknown";
 

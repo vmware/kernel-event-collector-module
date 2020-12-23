@@ -31,7 +31,7 @@ HashTbl * g_banning_table = NULL;
 int64_t  g_banned_process_by_inode_count;
 uint32_t g_protectionModeEnabled = PROTECTION_ENABLED; // Default to enabled
 
-static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino);
+void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino);
 
 bool cbBanningInitialize(ProcessContext *context)
 {
@@ -189,7 +189,7 @@ kbpbi_exit:
     return false;
 }
 
-static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
+void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     pid_t pid;
     struct siginfo info;

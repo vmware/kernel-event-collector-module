@@ -13,12 +13,12 @@
 #include "path-buffers.h"
 #include "cb-spinlock.h"
 
-static void hashtbl_delete_callback(void *procp, ProcessContext *context);
-static void shareddata_print_callback(void *data, ProcessContext *context);
+void hashtbl_delete_callback(void *procp, ProcessContext *context);
+void shareddata_print_callback(void *data, ProcessContext *context);
 
-static SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context);
-static void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
-static ProcessTracking *process_tracking_add_process(ProcessTracking *procp, ProcessContext *context);
+SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context);
+void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
+ProcessTracking *process_tracking_add_process(ProcessTracking *procp, ProcessContext *context);
 
 process_tracking_data g_process_tracking_data = { 0, };
 
@@ -446,7 +446,7 @@ void process_tracking_remove_process(ProcessTracking *procp, ProcessContext *con
     }
 }
 
-static ProcessTracking *process_tracking_add_process(ProcessTracking *procp, ProcessContext *context)
+ProcessTracking *process_tracking_add_process(ProcessTracking *procp, ProcessContext *context)
 {
     if (hashtbl_add_generic(g_process_tracking_data.table, procp, context) < 0)
     {
@@ -581,7 +581,7 @@ void create_process_start_by_exec_event(struct task_struct *task, ProcessContext
     process_tracking_put_process(procp, context);
 }
 
-static SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context)
+SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context)
 {
     SharedTrackingData *shared_data = NULL;
 
@@ -590,7 +590,7 @@ static SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *co
     return process_tracking_get_shared_data_ref(shared_data, context);
 }
 
-static void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
+void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
 {
     if (shared_data)
     {
@@ -645,7 +645,7 @@ void process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, P
 
 // Note: This function is used as a callback by the generic hash table to
 //  delete our private data.
-static void hashtbl_delete_callback(void *data, ProcessContext *context)
+void hashtbl_delete_callback(void *data, ProcessContext *context)
 {
     if (data)
     {
@@ -669,7 +669,7 @@ static void hashtbl_delete_callback(void *data, ProcessContext *context)
 
 // Note: This function is used as a callback by the cb-mem-cache to print any
 // kmem cache entries that are still alive when the cache is destroyed.
-static void shareddata_print_callback(void *data, ProcessContext *context)
+void shareddata_print_callback(void *data, ProcessContext *context)
 {
     if (data)
     {

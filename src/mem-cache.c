@@ -25,9 +25,9 @@ typedef struct cache_buffer {
 static const size_t CACHE_BUFFER_SZ = sizeof(cache_buffer_t);
 
 #ifdef MEM_DEBUG
-    static struct list_head mem_debug_list = LIST_HEAD_INIT(mem_debug_list);
+    struct list_head mem_debug_list = LIST_HEAD_INIT(mem_debug_list);
 
-    static void __cb_mem_cache_generic_report_leaks(void);
+    void __cb_mem_cache_generic_report_leaks(void);
 #endif
 
 // Get the size of this string, and subtract the `\0`
@@ -228,7 +228,7 @@ size_t cb_mem_cache_get_memory_usage(ProcessContext *context)
 }
 
 #define SUFFIX_LIST_SIZE  4
-static void simplify_size(size_t *size, const char **suffix)
+void simplify_size(size_t *size, const char **suffix)
 {
     int s_index = 0;
     static const char * const suffix_list[SUFFIX_LIST_SIZE] = { "bytes", "Kb", "Mb", "Gb" };
@@ -465,7 +465,7 @@ char *cb_mem_cache_strdup(const char *src, ProcessContext *context)
 }
 
 #ifdef MEM_DEBUG
-static void __cb_mem_cache_generic_report_leaks(void)
+void __cb_mem_cache_generic_report_leaks(void)
 {
     generic_buffer_t *generic_buffer;
 

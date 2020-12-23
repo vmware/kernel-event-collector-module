@@ -9,7 +9,7 @@
 
 #include <linux/binfmts.h>
 
-static struct file *get_file_from_mm(struct mm_struct *mm);
+struct file *get_file_from_mm(struct mm_struct *mm);
 
 pid_t gettid(struct task_struct *task)
 {
@@ -121,7 +121,7 @@ struct inode *get_inode_from_task(struct task_struct *task)
     return pInode;
 }
 
-static bool _get_cmdline(struct task_struct *task,
+bool _get_cmdline(struct task_struct *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,
@@ -166,7 +166,7 @@ bool get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t cm
 
 }
 
-static bool _get_cmdline(struct task_struct *task,
+bool _get_cmdline(struct task_struct *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,
@@ -217,7 +217,7 @@ static bool _get_cmdline(struct task_struct *task,
     return true;
 }
 
-static struct file *get_file_from_mm(struct mm_struct *mm)
+struct file *get_file_from_mm(struct mm_struct *mm)
 {
     struct vm_area_struct *vma;
     struct file *filep = NULL;
@@ -294,13 +294,13 @@ struct task_stack {
 // FIRST_TASK and NEXT_TASK provide local dereferenced pointers so we don't need to dereference here
 #define HAS_MORE_TASKS(stack)  (!list_empty((stack)->child->sibling.next) && (&(stack)->child->sibling != &(stack)->task->children))
 
-static bool add_tracking_for_child_and_update_stack(
+bool add_tracking_for_child_and_update_stack(
     struct task_stack *top,
     struct task_stack *next,
     char              *path_buffer,
     time_t             start_time,
     ProcessContext *context);
-static void add_tracking_for_task(
+void add_tracking_for_task(
     struct task_struct *task,
     time_t              start_time,
     char               *path_buffer,
@@ -388,7 +388,7 @@ CATCH_DEFAULT:
     cb_mem_cache_free_generic(stack);
 }
 
-static bool add_tracking_for_child_and_update_stack(
+bool add_tracking_for_child_and_update_stack(
     struct task_stack *top,
     struct task_stack *next,
     char              *path_buffer,
@@ -420,7 +420,7 @@ static bool add_tracking_for_child_and_update_stack(
     return found_child;
 }
 
-static void add_tracking_for_task(
+void add_tracking_for_task(
     struct task_struct *task,
     time_t              start_time,
     char               *path_buffer,

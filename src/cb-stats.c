@@ -71,12 +71,12 @@ static const struct _cb_procs proc_callbacks[] = {
     { 0 }
 };
 
-static int dummy_show(struct seq_file *m, void *v)
+int dummy_show(struct seq_file *m, void *v)
 {
     return 0;
 }
 
-static int cb_proc_open(struct inode *inode, struct file *file)
+int cb_proc_open(struct inode *inode, struct file *file)
 {
     uint64_t          procId   = (uint64_t)PDE_DATA(inode);
     fp_readCallback   callback = proc_callbacks[procId].r_callback;
@@ -87,7 +87,7 @@ static int cb_proc_open(struct inode *inode, struct file *file)
     return single_open(file, (callback ? callback : dummy_show), PDE_DATA(inode));
 }
 
-static ssize_t cb_proc_write(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+ssize_t cb_proc_write(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
 {
     uint64_t procId = (uint64_t)((struct seq_file *)file->private_data)->private;
     ssize_t  len    = 0;

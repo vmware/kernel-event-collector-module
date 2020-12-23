@@ -48,7 +48,7 @@ extern asmlinkage long cb_sys_delete_module(const char __user *name_user, unsign
 
 static unsigned long page_rw_set;
 
-static void save_old_hooks(p_sys_call_table syscall_table)
+void save_old_hooks(p_sys_call_table syscall_table)
 {
     cb_orig_sys_delete_module = syscall_table[__NR_delete_module];
     cb_orig_sys_recvfrom      = syscall_table[__NR_recvfrom];
@@ -64,7 +64,7 @@ static void save_old_hooks(p_sys_call_table syscall_table)
     cb_orig_sys_rename        = syscall_table[__NR_rename];
 }
 
-static bool set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
+bool set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
     bool rval = false;
 
@@ -100,7 +100,7 @@ static bool set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-static bool set_new_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
+bool set_new_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
     bool rval = false;
 
@@ -123,7 +123,7 @@ static bool set_new_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableH
 }
 #endif
 
-static void restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
+void restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
     // Disable CPU write protect, and restore the call table
     get_cpu();
@@ -154,7 +154,7 @@ static void restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-static void restore_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
+void restore_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
     // Disable CPU write protect, and restore the call table
     get_cpu();
@@ -251,7 +251,7 @@ CATCH_DEFAULT:
 
 
 #ifdef HOOK_SELECTOR
-static void setSyscall(const char *buf, const char *name, uint64_t syscall, int nr, void *cb_call, void *krn_call, void **table)
+void setSyscall(const char *buf, const char *name, uint64_t syscall, int nr, void *cb_call, void *krn_call, void **table)
 {
     int cpu;
     void *call = NULL;
@@ -284,7 +284,7 @@ static void setSyscall(const char *buf, const char *name, uint64_t syscall, int 
     put_cpu();
 }
 
-static int getSyscall(uint64_t syscall, struct seq_file *m)
+int getSyscall(uint64_t syscall, struct seq_file *m)
 {
     seq_printf(m, (g_enableHooks & syscall ? "1\n" : "0\n"));
     return 0;

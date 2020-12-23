@@ -19,10 +19,10 @@ typedef struct SORTED_PROCESS {
     pid_t              pid;
 } SORTED_PROCESS;
 
-static int _rbtree_compare_process_start_time(void *left, void *right);
-static void _rbtree_get_ref(void *data, ProcessContext *context);
-static void _rbtree_put_ref(void *data, ProcessContext *context);
-static int _sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
+int _rbtree_compare_process_start_time(void *left, void *right);
+void _rbtree_get_ref(void *data, ProcessContext *context);
+void _rbtree_put_ref(void *data, ProcessContext *context);
+int _sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
 void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, ProcessContext *context)
 {
@@ -53,7 +53,7 @@ ProcessTracking *sorted_tracking_table_get_process(void *data, ProcessContext *c
     return NULL;
 }
 
-static int _sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int _sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     ProcessTracking *procp = (ProcessTracking *)nodep;
     SORTED_PROCESS_TREE *data  = (SORTED_PROCESS_TREE *)priv;
@@ -90,7 +90,7 @@ CATCH_DISABLED:
 }
 
 // Compare function for the rb_tree
-static int _rbtree_compare_process_start_time(void *left, void *right)
+int _rbtree_compare_process_start_time(void *left, void *right)
 {
     time_t *left_key  = (time_t *)left;
     time_t *right_key = (time_t *)right;
@@ -111,11 +111,11 @@ static int _rbtree_compare_process_start_time(void *left, void *right)
     return -2;
 }
 
-static void _rbtree_get_ref(void *data, ProcessContext *context)
+void _rbtree_get_ref(void *data, ProcessContext *context)
 {
 }
 
-static void _rbtree_put_ref(void *data, ProcessContext *context)
+void _rbtree_put_ref(void *data, ProcessContext *context)
 {
     cb_mem_cache_free_generic(data);
 }

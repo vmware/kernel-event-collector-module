@@ -18,7 +18,7 @@ static PCB_ISOLATION_MODE_CONTROL   _pCurrentCbIsolationModeControl;
 uint64_t                            _pControlLock;
 static BOOLEAN                      _isInitialized = FALSE;
 
-static BOOLEAN ACQUIRE_RESOURCE(ProcessContext *context)
+BOOLEAN ACQUIRE_RESOURCE(ProcessContext *context)
 {
     if (_isInitialized == FALSE)
     {
@@ -29,7 +29,7 @@ static BOOLEAN ACQUIRE_RESOURCE(ProcessContext *context)
     return TRUE;
 }
 
-static VOID RELEASE_RESOURCE(ProcessContext *context)
+VOID RELEASE_RESOURCE(ProcessContext *context)
 {
     cb_write_unlock(&_pControlLock, context);
 }

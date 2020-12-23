@@ -14,7 +14,7 @@ static inline void *get_datap(const HashTbl *hashTblp, HashTableNode *nodep)
 {
     return (void *)(nodep - hashTblp->node_offset);
 }
-static inline HashTableNode *get_nodep(const HashTbl *hashTblp, void *datap)
+inline HashTableNode *get_nodep(const HashTbl *hashTblp, void *datap)
 {
     return (HashTableNode *)(datap + hashTblp->node_offset);
 }
@@ -22,11 +22,11 @@ static inline HashTableNode *get_nodep(const HashTbl *hashTblp, void *datap)
 static int debug;
 
 static uint64_t g_hashtbl_generic_lock;
-static LIST_HEAD(g_hashtbl_generic);
+LIST_HEAD(g_hashtbl_generic);
 
 #define HASHTBL_PRINT(fmt, ...)    do { if (debug) pr_err("hash-tbl: " fmt, ##__VA_ARGS__); } while (0)
 
-static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
+int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
 
 void debug_on(void)
 {
@@ -183,12 +183,12 @@ HashTbl *hashtbl_init_generic(ProcessContext *context,
     return hashTblp;
 }
 
-static int _hashtbl_delete_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int _hashtbl_delete_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     return ACTION_DELETE;
 }
 
-static void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context);
+void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context);
 
 void hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
 {
@@ -250,7 +250,7 @@ void hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_c
     __hashtbl_for_each_generic(hashTblp, callback, priv, false, context);
 }
 
-static void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context)
+void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context)
 {
     unsigned int i;
     uint64_t numberOfBuckets;
@@ -329,7 +329,7 @@ Exit:
 }
 
 
-static HashTableNode *__hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u32 hash, const void *key)
+HashTableNode *__hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u32 hash, const void *key)
 {
     HashTableNode *tableNode = NULL;
     struct hlist_node *hlistTmp = NULL;
@@ -496,7 +496,7 @@ void *hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
     return datap;
 }
 
-static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
+int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     HashTableNode *nodep = get_nodep(hashTblp, datap);
 

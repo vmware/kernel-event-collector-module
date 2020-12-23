@@ -18,7 +18,7 @@ typedef struct entry {
     struct table_value value;
 } Entry;
 
-static HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_delete_cb delete_callback)
+HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_delete_cb delete_callback)
 {
     return hashtbl_init_generic(context,
                               1024,
@@ -177,7 +177,7 @@ CATCH_DEFAULT:
 
 static bool _delete_callback_called __initdata;
 
-static void __init _hashtbl_delete_callback(void *data, ProcessContext *context)
+void __init __hashtbl_delete_callback(void *data, ProcessContext *context)
 {
     _delete_callback_called = true;
 }
@@ -185,7 +185,7 @@ static void __init _hashtbl_delete_callback(void *data, ProcessContext *context)
 bool __init test__hashtbl_refcount(ProcessContext *context)
 {
     bool passed = false;
-    HashTbl *table = init_hashtbl(context, offsetof(Entry, reference_count), _hashtbl_delete_callback);
+    HashTbl *table = init_hashtbl(context, offsetof(Entry, reference_count), __hashtbl_delete_callback);
     Entry *tdata   = NULL;
     TableKey key;
 

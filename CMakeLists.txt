@@ -34,6 +34,7 @@ cb_check_kernel_files(
                             OPEN_BRACE
                             SUSPECT_CODE_INDENT
                             TRAILING_STATEMENTS
+                            AVOID_EXTERNS
         # checkpatch.pl does not like new typedefs.  We possibly should list all the typedefs we add here, but for now
         #  I am only listing the ones that are giving me issues.
         #  If you get the error `need consistent spacing around "*"` then add the type here.

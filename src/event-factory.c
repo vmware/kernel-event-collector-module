@@ -7,7 +7,7 @@
 #include "file-types.h"
 #include "priv.h"
 
-static const char *StartAction_ToString(int start_action)
+const char *StartAction_ToString(int start_action)
 {
     switch (start_action)
     {

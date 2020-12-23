@@ -18,10 +18,10 @@
 #define KPTR_RESTRICT_LEN 1
 #define KPTR_RESTRICT_PATH "/proc/sys/kernel/kptr_restrict"
 
-static bool parse_module_name(char *line, char **module_name);
-static bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules);
-static int get_kptr_restrict(void);
-static void set_kptr_restrict(int new_kptr_restrict);
+bool parse_module_name(char *line, char **module_name);
+bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules);
+int get_kptr_restrict(void);
+void set_kptr_restrict(int new_kptr_restrict);
 
 
 int set_symbol_address_if_matches(void *data, const char *namebuf, struct module *module, unsigned long address)
@@ -183,7 +183,7 @@ Exit:
     return result;
 }
 
-static bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules)
+bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules)
 {
     struct file *pFile  = NULL;
     bool           result = true;
@@ -311,7 +311,7 @@ void free_peer_module_symbols(struct list_head *peer_modules)
  * @param module_name
  * @return
  */
-static bool parse_module_name(char *line, char **module_name)
+bool parse_module_name(char *line, char **module_name)
 {
     *module_name = strsep(&line, " ");
     return true;
@@ -340,7 +340,7 @@ int verify_symbols(ProcessContext *context, struct symbols_s *p_symbols)
  *
  * @return kptr_restrict setting or -1 if unable to retrieve
  */
-static int get_kptr_restrict(void)
+int get_kptr_restrict(void)
 {
     struct file *pFile = NULL;
     ssize_t      ret;
@@ -381,7 +381,7 @@ CATCH_DEFAULT:
  *
  * @param new_kptr_restrict
  */
-static void set_kptr_restrict(int new_kptr_restrict)
+void set_kptr_restrict(int new_kptr_restrict)
 {
     struct file *pFile = NULL;
     char         buffer[KPTR_RESTRICT_LEN + 1];

@@ -66,12 +66,12 @@ typedef struct table_node {
     struct list_head  ageList;
 } NET_TBL_NODE;
 
-static void net_tracking_print_message(const char *message, NET_TBL_KEY *key);
+void net_tracking_print_message(const char *message, NET_TBL_KEY *key);
 
 HashTbl *g_net_hash_table;
 
-static struct delayed_work net_track_work;
-static void network_tracking_task(struct work_struct *work);
+struct delayed_work net_track_work;
+void network_tracking_task(struct work_struct *work);
 static uint32_t g_ntt_delay;
 
 uint64_t g_net_age_lock;
@@ -188,7 +188,7 @@ if (CHECK_SOCKET(sock) && IPPROTO_UDP == sock->sk->sk_protocol)   \
 }
 // checkpatch-no-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON,LINE_CONTINUATIONS,MACRO_WITH_FLOW_CONTROL
 
-static void udp_init_sockets(void);
+void udp_init_sockets(void);
 
 bool network_tracking_initialize(ProcessContext *context)
 {
@@ -240,7 +240,7 @@ void network_tracking_shutdown(ProcessContext *context)
 #endif
 
 
-static void cb_sk_nulls_for_each_rcu(struct hlist_nulls_head *head, bool (*callback)(struct sock *))
+void cb_sk_nulls_for_each_rcu(struct hlist_nulls_head *head, bool (*callback)(struct sock *))
 {
     struct sock *sk;
     struct hlist_nulls_node *node;
@@ -254,7 +254,7 @@ static void cb_sk_nulls_for_each_rcu(struct hlist_nulls_head *head, bool (*callb
     }
 }
 
-static void cb_sk_for_each_rcu(struct hlist_head *head, bool (*callback)(struct sock *))
+void cb_sk_for_each_rcu(struct hlist_head *head, bool (*callback)(struct sock *))
 {
 #ifdef sk_for_each_rcu
     // Some older kernels do not have sk_for_each_rcu. (This function will never be called
@@ -280,7 +280,7 @@ static void cb_sk_for_each_rcu(struct hlist_head *head, bool (*callback)(struct 
         cb_sk_nulls_for_each_rcu((struct hlist_nulls_head *)head, callback),  \
         cb_sk_for_each_rcu((struct hlist_head *)head, callback))
 
-static void udp_for_each(bool (*callback)(struct sock *))
+void udp_for_each(bool (*callback)(struct sock *))
 {
     int slot;
     int size = UDP_HTABLE_SIZE;
@@ -296,7 +296,7 @@ static void udp_for_each(bool (*callback)(struct sock *))
     rcu_read_unlock();
 }
 
-static bool udp_configure_raddr(struct sock *sk)
+bool udp_configure_raddr(struct sock *sk)
 {
     // TODO: Maybe remove this logic
     //       I found that this logic was no longer getting a valid address.  This
@@ -312,7 +312,7 @@ static bool udp_configure_raddr(struct sock *sk)
     return true;
 }
 
-static void udp_init_sockets(void)
+void udp_init_sockets(void)
 {
     udp_for_each(udp_configure_raddr);
 }
@@ -322,7 +322,7 @@ struct priv_data {
     uint32_t        count;
 };
 
-static void net_hash_table_cleanup(ProcessContext *context, struct priv_data *data)
+void net_hash_table_cleanup(ProcessContext *context, struct priv_data *data)
 {
     NET_TBL_NODE *datap = NULL;
     NET_TBL_NODE *tmp = NULL;
@@ -363,7 +363,7 @@ static void net_hash_table_cleanup(ProcessContext *context, struct priv_data *da
     cb_write_unlock(&g_net_age_lock, context);
 }
 
-static void network_tracking_clean(ProcessContext *context, int sec)
+void network_tracking_clean(ProcessContext *context, int sec)
 {
     struct priv_data data;
     uint64_t         total = atomic64_read(&(g_net_hash_table->tableInstance));
@@ -379,7 +379,7 @@ static void network_tracking_clean(ProcessContext *context, int sec)
     TRACE(DL_NET_TRACKING, "%s: Removed %d of %llu cached connections\n", __func__, data.count, total);
 }
 
-static void network_tracking_task(struct work_struct *work)
+void network_tracking_task(struct work_struct *work)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
@@ -484,7 +484,7 @@ int cb_net_track_show_new(struct seq_file *m, void *v)
     return 0;
 }
 
-static void set_net_key(NET_TBL_KEY    *key,
+void set_net_key(NET_TBL_KEY    *key,
                          pid_t           pid,
                          CB_SOCK_ADDR   *localAddr,
                          CB_SOCK_ADDR   *remoteAddr,
@@ -518,7 +518,7 @@ static void set_net_key(NET_TBL_KEY    *key,
 // Track this connection in the local table
 //  If it is a new connection, add an entry and send an event (return value of true)
 //  If it is a tracked connection, update the time and skip sending an event (return value of false)
-static bool track_connection(
+bool track_connection(
     ProcessContext *context,
     pid_t           pid,
     CB_SOCK_ADDR   *localAddr,
@@ -585,7 +585,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-static void net_tracking_print_message(const char *message, NET_TBL_KEY *key)
+void net_tracking_print_message(const char *message, NET_TBL_KEY *key)
 {
     uint16_t  rport                         = 0;
     uint16_t  lport                         = 0;
@@ -610,7 +610,7 @@ static void net_tracking_print_message(const char *message, NET_TBL_KEY *key)
 #  define IPV6_SOCKNAME(sk, a)   (inet6_sk(sk)->a)
 #endif
 
-static bool cb_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
+bool cb_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
 {
     int namelen;
     bool rval = false;
@@ -634,7 +634,7 @@ static bool cb_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct 
 
 // I would prefer to use kernel_getpeername here, but it does not work if the socket state is closed.
 //  (Which seems to happen under load.)
-static void cb_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
+void cb_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
 {
     CANCEL_VOID(sk);
     CANCEL_VOID(remoteAddr);
@@ -661,7 +661,7 @@ static void cb_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msg
 
 }
 
-static void cb_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msghdr *msg)
+void cb_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msghdr *msg)
 {
     struct inet_sock *inet;
 
@@ -687,7 +687,7 @@ static void cb_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msgh
     }
 }
 
-static int checkIsolate(ProcessContext *context, u16 family, int protocol, struct sockaddr *p_sockaddr)
+int checkIsolate(ProcessContext *context, u16 family, int protocol, struct sockaddr *p_sockaddr)
 {
     CB_ISOLATION_INTERCEPT_RESULT isolationResult;
 

@@ -127,7 +127,7 @@ struct inode *get_inode_from_file(struct file *file)
         // The nosec version is needed because SELinux was rejecting our access to some files.
         //  (You would see messages like this in the log.)
         //  SELinux is preventing /usr/bin/dbus-daemon from getattr access on the fifo_file /run/systemd/sessions/1.ref.
-        static int cb_getattr(struct path *path, struct kstat *stat)
+        int cb_getattr(struct path *path, struct kstat *stat)
         {
             int ret = 0;
             bool should_remove_private = false;
@@ -216,7 +216,7 @@ umode_t get_mode_from_file(struct file *file)
     return mode;
 }
 
-static struct super_block *get_sb_from_dentry(struct dentry *dentry)
+struct super_block *get_sb_from_dentry(struct dentry *dentry)
 {
     struct super_block *sb = NULL;
 
@@ -261,7 +261,7 @@ struct super_block *get_sb_from_file(struct file *file)
     return sb;
 }
 
-static bool is_network_filesystem(struct super_block *sb)
+bool is_network_filesystem(struct super_block *sb)
 {
     if (!sb)
     {

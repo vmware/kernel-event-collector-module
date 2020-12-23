@@ -9,7 +9,7 @@
 
 #define IPV6_SCOPE_DELIMITER '%'
 #define IPV6_SCOPE_ID_LEN sizeof("%nnnnnnnnnn")
-static size_t rpc_ntop6_noscopeid(const struct sockaddr *sap,
+size_t rpc_ntop6_noscopeid(const struct sockaddr *sap,
                                   char *buf, const int buflen)
 {
     const struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sap;
@@ -48,7 +48,7 @@ static size_t rpc_ntop6_noscopeid(const struct sockaddr *sap,
 }
 
 
-static size_t rpc_ntop6(const struct sockaddr *sap,
+size_t rpc_ntop6(const struct sockaddr *sap,
                         char *buf, const size_t buflen)
 {
     const struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sap;
@@ -78,7 +78,7 @@ static size_t rpc_ntop6(const struct sockaddr *sap,
     return len;
 }
 
-static int rpc_ntop4(const struct sockaddr *sap,
+int rpc_ntop4(const struct sockaddr *sap,
                      char *buf, const size_t buflen)
 {
     const struct sockaddr_in *sin = (struct sockaddr_in *)sap;

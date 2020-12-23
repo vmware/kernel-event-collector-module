@@ -13,7 +13,7 @@ struct for_each_priv {
     void *priv;
 };
 
-static int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
+int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
 bool process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, ProcessContext *context)
 {
@@ -69,7 +69,7 @@ void process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback
 //       process_tracking_for_each, and is called from inside a spinlock.
 //       Therefore, in the future if modifications are required be aware that any function call that may
 //       sleep should be avoided.
-static int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     ProcessTracking *procp      = NULL;
     struct for_each_priv *local_priv = NULL;

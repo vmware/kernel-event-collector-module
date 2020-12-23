@@ -5,7 +5,7 @@
 #include "priv.h"
 #include "linux/cred.h"
 
-static inline bool is_root_uid(void)
+inline bool is_root_uid(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
 #include "linux/uidgid.h"

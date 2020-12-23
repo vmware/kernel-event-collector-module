@@ -29,12 +29,12 @@
 #endif
 
 #define NUM_HOOKS     2
-static struct nf_hook_ops nfho_local_out[NUM_HOOKS];
+struct nf_hook_ops nfho_local_out[NUM_HOOKS];
 
-static int find_char_offset(const struct sk_buff *skb, int offset, char target);
-static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb);
+int find_char_offset(const struct sk_buff *skb, int offset, char target);
+int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb);
 
-static unsigned int hook_func_local_out(
+unsigned int hook_func_local_out(
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     unsigned int hooknum,
 #else
@@ -116,7 +116,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
+int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
 {
     char tmp[10];
     char url[PROXY_SERVER_MAX_LEN + 1];
@@ -234,7 +234,7 @@ CATCH_DEFAULT:
     return 0;
 }
 
-static int find_char_offset(const struct sk_buff *skb, int offset, char target)
+int find_char_offset(const struct sk_buff *skb, int offset, char target)
 {
     char *ptr;
     char *frag_addr;
@@ -302,7 +302,7 @@ void netfilter_cleanup(ProcessContext *context, uint64_t enableHooks)
 }
 
 #ifdef HOOK_SELECTOR
-static void setNetfilter(const char *buf, const char *name, uint32_t call, void *cb_hook, int cb_hook_nr)
+void setNetfilter(const char *buf, const char *name, uint32_t call, void *cb_hook, int cb_hook_nr)
 {
     if (0 == strncmp("1", buf, sizeof(char)))
     {
@@ -321,7 +321,7 @@ static void setNetfilter(const char *buf, const char *name, uint32_t call, void 
     }
 }
 
-static int getNetfilter(uint32_t call, struct seq_file *m)
+int getNetfilter(uint32_t call, struct seq_file *m)
 {
     seq_printf(m, (g_enableHooks & call ? "1\n" : "0\n"));
     return 0;

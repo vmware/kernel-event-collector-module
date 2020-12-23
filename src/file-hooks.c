@@ -16,7 +16,7 @@
 
 static FILE_PROCESS_KEY g_log_messages_file_id = {0, 0};
 
-static bool file_exists(const char __user *filename);
+bool file_exists(const char __user *filename);
 
 #define N_ELEM(x) (sizeof(x) / sizeof(*x))
 
@@ -46,9 +46,9 @@ typedef struct file_data_t_ {
     char            *generic_path_buffer; // on the GENERIC cache
 } file_data_t;
 
-static file_data_t *get_file_data_from_name(ProcessContext *context, const char __user *filename);
-static file_data_t *get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
-static void put_file_data(ProcessContext *context, file_data_t *file_data);
+file_data_t *get_file_data_from_name(ProcessContext *context, const char __user *filename);
+file_data_t *get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
+void put_file_data(ProcessContext *context, file_data_t *file_data);
 
 #define ENABLE_SPECIAL_FILE_SETUP(x)   {x, sizeof(x)-1, 1}
 #define DISABLE_SPECIAL_FILE_SETUP(x)  {x, sizeof(x)-1, 0}
@@ -135,7 +135,7 @@ int is_special_file(char *pathname, int len)
     return 0;
 }
 
-static void check_for_log_messages(uint64_t device, uint64_t inode, char *pathname, bool forcecheck)
+void check_for_log_messages(uint64_t device, uint64_t inode, char *pathname, bool forcecheck)
 {
     // If we don't know what the messages inode is then figure it out
     if (g_log_messages_file_id.inode == 0 || forcecheck)
@@ -193,7 +193,7 @@ char *event_type_to_str(CB_EVENT_TYPE event_type)
 //
 
 // Allocates a file_data_t and sets file_data->file_s to a kernelspace filename string
-static file_data_t *file_data_alloc(ProcessContext *context, const char __user *filename)
+file_data_t *file_data_alloc(ProcessContext *context, const char __user *filename)
 {
     file_data_t *file_data           = NULL;
 
@@ -215,7 +215,7 @@ CATCH_DEFAULT:
 }
 
 // Initializes file_data members from a file struct
-static void file_data_init(ProcessContext *context, file_data_t *file_data, struct file *file)
+void file_data_init(ProcessContext *context, file_data_t *file_data, struct file *file)
 {
     char *pathname            = NULL;
     char *generic_path_buffer = NULL;
@@ -247,7 +247,7 @@ static void file_data_init(ProcessContext *context, file_data_t *file_data, stru
     get_devinfo_from_file(file, &file_data->device, &file_data->inode);
 }
 
-static file_data_t *get_file_data_from_name(ProcessContext *context, const char __user *filename)
+file_data_t *get_file_data_from_name(ProcessContext *context, const char __user *filename)
 {
     struct file *file      = NULL;
     file_data_t *file_data = file_data_alloc(context, filename);
@@ -270,7 +270,7 @@ CATCH_DEFAULT:
     return NULL;
 }
 
-static file_data_t *get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd)
+file_data_t *get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd)
 {
     struct file *file      = NULL;
     file_data_t *file_data = file_data_alloc(context, filename);
@@ -294,7 +294,7 @@ CATCH_DEFAULT:
 //
 // **NOTE: put_file_data is not protected by active call hook disable tracking.
 //
-static void put_file_data(ProcessContext *context, file_data_t *file_data)
+void put_file_data(ProcessContext *context, file_data_t *file_data)
 {
     CANCEL_VOID(file_data);
 
@@ -309,7 +309,7 @@ static void put_file_data(ProcessContext *context, file_data_t *file_data)
     cb_mem_cache_free_generic(file_data);
 }
 
-static void do_generic_file_event(ProcessContext *context,
+void do_generic_file_event(ProcessContext *context,
                                    file_data_t *file_data,
                                    CB_EVENT_TYPE   eventType)
 {
@@ -855,7 +855,7 @@ CATCH_DEFAULT:
     return ret;
 }
 
-static bool file_exists(const char __user *filename)
+bool file_exists(const char __user *filename)
 {
     bool         exists     = false;
     struct path path;

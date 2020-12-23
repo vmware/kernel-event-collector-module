@@ -59,21 +59,21 @@ atomic64_t       module_used      = ATOMIC64_INIT(0);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
-static bool module_state_info_initialize(ProcessContext *context);
+bool module_state_info_initialize(ProcessContext *context);
 
-static void module_state_info_shutdown(ProcessContext *context);
+void module_state_info_shutdown(ProcessContext *context);
 
-static int _cb_sensor_enable_module_initialize_memory(ProcessContext *context);
+int _cb_sensor_enable_module_initialize_memory(ProcessContext *context);
 
-static void _cb_sensor_disable_module_shutdown(ProcessContext *context);
+void _cb_sensor_disable_module_shutdown(ProcessContext *context);
 
-static void set_module_state(ProcessContext *context, ModuleState newState);
+void set_module_state(ProcessContext *context, ModuleState newState);
 
-static bool disable_peer_modules(ProcessContext *context);
+bool disable_peer_modules(ProcessContext *context);
 
-static bool cb_proc_initialize(ProcessContext *context);
+bool cb_proc_initialize(ProcessContext *context);
 
-static void cb_proc_shutdown(ProcessContext *context);
+void cb_proc_shutdown(ProcessContext *context);
 
 struct proc_dir_entry *g_cb_proc_dir;
 
@@ -129,7 +129,7 @@ int cb_proc_state(struct seq_file *m, void *v)
     return 0;
 }
 
-static int cb_proc_state_open(struct inode *inode, struct file *file)
+int cb_proc_state_open(struct inode *inode, struct file *file)
 {
     return single_open(file, cb_proc_state, PDE_DATA(inode));
 }
@@ -144,7 +144,7 @@ static const struct file_operations cb_fops = {
 
 const char *PROC_STATE_FILENAME = CB_APP_MODULE_NAME "_state";
 
-static int __init cbsensor_init(void)
+int __init cbsensor_init(void)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
     // Here we look up symbols at runtime to fill in the CB_RESOLVED_SYMS struct.
@@ -259,7 +259,7 @@ void cbsensor_shutdown(ProcessContext *context)
     netfilter_cleanup(context, g_enableHooks);
 }
 
-static void __exit cbsensor_cleanup(void)
+void __exit cbsensor_cleanup(void)
 {
     uint64_t l_module_used;
 
@@ -403,7 +403,7 @@ ModuleState get_module_state(ProcessContext *context)
     return _state;
 }
 
-static void set_module_state(ProcessContext *context, ModuleState newState)
+void set_module_state(ProcessContext *context, ModuleState newState)
 {
     cb_write_lock(&g_module_state_info.module_state_lock, context);
     g_module_state_info.module_state = newState;
@@ -483,7 +483,7 @@ int cbsensor_enable_module(ProcessContext *context)
 }
 
 
-static int _cb_sensor_enable_module_initialize_memory(ProcessContext *context)
+int _cb_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
     TRY_STEP(DEFAULT,   disable_peer_modules(context));
     TRY_STEP(DEFAULT,   path_buffers_init(context));
@@ -525,7 +525,7 @@ CATCH_DEFAULT:
     return -ENOMEM;
 }
 
-static void _cb_sensor_disable_module_shutdown(ProcessContext *context)
+void _cb_sensor_disable_module_shutdown(ProcessContext *context)
 {
     /**
      * Shutdown the different subsystems, note order is important here.
@@ -544,7 +544,7 @@ static void _cb_sensor_disable_module_shutdown(ProcessContext *context)
     cb_proc_shutdown(context);
 }
 
-static bool disable_peer_modules(ProcessContext *context)
+bool disable_peer_modules(ProcessContext *context)
 {
     struct list_head peer_modules = LIST_HEAD_INIT(peer_modules);
     struct PEER_MODULE *elem = NULL;
@@ -582,7 +582,7 @@ Exit:
     return result;
 }
 
-static bool module_state_info_initialize(ProcessContext *context)
+bool module_state_info_initialize(ProcessContext *context)
 {
     cb_spinlock_init(&g_module_state_info.module_state_lock, context);
 
@@ -593,13 +593,13 @@ static bool module_state_info_initialize(ProcessContext *context)
     return true;
 }
 
-static void module_state_info_shutdown(ProcessContext *context)
+void module_state_info_shutdown(ProcessContext *context)
 {
     remove_proc_entry(PROC_STATE_FILENAME, NULL);
     cb_spinlock_destroy(&g_module_state_info.module_state_lock, context);
 }
 
-static bool cb_proc_initialize(ProcessContext *context)
+bool cb_proc_initialize(ProcessContext *context)
 {
     g_cb_proc_dir = proc_mkdir(CB_APP_PROC_DIR, NULL);
     TRY(g_cb_proc_dir);
@@ -610,7 +610,7 @@ CATCH_DEFAULT:
     return false;
 }
 
-static void cb_proc_shutdown(ProcessContext *context)
+void cb_proc_shutdown(ProcessContext *context)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     proc_remove(g_cb_proc_dir);

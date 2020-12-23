@@ -118,7 +118,7 @@ void lsm_shutdown(ProcessContext *context)
 }
 
 #ifdef HOOK_SELECTOR
-static void setHook(const char *buf, const char *name, uint32_t call, void **addr, void *cb_hook, void *kern_hook)
+void setHook(const char *buf, const char *name, uint32_t call, void **addr, void *cb_hook, void *kern_hook)
 {
     if (0 == strncmp("1", buf, sizeof(char)))
     {
@@ -137,7 +137,7 @@ static void setHook(const char *buf, const char *name, uint32_t call, void **add
     }
 }
 
-static int getHook(uint32_t hook, struct seq_file *m)
+int getHook(uint32_t hook, struct seq_file *m)
 {
     seq_printf(m, (g_enableHooks & hook ? "1\n" : "0\n"));
     return 0;

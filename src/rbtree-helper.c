@@ -6,17 +6,17 @@
 #include "cb-spinlock.h"
 #include "priv.h"
 
-static struct rb_node *_get_left_most_node(struct rb_node *node);
+struct rb_node *_get_left_most_node(struct rb_node *node);
 
-static bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context);
-static bool __is_valid_tree(CB_RBTREE *tree);
-static void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context);
+bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context);
+bool __is_valid_tree(CB_RBTREE *tree);
+void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context);
 
 #define get_data_ptr(tree, ptr)  ((void *)((ptr) - (tree)->node_offset))
 #define get_node_ptr(tree, ptr)  ((struct rb_node *)((ptr) + (tree)->node_offset))
 #define get_key_ptr(tree, ptr)   ((void *)((ptr) + (tree)->key_offset))
 
-static bool __is_valid_tree(CB_RBTREE *tree)
+bool __is_valid_tree(CB_RBTREE *tree)
 {
     return (tree && tree->valid);
 }
@@ -61,7 +61,7 @@ void cb_rbtree_destroy(CB_RBTREE *tree, ProcessContext *context)
     }
 }
 
-static void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key);
+void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key);
 
 void *cb_rbtree_search(CB_RBTREE *tree, void *key, ProcessContext *context)
 {
@@ -78,7 +78,7 @@ void *cb_rbtree_search(CB_RBTREE *tree, void *key, ProcessContext *context)
     return data;
 }
 
-static void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key)
+void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key)
 {
     void *return_data = NULL;
     struct rb_node *node = NULL;
@@ -213,7 +213,7 @@ bool cb_rbtree_delete(CB_RBTREE *tree, void *data, ProcessContext *context)
     return didDelete;
 }
 
-static bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context)
+bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context)
 {
     bool didDelete = false;
 
@@ -253,7 +253,7 @@ void cb_rbtree_write_for_each(CB_RBTREE *tree, cb_for_rbtree_node callback, void
     }
 }
 
-static void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context)
+void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context)
 {
     struct rb_node *node;
 
@@ -263,7 +263,7 @@ static void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callbac
     }
 }
 
-static void __rotate_child(struct rb_node *node)
+void __rotate_child(struct rb_node *node)
 {
     node->rb_left  = node->rb_right;
     node->rb_right = NULL;
@@ -320,7 +320,7 @@ void cb_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
     }
 }
 
-static struct rb_node *_get_left_most_node(struct rb_node *node)
+struct rb_node *_get_left_most_node(struct rb_node *node)
 {
     if (node)
     {

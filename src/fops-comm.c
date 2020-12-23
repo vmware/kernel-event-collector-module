@@ -33,24 +33,24 @@ const char DRIVER_NAME[] = CB_APP_MODULE_NAME;
 #define MINOR_COUNT 1
 ssize_t KF_LEN = sizeof(struct CB_EVENT_UM); // This needs to be sizeof(whatever we store in queue)
 
-static int device_open(struct inode *inode, struct file *filep);
-static int device_release(struct inode *inode, struct file *filep);
-static ssize_t device_read(struct file *f, char __user *buf, size_t count, loff_t *offset);
-static unsigned int device_poll(struct file *filep, struct poll_table_struct *poll);
-static long device_unlocked_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
-static int DoAction(ProcessContext *context, uint32_t action);
-static void user_comm_clear_queues(ProcessContext *context);
-static void user_comm_clear_queues_locked(ProcessContext *context);
-static bool try_to_gain_capacity(struct list_head *tx_queue);
-static void get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready);
-static void decrease_holdoff_counter(atomic64_t *tx_ready);
-static bool is_action_allowed(ModuleState moduleState, CB_EVENT_ACTION_TYPE action);
-static bool is_ioctl_allowed(ModuleState module_state, unsigned int cmd);
-static size_t get_memory_usage(ProcessContext *context);
-static void apply_legacy_driver_config(uint32_t eventFilter);
-static void apply_driver_config(CB_DRIVER_CONFIG *config);
-static char *driver_config_option_to_string(CB_CONFIG_OPTION config_option);
-static void print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
+int device_open(struct inode *inode, struct file *filep);
+int device_release(struct inode *inode, struct file *filep);
+ssize_t device_read(struct file *f, char __user *buf, size_t count, loff_t *offset);
+unsigned int device_poll(struct file *filep, struct poll_table_struct *poll);
+long device_unlocked_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
+int DoAction(ProcessContext *context, uint32_t action);
+void user_comm_clear_queues(ProcessContext *context);
+void user_comm_clear_queues_locked(ProcessContext *context);
+bool try_to_gain_capacity(struct list_head *tx_queue);
+void get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready);
+void decrease_holdoff_counter(atomic64_t *tx_ready);
+bool is_action_allowed(ModuleState moduleState, CB_EVENT_ACTION_TYPE action);
+bool is_ioctl_allowed(ModuleState module_state, unsigned int cmd);
+size_t get_memory_usage(ProcessContext *context);
+void apply_legacy_driver_config(uint32_t eventFilter);
+void apply_driver_config(CB_DRIVER_CONFIG *config);
+char *driver_config_option_to_string(CB_CONFIG_OPTION config_option);
+void print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
 
 // checkpatch-ignore: CONST_STRUCT
 struct file_operations driver_fops = {
@@ -185,7 +185,7 @@ DECLARE_WAIT_QUEUE_HEAD(wq);
 
 #define STAT_INTERVAL    15
 static struct delayed_work stats_work;
-static void stats_work_task(struct work_struct *work);
+void stats_work_task(struct work_struct *work);
 static uint32_t g_stats_work_delay;
 
 void reader_init(void)
@@ -295,14 +295,14 @@ void user_comm_shutdown(ProcessContext *context)
     cb_spinlock_destroy(&dev_spinlock, context);
 }
 
-static void user_comm_clear_queues(ProcessContext *context)
+void user_comm_clear_queues(ProcessContext *context)
 {
     cb_write_lock(&dev_spinlock, context);
     user_comm_clear_queues_locked(context);
     cb_write_unlock(&dev_spinlock, context);
 }
 
-static void clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, ProcessContext *context)
+void clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, ProcessContext *context)
 {
     struct list_head *eventNode;
     struct list_head *safeNode;
@@ -315,7 +315,7 @@ static void clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, Pro
     }
 }
 
-static void user_comm_clear_queues_locked(ProcessContext *context)
+void user_comm_clear_queues_locked(ProcessContext *context)
 {
     TRACE(DL_INFO, "%s: clear queues", __func__);
 
@@ -409,7 +409,7 @@ void fops_comm_wake_up_reader(ProcessContext *context)
     }
 }
 
-static bool try_to_gain_capacity(struct list_head *tx_queue)
+bool try_to_gain_capacity(struct list_head *tx_queue)
 {
     bool              tx_queue_is_pri1 = tx_queue == &msg_queue_pri1;
     uint64_t          qlen_pri0        = atomic64_read(&tx_ready_pri0);
@@ -638,7 +638,7 @@ CATCH_DEFAULT:
 }
 
 // Note, this is expected to be called with the lock held
-static void get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready)
+void get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready)
 {
     uint64_t          qlen_pri0    = atomic64_read(&tx_ready_pri0);
     uint64_t          qlen_pri1    = atomic64_read(&tx_ready_pri1);
@@ -660,7 +660,7 @@ static void get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_r
     decrease_holdoff_counter(*tx_ready);
 }
 
-static void decrease_holdoff_counter(atomic64_t *tx_ready)
+void decrease_holdoff_counter(atomic64_t *tx_ready)
 {
     uint64_t pri1_holdoff = atomic64_read(&tx_ready_pri1_holdoff);
 
@@ -682,7 +682,7 @@ static void decrease_holdoff_counter(atomic64_t *tx_ready)
     }
 }
 
-static int device_open(struct inode *inode, struct file *filp)
+int device_open(struct inode *inode, struct file *filp)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
 
@@ -708,7 +708,7 @@ static int device_open(struct inode *inode, struct file *filp)
     return nonseekable_open(inode, filp);
 }
 
-static int device_release(struct inode *inode, struct file *filp)
+int device_release(struct inode *inode, struct file *filp)
 {
     TRACE(DL_INFO, "%s: releasing device from pid[%d]; reader_pid[%d]", __func__, getpid(current), atomic_read(&reader_pid));
 
@@ -720,7 +720,7 @@ static int device_release(struct inode *inode, struct file *filp)
     return 0;
 }
 
-static unsigned int device_poll(struct file *filp, struct poll_table_struct *pts)
+unsigned int device_poll(struct file *filp, struct poll_table_struct *pts)
 {
     uint64_t qlen;
 
@@ -755,7 +755,7 @@ data_avail:
 }
 
 
-static long device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned long arg)
+long device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned long arg)
 {
     unsigned int cmd  = _IOC_NR(cmd_in);
     size_t       size = _IOC_SIZE(cmd_in);
@@ -1007,7 +1007,7 @@ static long device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsig
 }
 
 
-static bool is_ioctl_allowed(ModuleState module_state, unsigned int cmd)
+bool is_ioctl_allowed(ModuleState module_state, unsigned int cmd)
 {
     return (module_state == ModuleStateEnabled || cmd == CB_DRIVER_REQUEST_ACTION);
 }
@@ -1016,14 +1016,14 @@ static bool is_ioctl_allowed(ModuleState module_state, unsigned int cmd)
  * Check if module is not enabled, the only allowed action is one that changes states,
  * fail any other actions.
  */
-static bool is_action_allowed(ModuleState moduleState, CB_EVENT_ACTION_TYPE action)
+bool is_action_allowed(ModuleState moduleState, CB_EVENT_ACTION_TYPE action)
 {
     return ((moduleState == ModuleStateEnabled) ||
             (action == CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR ||
              action == CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR));
 }
 
-static int DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
+int DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
 {
     int result = 0;
 
@@ -1053,7 +1053,7 @@ static int DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
     return result;
 }
 
-static void apply_legacy_driver_config(uint32_t eventFilter)
+void apply_legacy_driver_config(uint32_t eventFilter)
 {
     g_driver_config.processes = (eventFilter & CB_EVENT_FILTER_PROCESSES ? ALL_FORKS_AND_EXITS : DISABLE);
     g_driver_config.module_loads = (eventFilter & CB_EVENT_FILTER_MODULE_LOADS ? ENABLE : DISABLE);
@@ -1064,7 +1064,7 @@ static void apply_legacy_driver_config(uint32_t eventFilter)
     print_driver_config("New Module Config", &g_driver_config);
 }
 
-static void apply_driver_config(CB_DRIVER_CONFIG *config)
+void apply_driver_config(CB_DRIVER_CONFIG *config)
 {
     if (config)
     {
@@ -1080,7 +1080,7 @@ static void apply_driver_config(CB_DRIVER_CONFIG *config)
 
 #define STR(A) #A
 
-static char *driver_config_option_to_string(CB_CONFIG_OPTION config_option)
+char *driver_config_option_to_string(CB_CONFIG_OPTION config_option)
 {
     char *str =  "<unknown>";
 
@@ -1097,7 +1097,7 @@ static char *driver_config_option_to_string(CB_CONFIG_OPTION config_option)
     return str;
 }
 
-static void print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
+void print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
 {
     if (config)
     {
@@ -1111,7 +1111,7 @@ static void print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
     }
 }
 
-static void stats_work_task(struct work_struct *work)
+void stats_work_task(struct work_struct *work)
 {
     uint32_t         curr   = atomic_read(&cb_event_stats.curr);
     uint32_t         next   = (curr + 1) % MAX_INTERVALS;
@@ -1340,7 +1340,7 @@ int cb_proc_current_memory_det(struct seq_file *m, void *v)
     return 0;
 }
 
-static size_t get_memory_usage(ProcessContext *context)
+size_t get_memory_usage(ProcessContext *context)
 {
     return cb_mem_cache_get_memory_usage(context) +
            hashtbl_get_memory(context);

@@ -6,7 +6,7 @@
 #include "cb-test.h"
 #include "task-helper.h"
 
-static void _show_process_tracking_table(void *data, void *priv, ProcessContext *context);
+void _show_process_tracking_table(void *data, void *priv, ProcessContext *context);
 
 int cb_proc_track_show_table(struct seq_file *m, void *v)
 {
@@ -39,7 +39,7 @@ const char *process_tracking_get_proc_name(const char *path)
     return proc_name;
 }
 
-static void _show_process_tracking_table(void *data, void *priv, ProcessContext *context)
+void _show_process_tracking_table(void *data, void *priv, ProcessContext *context)
 {
     struct seq_file    *seq_file     = (struct seq_file *)priv;
     ProcessTracking    *procp        = sorted_tracking_table_get_process(data, context);

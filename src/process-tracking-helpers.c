@@ -158,7 +158,7 @@ void process_tracking_store_exit_event(ProcessTracking *procp, PCB_EVENT event, 
     logger_free_event(prev_event, context);
 }
 
-static int __hashtbl_search_callback(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
+int __hashtbl_search_callback(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
 
 void is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context)
 {
@@ -177,7 +177,7 @@ bool process_tracking_has_active_process(ProcessTracking *procp)
 //       Therefore, in the future if modifications are required be aware that any function call that may
 //       sleep should be avoided.
 //       We also allocate an array of pointers and it is the responsibility of the caller to free them when done.
-static int __hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     ProcessTracking *procp = NULL;
     RUNNING_BANNED_INODE_S *psRunningInodesToBan = NULL;

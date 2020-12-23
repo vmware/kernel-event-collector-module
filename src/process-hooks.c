@@ -18,12 +18,12 @@
 #include "cb-spinlock.h"
 #include "task-helper.h"
 
-static void cb_exit_hook(struct task_struct *task, ProcessContext *context);
+void cb_exit_hook(struct task_struct *task, ProcessContext *context);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    static void sched_process_fork_probe(void *data, struct task_struct *parent, struct task_struct *child);
+    void sched_process_fork_probe(void *data, struct task_struct *parent, struct task_struct *child);
 #else
-    static void sched_process_fork_probe(struct task_struct *parent, struct task_struct *child);
+    void sched_process_fork_probe(struct task_struct *parent, struct task_struct *child);
 #endif
 
 bool task_initialize(ProcessContext *context)
@@ -91,7 +91,7 @@ CATCH_DEFAULT:
     }
 #endif /* KERNEL_VERSION CHECK */
 
-static void cb_exit_hook(struct task_struct *task, ProcessContext *context)
+void cb_exit_hook(struct task_struct *task, ProcessContext *context)
 {
     pid_t pid = getpid(task);
 
