@@ -25,6 +25,7 @@
 #include <linux/mman.h>
 #include <linux/connector.h>
 #include <linux/version.h>
+#include <linux/llist.h>
 
 #include "process-context.h"
 #include "dbg.h"
@@ -395,6 +396,7 @@ typedef struct _CB_RESOLVED_SYMS {
 // Create a node to hold the event
 typedef struct _CB_EVENT_NODE {
     struct list_head   listEntry;
+    struct llist_node  llistEntry;
     struct CB_EVENT    data;
     uint16_t           payload; // precomputed size of event data to be sent to userspace
     void              *process_data;

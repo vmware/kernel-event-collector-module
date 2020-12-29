@@ -40,7 +40,6 @@ unsigned int ec_device_poll(struct file *filep, struct poll_table_struct *poll);
 long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 int __ec_DoAction(ProcessContext *context, uint32_t action);
 void ec_user_comm_clear_queues(ProcessContext *context);
-void __ec_user_comm_clear_queues_locked(ProcessContext *context);
 bool __ec_try_to_gain_capacity(struct list_head *tx_queue);
 void __ec_get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready);
 void __ec_decrease_holdoff_counter(atomic64_t *tx_ready);
@@ -51,6 +50,7 @@ void __ec_apply_legacy_driver_config(uint32_t eventFilter);
 void __ec_apply_driver_config(CB_DRIVER_CONFIG *config);
 char *__ec_driver_config_option_to_string(CB_CONFIG_OPTION config_option);
 void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
+void __ec_transfer_from_input_queue(struct list_head *tx_queue, struct llist_head *_tx_queue_in);
 int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *context);
 int __ec_precompute_payload(struct CB_EVENT *cb_event);
 void __ec_stats_work_task(struct work_struct *work);
@@ -69,6 +69,10 @@ struct file_operations driver_fops = {
 static LIST_HEAD(msg_queue_pri0);
 static LIST_HEAD(msg_queue_pri1);
 static LIST_HEAD(msg_queue_pri2);
+
+static LLIST_HEAD(msg_queue_pri0_in);
+static LLIST_HEAD(msg_queue_pri1_in);
+static LLIST_HEAD(msg_queue_pri2_in);
 
 static const uint64_t MAX_VALID_INTERVALS =   60;
 #define  MAX_INTERVALS           62
@@ -222,8 +226,6 @@ bool ec_user_comm_initialize(ProcessContext *context)
 {
     size_t kernel_mem;
 
-    ec_spinlock_init(&s_fops_data.lock, context);
-
     current_stat = 0;
     valid_stats  = 0;
     atomic64_set(&tx_ready_pri0,         0);
@@ -316,10 +318,12 @@ void ec_user_comm_clear_queues(ProcessContext *context)
     ec_write_unlock(&s_fops_data.lock, context);
 }
 
-void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, ProcessContext *context)
+void __ec_clear_tx_queue(struct list_head *tx_queue, struct llist_head *tx_queue_in, atomic64_t *tx_ready, ProcessContext *context)
 {
     struct list_head *eventNode;
     struct list_head *safeNode;
+
+    __ec_transfer_from_input_queue(tx_queue, tx_queue_in);
 
     list_for_each_safe(eventNode, safeNode, tx_queue)
     {
@@ -329,28 +333,28 @@ void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, Proce
     }
 }
 
-void __ec_user_comm_clear_queues_locked(ProcessContext *context)
+void ec_user_comm_clear_queues(ProcessContext *context)
 {
     TRACE(DL_INFO, "%s: clear queues", __func__);
 
     // Clearing the queues can trigger sending an exit event which will hang when ec_send_event
     // locks this same lock. Since we're clearing the queues we don't need to send exit events.
     DISABLE_SEND_EVENTS(context);
-     __ec_clear_tx_queue(&msg_queue_pri0, &tx_ready_pri0, context);
-     __ec_clear_tx_queue(&msg_queue_pri1, &tx_ready_pri1, context);
-     __ec_clear_tx_queue(&msg_queue_pri2, &tx_ready_pri2, context);
+    __ec_clear_tx_queue(&msg_queue_pri0, &msg_queue_pri0_in, &tx_ready_pri0, context);
+    __ec_clear_tx_queue(&msg_queue_pri1, &msg_queue_pri1_in, &tx_ready_pri1, context);
+    __ec_clear_tx_queue(&msg_queue_pri2, &msg_queue_pri2_in, &tx_ready_pri2, context);
     ENABLE_SEND_EVENTS(context);
 }
 
 int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 {
-    int               result     = -1;
-    uint64_t          readyCount = 0;
-    struct list_head *tx_queue   = NULL;
-    atomic64_t       *tx_ready   = NULL;
-    uint64_t          max_queue_size = 0;
-    int               payload;
-    CB_EVENT_NODE    *eventNode;
+    int                result     = -1;
+    uint64_t           readyCount = 0;
+    struct llist_head *tx_queue   = NULL;
+    atomic64_t        *tx_ready   = NULL;
+    uint64_t           max_queue_size = 0;
+    int                payload;
+    CB_EVENT_NODE      *eventNode;
 
     TRY(ALLOW_SEND_EVENTS(context));
 
@@ -372,33 +376,31 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
     case CB_EVENT_TYPE_PROCESS_NOT_BLOCKED:
-        tx_queue       = &msg_queue_pri0;
+        tx_queue       = &msg_queue_pri0_in;
         tx_ready       = &tx_ready_pri0;
         max_queue_size = g_max_queue_size_pri0;
         break;
     case CB_EVENT_TYPE_MODULE_LOAD:
-        tx_queue       = &msg_queue_pri2;
+        tx_queue       = &msg_queue_pri2_in;
         tx_ready       = &tx_ready_pri2;
         max_queue_size = g_max_queue_size_pri2;
         break;
     default:
-        tx_queue       = &msg_queue_pri1;
+        tx_queue       = &msg_queue_pri1_in;
         tx_ready       = &tx_ready_pri1;
         max_queue_size = g_max_queue_size_pri1;
         break;
     }
 
-    ec_write_lock(&s_fops_data.lock, context);
     readyCount = atomic64_read(tx_ready);
     if ((readyCount < max_queue_size ||
          __ec_try_to_gain_capacity(tx_queue)))
     {
-        list_add_tail(&(eventNode->listEntry), tx_queue);
+        llist_add(&(eventNode->llistEntry), tx_queue);
         atomic64_inc(tx_ready);
         TRACE(DL_VERBOSE, "send_event_atomic %p %llu", msg, readyCount);
         msg = NULL;
     }
-    ec_write_unlock(&s_fops_data.lock, context);
 
     // This should be NULL by now.
     TRY(!msg);
@@ -406,8 +408,6 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     // If we did enqueue the event, wake up the reader task if we are allowed to
     if (ALLOW_WAKE_UP(context))
     {
-        // NOTE: This call must happen outside the lock or it may cause a
-        //       deadlock woking up the task
         ec_fops_comm_wake_up_reader(context);
     }
     result = 0;
@@ -548,7 +548,6 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
                 DL_COMMS,
                 "%s: empty queue", __func__);
 
-    ec_write_lock(&s_fops_data.lock, context);
     // select the queue - taken from __ec_get_tx_queue_to_serve
     if (qlen_pri0 != 0)
     {
@@ -784,11 +783,37 @@ CATCH_DEFAULT:
     return xcode;
 }
 
+void __ec_transfer_from_input_queue(struct list_head *tx_queue, struct llist_head *_tx_queue_in)
+{
+    LIST_HEAD(tempList);
+    struct llist_node *l_node = NULL;
+
+    // Move the input queue into a temporary list (no lock required)
+    struct llist_head tx_queue_in = { llist_del_all(_tx_queue_in) };
+
+    // Move the contents of the input queue into a temporary list
+    //  This reverses the order because the input queue is implemented as a stack
+    while ((l_node = llist_del_first(&tx_queue_in)) != NULL)
+    {
+        CB_EVENT_NODE *node = container_of(l_node, CB_EVENT_NODE, llistEntry);
+
+        list_add(&node->listEntry, &tempList);
+    }
+
+    // Splice the list onto the end of the real tx_queue
+    list_splice_tail(&tempList, tx_queue);
+}
+
 // Note, this is expected to be called with the lock held
 void __ec_get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready)
 {
     uint64_t          qlen_pri0    = atomic64_read(&tx_ready_pri0);
     uint64_t          qlen_pri1    = atomic64_read(&tx_ready_pri1);
+
+    // TODO: Figure out queue max
+    __ec_transfer_from_input_queue(&msg_queue_pri0, &msg_queue_pri0_in);
+    __ec_transfer_from_input_queue(&msg_queue_pri1, &msg_queue_pri1_in);
+    __ec_transfer_from_input_queue(&msg_queue_pri2, &msg_queue_pri2_in);
 
     if (qlen_pri0 != 0)
     {
