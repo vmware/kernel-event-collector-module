@@ -351,10 +351,9 @@ void ec_event_send_net(
 }
 
 void ec_event_send_dns(
-    CB_EVENT_TYPE   net_event_type,
-    char           *data,
-    uint32_t        len,
-    ProcessContext *context)
+    CB_EVENT_TYPE          net_event_type,
+    CB_EVENT_DNS_RESPONSE *response,
+    ProcessContext        *context)
 {
     PCB_EVENT event = ec_factory_alloc_event(
         NULL,           // The procInfo is ignored for this event type
@@ -365,16 +364,13 @@ void ec_event_send_dns(
         context);
 
     CANCEL_VOID(event);
+    CANCEL_VOID(response);
 
     // Populate the event
-    len = min_t(uint32_t, len, sizeof(event->dnsResponse.data));
+    memcpy(&event->dnsResponse, response, sizeof(CB_EVENT_DNS_RESPONSE));
 
-    event->dnsResponse.length = len;
-    event->dnsResponse.data = ec_mem_cache_alloc_generic(len, context);
-    memcpy(event->dnsResponse.data, data, len);
-
-    TRACE(DL_NET, "UDP-DNS response len:%d id:%X flags:%X",
-          len, event->dnsResponse.dnsheader->id, event->dnsResponse.dnsheader->flags);
+    // Clear this from the input because it is now owned by the event.
+    response->records = NULL;
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);

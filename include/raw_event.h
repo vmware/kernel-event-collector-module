@@ -277,13 +277,46 @@ struct dnshdr {
   u_int16_t addi_rrs;
 };
 
-typedef struct _CB_EVENT_DNS_RESPONSE {
+#define DNS_MAX_NAME 256
+
+// Basically http://subversion.assembla.com/svn/132531/indv/push_dns/trunk/poller/src/
+// Status returned in a CB_DNS_RECORD
+enum QTYPE
+{
+    QT_A     = 1,
+    QT_NS    = 2,
+    QT_CNAME = 5,
+    QT_SOA   = 6,
+    QT_PTR   = 0xC,
+    QT_MX    = 0xf,
+    QT_TXT   = 0x10,
+    QT_AAAA  = 0x1c
+};
+
+// DNS Resource Record
+typedef struct _CB_DNS_RECORD
+{
+    char     name[DNS_MAX_NAME];
+    uint16_t dnstype;
+    uint16_t dnsclass;
+    uint32_t ttl;
     union {
-        char *data;
-        struct dnshdr *dnsheader;
+        CB_SOCK_ADDR  A;
+        CB_SOCK_ADDR  AAAA;
+        char          CNAME[DNS_MAX_NAME];
     };
-    uint32_t length;
-} CB_EVENT_DNS_RESPONSE, *PCB_EVENT_DNS_RESPONSE;
+} CB_DNS_RECORD;
+
+typedef struct _CB_EVENT_DNS_RESPONSE {
+    CB_DNS_RECORD *records;
+    uint16_t       xid;
+    uint32_t       status;
+    char           qname[DNS_MAX_NAME];
+    uint16_t       qtype;
+    uint16_t       record_count;
+    uint16_t       nscount;
+    uint16_t       arcount;
+} CB_EVENT_DNS_RESPONSE;
 
 enum ProcessBlockType {
     BlockDuringProcessStartup, ///< We killed (or tried to kill) the process when

@@ -1137,61 +1137,6 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-// This hook only looks for DNS response packets.  If one is found, a message is sent to
-//  user space for processing.  NOTE: Process ID and such will be added to the event but
-//  it is not used by the daemon.  This is only used for internal caching.
-//  We have to do this here because the UDP header is not easily available in later hooks.
-int ec_on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
-{
-    int            xcode;
-    struct udphdr  udphdr;
-    struct udphdr *udp;
-    char *data = NULL;
-
-    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    // Only handle IPv4 UDP packets
-    TRY(CHECK_SK_FAMILY_INET(sk) && CHECK_SK_PROTO_UDP(sk));
-
-    // Copy the packet for inspection
-    TRY_MSG(!skb_copy_bits(skb, 0, &udphdr, sizeof(udphdr)),
-             DL_WARNING, "Error copying UDP packet bits");
-
-    udp = &udphdr;
-
-    if (ntohs(udp->source) == 53)
-    {
-        //
-        // This is a DNS response, log it
-        //
-        int32_t       len   = ntohs(udp->len) - sizeof(struct udphdr);
-
-        TRY_MSG(len > 0, DL_WARNING, "invalid length:%d for UDP response", len);
-
-        data = ec_mem_cache_alloc_generic(len, &context);
-        if (data)
-        {
-            TRY_MSG(!skb_copy_bits(skb, sizeof(udphdr), data, len),
-                DL_WARNING, "Error copying UDP DNS response data");
-            ec_event_send_dns(
-                CB_EVENT_TYPE_DNS_RESPONSE,
-                data,
-                len,
-                &context);
-        }
-
-        rcv_skb_cnt += 1;
-    }
-
-CATCH_DEFAULT:
-    ec_mem_cache_free_generic(data);
-    xcode = g_original_ops_ptr->socket_sock_rcv_skb(sk, skb);
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return xcode;
-}
-
 // These will hold a copy of the old syscall so that it can be called from below and restored
 //  when the module is unloaded.
 long (*ec_orig_sys_recvfrom)(int fd, void __user *ubuf, size_t size, unsigned int flags,
