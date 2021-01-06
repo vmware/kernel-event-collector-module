@@ -14,8 +14,8 @@
 //  but we do not currently have a context "destroy" action.  Instead I am adding
 //  a context to the list from the module entry check routines.
 // This makes the assumption that these macros are not used recursively.
-bool hook_tracking_initialize(ProcessContext *context);
-void hook_tracking_shutdown(ProcessContext *context);
-void hook_tracking_add_entry(ProcessContext *context);
-void hook_tracking_del_entry(ProcessContext *context);
-int hook_tracking_print_active(ProcessContext *context);
+bool ec_hook_tracking_initialize(ProcessContext *context);
+void ec_hook_tracking_shutdown(ProcessContext *context);
+void ec_hook_tracking_add_entry(ProcessContext *context);
+void ec_hook_tracking_del_entry(ProcessContext *context);
+int ec_hook_tracking_print_active(ProcessContext *context);

@@ -13,12 +13,12 @@
 #include "path-buffers.h"
 #include "cb-spinlock.h"
 
-void hashtbl_delete_callback(void *procp, ProcessContext *context);
-void shareddata_print_callback(void *data, ProcessContext *context);
+void ec_hashtbl_delete_callback(void *procp, ProcessContext *context);
+void __ec_shared_data_print_callback(void *data, ProcessContext *context);
 
-SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context);
-void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
-ProcessTracking *process_tracking_add_process(ProcessTracking *procp, ProcessContext *context);
+SharedTrackingData *ec_process_tracking_alloc_shared_data(ProcessContext *context);
+void ec_process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
+ProcessTracking *ec_process_tracking_add_process(ProcessTracking *procp, ProcessContext *context);
 
 process_tracking_data g_process_tracking_data = { 0, };
 
@@ -34,15 +34,15 @@ bool g_print_proc_on_delete;
 
 #define CB_PT_CACHE_OBJ_SZ  256
 
-bool process_tracking_should_track_user(void)
+bool ec_process_tracking_should_track_user(void)
 {
     return g_driver_config.report_process_user == ENABLE;
 }
 
-bool process_tracking_initialize(ProcessContext *context)
+bool ec_process_tracking_initialize(ProcessContext *context)
 {
     g_print_proc_on_delete = false;
-    g_process_tracking_data.table = hashtbl_init_generic(
+    g_process_tracking_data.table = ec_hashtbl_init_generic(
                                                     context,
                                                     8192,
                                                     sizeof(ProcessTracking),
@@ -52,48 +52,48 @@ bool process_tracking_initialize(ProcessContext *context)
                                                     offsetof(ProcessTracking, pt_key),
                                                     offsetof(ProcessTracking, pt_link),
                                                     offsetof(ProcessTracking, reference_count),
-                                                    hashtbl_delete_callback);
+                                                    ec_hashtbl_delete_callback);
     TRY(g_process_tracking_data.table);
 
-    TRY(cb_mem_cache_create(&g_process_tracking_data.shared_data_cache, "pt_shared_data_cache", sizeof(SharedTrackingData), context));
+    TRY(ec_mem_cache_create(&g_process_tracking_data.shared_data_cache, "pt_shared_data_cache", sizeof(SharedTrackingData), context));
 
     return true;
 
 CATCH_DEFAULT:
-    process_tracking_shutdown(context);
+    ec_process_tracking_shutdown(context);
     return false;
 }
 
-void process_tracking_shutdown(ProcessContext *context)
+void ec_process_tracking_shutdown(ProcessContext *context)
 {
     g_print_proc_on_delete = true;
 
     if (g_process_tracking_data.table)
     {
-        hashtbl_shutdown_generic(g_process_tracking_data.table, context);
+        ec_hashtbl_shutdown_generic(g_process_tracking_data.table, context);
         g_process_tracking_data.table = NULL;
     }
 
-    cb_mem_cache_destroy(&g_process_tracking_data.shared_data_cache, context, shareddata_print_callback);
+    ec_mem_cache_destroy(&g_process_tracking_data.shared_data_cache, context, __ec_shared_data_print_callback);
 
     g_print_proc_on_delete = false;
 }
 
-ProcessTracking *process_tracking_get_process(pid_t pid, ProcessContext *context)
+ProcessTracking *ec_process_tracking_get_process(pid_t pid, ProcessContext *context)
 {
     PT_TBL_KEY key = { pid };
 
-    ProcessTracking *procp = ((ProcessTracking *)hashtbl_get_generic(g_process_tracking_data.table, &key, context));
+    ProcessTracking *procp = ((ProcessTracking *)ec_hashtbl_get_generic(g_process_tracking_data.table, &key, context));
 
     return procp;
 }
 
 // Check whether path points at an interpreter.
-bool process_tracking_is_interpreter(const char *path)
+bool ec_process_tracking_is_interpreter(const char *path)
 {
     if (path)
     {
-        const char *proc_name = process_tracking_get_proc_name(path);
+        const char *proc_name = ec_process_tracking_get_proc_name(path);
         int i;
 
         for (i = 0; i < g_interpreter_names_count; i++)
@@ -111,7 +111,7 @@ bool process_tracking_is_interpreter(const char *path)
     return false;
 }
 
-ProcessTracking *process_tracking_create_process(
+ProcessTracking *ec_process_tracking_create_process(
         pid_t               pid,
         pid_t               parent,
         pid_t               tid,
@@ -133,15 +133,15 @@ ProcessTracking *process_tracking_create_process(
     // If this start is a fork we need to pull the shared struct from the parent
     if (action == CB_PROCESS_START_BY_FORK)
     {
-        parent_procp = process_tracking_get_process(parent, context);
+        parent_procp = ec_process_tracking_get_process(parent, context);
         if (parent_procp)
         {
             // Increase the reference count on the shared data (for local function)
-            shared_data = process_tracking_get_shared_data_ref(parent_procp->shared_data, context);
+            shared_data = ec_process_tracking_get_shared_data_ref(parent_procp->shared_data, context);
             posix_parent_details      = parent_procp->posix_details;
             posix_grandparent_details = parent_procp->posix_parent_details;
 
-            process_tracking_put_process(parent_procp, context);
+            ec_process_tracking_put_process(parent_procp, context);
         }
     }
 
@@ -157,7 +157,7 @@ ProcessTracking *process_tracking_create_process(
 
         // TODO: We really need to build my parent
         // This gives us a local reference
-        shared_data = process_tracking_alloc_shared_data(context);
+        shared_data = ec_process_tracking_alloc_shared_data(context);
         if (!shared_data)
         {
             return NULL;
@@ -165,16 +165,16 @@ ProcessTracking *process_tracking_create_process(
 
         shared_data->exec_details.pid                = parent;
         shared_data->exec_details.start_time         = start_time;
-        get_devinfo_from_task(taskp, &shared_data->exec_details.device, &shared_data->exec_details.inode);
+        ec_get_devinfo_from_task(taskp, &shared_data->exec_details.device, &shared_data->exec_details.inode);
 
-        shared_data->exec_parent_details.pid         = (gparent_task ? getpid(gparent_task) : 1);
-        shared_data->exec_parent_details.start_time  = get_null_time();
-        get_devinfo_from_task(parent_task, &shared_data->exec_details.device, &shared_data->exec_details.inode);
+        shared_data->exec_parent_details.pid         = (gparent_task ? ec_getpid(gparent_task) : 1);
+        shared_data->exec_parent_details.start_time  = ec_get_null_time();
+        ec_get_devinfo_from_task(parent_task, &shared_data->exec_details.device, &shared_data->exec_details.inode);
 
         shared_data->exec_grandparent_details.pid         = 0;
         shared_data->exec_grandparent_details.device      = 0;
         shared_data->exec_grandparent_details.inode       = 0;
-        shared_data->exec_grandparent_details.start_time  = get_null_time();
+        shared_data->exec_grandparent_details.start_time  = ec_get_null_time();
 
         shared_data->path_found   = false;
         shared_data->exec_count   = 1;
@@ -182,10 +182,10 @@ ProcessTracking *process_tracking_create_process(
         posix_parent_details      = shared_data->exec_details;
         posix_grandparent_details = shared_data->exec_parent_details;
 
-        shared_data->is_interpreter = process_tracking_is_interpreter(shared_data->path);
+        shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data->path);
     }
 
-    procp = (ProcessTracking *)hashtbl_alloc_generic(g_process_tracking_data.table, context);
+    procp = (ProcessTracking *)ec_hashtbl_alloc_generic(g_process_tracking_data.table, context);
     if (procp)
     {
         procp->pt_key.pid                 = pid;
@@ -234,9 +234,9 @@ ProcessTracking *process_tracking_create_process(
             g_process_tracking_data.create_by_exec += 1;
         }
 
-        process_tracking_set_shared_data(procp, shared_data, context);
+        ec_process_tracking_set_shared_data(procp, shared_data, context);
 
-        procp = process_tracking_add_process(procp, context);
+        procp = ec_process_tracking_add_process(procp, context);
         TRY(procp);
 
 
@@ -245,7 +245,7 @@ ProcessTracking *process_tracking_create_process(
 
         TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %ld)",
               msg,
-              process_tracking_get_path(shared_data),
+              ec_process_tracking_get_path(shared_data),
               pid,
               parent,
               shared_data->exec_details.pid,
@@ -255,12 +255,12 @@ ProcessTracking *process_tracking_create_process(
 
 CATCH_DEFAULT:
     // Always drop the ref held by this local function
-    process_tracking_release_shared_data_ref(shared_data, context);
+    ec_process_tracking_release_shared_data_ref(shared_data, context);
 
     return procp;
 }
 
-ProcessTracking *process_tracking_update_process(
+ProcessTracking *ec_process_tracking_update_process(
     pid_t               pid,
     pid_t               tid,
     uid_t               uid,
@@ -279,20 +279,20 @@ ProcessTracking *process_tracking_update_process(
     ProcessTracking    *procp              = NULL;
     SharedTrackingData *shared_data        = NULL;
     SharedTrackingData *parent_shared_data = NULL;
-    pid_t               parent             = getppid(taskp);
+    pid_t               parent             = ec_getppid(taskp);
     struct task_struct *parent_task        = (taskp       ? taskp->real_parent : NULL);
     char               *msg                = "";
     bool isExecOther = false;
     bool was_last_active_process = false;
 
-    procp = process_tracking_get_process(pid, context);
+    procp = ec_process_tracking_get_process(pid, context);
     if (!procp)
     {
         msg = "<FAKE> ";
 
-        if (!is_process_tracked(parent, context))
+        if (!ec_is_process_tracked(parent, context))
         {
-            if (is_task_valid(parent_task) && parent_task->mm)
+            if (ec_is_task_valid(parent_task) && parent_task->mm)
             {
                 // if the task has not exited and it is a userspace task then it should
                 // be tracked
@@ -306,7 +306,7 @@ ProcessTracking *process_tracking_update_process(
         }
 
         // This will use the comm instead of a path
-        procp = process_tracking_create_process(
+        procp = ec_process_tracking_create_process(
                 pid,
                 parent,
                 tid,
@@ -328,7 +328,7 @@ ProcessTracking *process_tracking_update_process(
     }
 
     // Increase the reference count on the shared data (for local function)
-    parent_shared_data = process_tracking_get_shared_data_ref(procp->shared_data, context);
+    parent_shared_data = ec_process_tracking_get_shared_data_ref(procp->shared_data, context);
 
     isExecOther = parent_shared_data->exec_details.pid == pid;
 
@@ -343,12 +343,12 @@ ProcessTracking *process_tracking_update_process(
         // Send the event based on the current process information.
         //  We will not delete the procp since it will be used by the new process.
         //  The shared_data will be released later
-        event_send_exit(procp, was_last_active_process, context);
+        ec_event_send_exit(procp, was_last_active_process, context);
     }
 
     // Allocate a shared data_object for the new process
     //  We get a reference to this
-    shared_data = process_tracking_alloc_shared_data(context);
+    shared_data = ec_process_tracking_alloc_shared_data(context);
 
     TRY_DO_MSG(shared_data,
                { procp = NULL; },
@@ -371,18 +371,18 @@ ProcessTracking *process_tracking_update_process(
     procp->posix_details.device           = device;
     procp->posix_details.inode            = inode;
 
-    if (!path && is_task_valid(taskp))
+    if (!path && ec_is_task_valid(taskp))
     {
         path = taskp->comm;
     }
 
-    shared_data->path = cb_mem_cache_strdup(path, context);
+    shared_data->path = ec_mem_cache_strdup(path, context);
     TRY(shared_data->path);
 
-    shared_data->is_interpreter = process_tracking_is_interpreter(shared_data->path);
+    shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data->path);
 
     // Update our table entry with the new shared data
-    process_tracking_set_shared_data(procp, shared_data, context);
+    ec_process_tracking_set_shared_data(procp, shared_data, context);
 
     // Mark us as an active process
     atomic64_inc(&shared_data->active_process_count);
@@ -397,10 +397,10 @@ ProcessTracking *process_tracking_update_process(
     {
         // Hold onto a reference to our parent shared_data until the start event is sent.
         //  This will ensure the exit event of the parent is sent after this start event
-        process_tracking_set_parent_shared_data(procp, parent_shared_data, context);
+        ec_process_tracking_set_parent_shared_data(procp, parent_shared_data, context);
     }
 
-    process_tracking_update_op_cnts(procp, event_type, action);
+    ec_process_tracking_update_op_cnts(procp, event_type, action);
 
     TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d by %d) (active: %ld)",
           msg,
@@ -413,21 +413,21 @@ ProcessTracking *process_tracking_update_process(
 
 CATCH_DEFAULT:
     // Release the local ref held by this function
-    process_tracking_release_shared_data_ref(shared_data, context);
-    process_tracking_release_shared_data_ref(parent_shared_data, context);
+    ec_process_tracking_release_shared_data_ref(shared_data, context);
+    ec_process_tracking_release_shared_data_ref(parent_shared_data, context);
 
     return procp;
 }
 
-void process_tracking_put_process(ProcessTracking *procp, ProcessContext *context)
+void ec_process_tracking_put_process(ProcessTracking *procp, ProcessContext *context)
 {
     if (procp)
     {
-        hashtbl_put_generic(g_process_tracking_data.table, procp, context);
+        ec_hashtbl_put_generic(g_process_tracking_data.table, procp, context);
     }
 }
 
-void process_tracking_remove_process(ProcessTracking *procp, ProcessContext *context)
+void ec_process_tracking_remove_process(ProcessTracking *procp, ProcessContext *context)
 {
     if (procp)
     {
@@ -442,26 +442,26 @@ void process_tracking_remove_process(ProcessTracking *procp, ProcessContext *con
 
         // In the exec-other and some pid wrap cases this entry may not exist in
         //  hash table.  In this case, it will be a no-op.
-        hashtbl_del_generic(g_process_tracking_data.table, procp, context);
+        ec_hashtbl_del_generic(g_process_tracking_data.table, procp, context);
     }
 }
 
-ProcessTracking *process_tracking_add_process(ProcessTracking *procp, ProcessContext *context)
+ProcessTracking *ec_process_tracking_add_process(ProcessTracking *procp, ProcessContext *context)
 {
-    if (hashtbl_add_generic(g_process_tracking_data.table, procp, context) < 0)
+    if (ec_hashtbl_add_generic(g_process_tracking_data.table, procp, context) < 0)
     {
         // This will free the procp regardless of the current ref count
-        hashtbl_free_generic(g_process_tracking_data.table, procp, context);
+        ec_hashtbl_free_generic(g_process_tracking_data.table, procp, context);
         procp = NULL;
     }
     return procp;
 }
 
-bool process_tracking_report_exit(pid_t pid, ProcessContext *context)
+bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context)
 {
     bool was_last_active_process = false;
     bool warn_on_negative_active_count = LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0);
-    ProcessTracking *procp = process_tracking_get_process(pid, context);
+    ProcessTracking *procp = ec_process_tracking_get_process(pid, context);
 
     TRY(procp);
 
@@ -471,36 +471,35 @@ bool process_tracking_report_exit(pid_t pid, ProcessContext *context)
                                 { was_last_active_process = true; },
                                       warn_on_negative_active_count);
 
-    event_send_exit(procp, was_last_active_process, context);
-    process_tracking_remove_process(procp, context);
-    process_tracking_put_process(procp, context);
+    ec_event_send_exit(procp, was_last_active_process, context);
+    ec_process_tracking_remove_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
     return true;
 
 CATCH_DEFAULT:
-    process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
     return false;
 }
 
-ProcessTracking *
-get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context)
+ProcessTracking *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context)
 {
     ProcessTracking *procp = NULL;
 
-    procp = process_tracking_get_process(pid, context);
+    procp = ec_process_tracking_get_process(pid, context);
     if (!procp)
     {
         TRACE(DL_INFO, "%s pid=%d not tracked", msg, pid);
-        create_process_start_by_exec_event(current, context);
-        procp = process_tracking_get_process(pid, context);
+        ec_create_process_start_by_exec_event(current, context);
+        procp = ec_process_tracking_get_process(pid, context);
     }
     return procp;
 }
 
-void create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context)
+void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context)
 {
     uint64_t device = 0;
     uint64_t inode = 0;
-    time_t start_time = get_current_time();
+    time_t start_time = ec_get_current_time();
     uid_t uid = 0;
     uid_t euid = 0;
     pid_t pid = 0;
@@ -515,13 +514,13 @@ void create_process_start_by_exec_event(struct task_struct *task, ProcessContext
 
     uid = TASK_UID(task);
     euid = TASK_EUID(task);
-    pid = getpid(task);
-    tid = gettid(task);
+    pid = ec_getpid(task);
+    tid = ec_gettid(task);
 
     // PSCLNX-5220
-    //  If we are in the clone hook it is possible for the task_get_path functon
+    //  If we are in the clone hook it is possible for the ec_task_get_path functon
     //  to schedule. (Softlock!)  For now I am catching this here and just useing
-    //  the command name.  I want to make the decision down in task_get_path, but
+    //  the command name.  I want to make the decision down in ec_task_get_path, but
     //  I need to pass the context.  (Which is too invasive for right now!)
     //
     //  Also this would need to be able to understand when we would be looking up
@@ -531,16 +530,16 @@ void create_process_start_by_exec_event(struct task_struct *task, ProcessContext
         path = task->comm;
     } else
     {
-        path_buffer = get_path_buffer(context);
+        path_buffer = ec_get_path_buffer(context);
         if (path_buffer)
         {
-            // task_get_path() uses dpath which builds the path efficently
+            // ec_task_get_path() uses dpath which builds the path efficently
             //  by walking back to the root. It starts with a string terminator
             //  in the last byte of the target buffer.
             //
             // The `path` variable will point to the start of the string, so we will
             //  use that directly later to copy into the tracking entry and event.
-            path_found = task_get_path(task, path_buffer, PATH_MAX, &path);
+            path_found = ec_task_get_path(task, path_buffer, PATH_MAX, &path);
             path_buffer[PATH_MAX] = 0;
 
             if (!path_found)
@@ -550,9 +549,9 @@ void create_process_start_by_exec_event(struct task_struct *task, ProcessContext
         }
     }
 
-    get_devinfo_from_task(task, &device, &inode);
+    ec_get_devinfo_from_task(task, &device, &inode);
 
-    procp = process_tracking_update_process(
+    procp = ec_process_tracking_update_process(
         pid,
         tid,
         uid,
@@ -568,33 +567,33 @@ void create_process_start_by_exec_event(struct task_struct *task, ProcessContext
         FAKE_START,
         context);
 
-    put_path_buffer(path_buffer);
+    ec_put_path_buffer(path_buffer);
     path = path_buffer = NULL;
 
     CANCEL_VOID(procp);
 
-    event_send_start(procp,
-                    process_tracking_should_track_user() ? uid : (uid_t)-1,
+    ec_event_send_start(procp,
+                    ec_process_tracking_should_track_user() ? uid : (uid_t)-1,
                     CB_PROCESS_START_BY_EXEC,
                     context);
 
-    process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
 }
 
-SharedTrackingData *process_tracking_alloc_shared_data(ProcessContext *context)
+SharedTrackingData *ec_process_tracking_alloc_shared_data(ProcessContext *context)
 {
     SharedTrackingData *shared_data = NULL;
 
-    shared_data = (SharedTrackingData *)cb_mem_cache_alloc(&g_process_tracking_data.shared_data_cache, context);
-    process_tracking_init_shared_data(shared_data, context);
-    return process_tracking_get_shared_data_ref(shared_data, context);
+    shared_data = (SharedTrackingData *)ec_mem_cache_alloc(&g_process_tracking_data.shared_data_cache, context);
+    ec_process_tracking_init_shared_data(shared_data, context);
+    return ec_process_tracking_get_shared_data_ref(shared_data, context);
 }
 
-void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
+void ec_process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
 {
     if (shared_data)
     {
-        file_process_tree_init(&shared_data->tracked_files, context);
+        ec_file_process_tree_init(&shared_data->tracked_files, context);
         atomic64_set(&shared_data->reference_count, 0);
         atomic64_set(&shared_data->active_process_count, 0);
         atomic64_set(&shared_data->exit_event, 0);
@@ -604,7 +603,7 @@ void process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessC
     }
 }
 
-void process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context)
+void ec_process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context)
 {
     PCB_EVENT exit_event;
 
@@ -612,7 +611,7 @@ void process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, P
 
     TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
         __func__,
-        process_tracking_get_proc_name(shared_data->path),
+        ec_process_tracking_get_proc_name(shared_data->path),
         shared_data->exec_details.pid,
         atomic64_read(&shared_data->reference_count),
         atomic64_read(&shared_data->active_process_count),
@@ -621,31 +620,31 @@ void process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, P
     // If the reference count reaches 0, then delete it
     IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&shared_data->reference_count, {
         // Notify the file tracking logic that this process has exited and any open files should be purged.
-        check_open_file_list_on_exit(shared_data->tracked_files, context);
+        ec_check_open_file_list_on_exit(shared_data->tracked_files, context);
 
         // Destroy the file tracking
-        file_process_tree_destroy(&shared_data->tracked_files, context);
+        ec_file_process_tree_destroy(&shared_data->tracked_files, context);
 
         // Free the path and commandline
-        cb_mem_cache_free_generic(shared_data->path);
-        cb_mem_cache_free_generic(shared_data->cmdline);
+        ec_mem_cache_free_generic(shared_data->path);
+        ec_mem_cache_free_generic(shared_data->cmdline);
 
         exit_event = (PCB_EVENT) atomic64_xchg(&shared_data->exit_event, 0);
 
         // Send the exit
-        event_send_last_exit(exit_event, context);
+        ec_event_send_last_exit(exit_event, context);
 
         shared_data->path       = NULL;
         shared_data->cmdline    = NULL;
 
         // Free the shared data
-        cb_mem_cache_free(&g_process_tracking_data.shared_data_cache, shared_data, context);
+        ec_mem_cache_free(&g_process_tracking_data.shared_data_cache, shared_data, context);
     });
 }
 
 // Note: This function is used as a callback by the generic hash table to
 //  delete our private data.
-void hashtbl_delete_callback(void *data, ProcessContext *context)
+void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
 {
     if (data)
     {
@@ -655,21 +654,21 @@ void hashtbl_delete_callback(void *data, ProcessContext *context)
         {
             TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
                                    __func__,
-                                   process_tracking_get_proc_name(procp->shared_data->path),
+                                   ec_process_tracking_get_proc_name(procp->shared_data->path),
                                    procp->shared_data->exec_details.pid,
                                    atomic64_read(&(procp->shared_data->reference_count)),
                                    atomic64_read(&(procp->shared_data->active_process_count)),
                                    procp->shared_data);
         }
 
-        process_tracking_set_shared_data(procp, NULL, context);
-        process_tracking_set_parent_shared_data(procp, NULL, context);
+        ec_process_tracking_set_shared_data(procp, NULL, context);
+        ec_process_tracking_set_parent_shared_data(procp, NULL, context);
     }
 }
 
 // Note: This function is used as a callback by the cb-mem-cache to print any
 // kmem cache entries that are still alive when the cache is destroyed.
-void shareddata_print_callback(void *data, ProcessContext *context)
+void __ec_shared_data_print_callback(void *data, ProcessContext *context)
 {
     if (data)
     {
@@ -677,7 +676,7 @@ void shareddata_print_callback(void *data, ProcessContext *context)
 
         TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
               __func__,
-              process_tracking_get_proc_name(sdata->path),
+              ec_process_tracking_get_proc_name(sdata->path),
               sdata->exec_details.pid,
               atomic64_read(&(sdata->reference_count)),
               atomic64_read(&(sdata->active_process_count)),

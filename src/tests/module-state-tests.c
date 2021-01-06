@@ -4,7 +4,7 @@
 #include "run-tests.h"
 
 // This verifies multiple BEGIN/FINISH disable check macros in the same
-// hook function. See cb_sys_rename for an example.
+// hook function. See ec_sys_rename for an example.
 bool __init test__begin_finish_macros(ProcessContext *context)
 {
     bool passed = false;

@@ -47,7 +47,7 @@ extern const char DRIVER_NAME[];
 #define ROUND_TO_NEXT_PAGE(x) (ROUND_TO_BASE(x, PAGE_SIZE))
 
 extern CB_DRIVER_CONFIG g_driver_config;
-extern uid_t    g_cb_server_uid;
+extern uid_t    g_edr_server_uid;
 extern int64_t  g_cb_ignored_pid_count;
 extern int64_t  g_cb_ignored_uid_count;
 extern pid_t    g_cb_ignored_pids[CB_SENSOR_MAX_PIDS];
@@ -85,12 +85,6 @@ typedef struct _ModuleStateInfo {
     atomic64_t   module_active_call_count;
 } ModuleStateInfo;
 
-//-------------------------------------------------
-// Exclusion functions
-//
-extern bool shouldExcludeCbServerByUID(uid_t uid);
-
-
 //------------------------------------------------
 // Macros that track entry and exit for each of the hook routines.
 // - Implement the checks for module-state and bypass the routines if the module is disabled.
@@ -105,11 +99,11 @@ extern ModuleStateInfo g_module_state_info;
 // checkpatch-ignore: SUSPECT_CODE_INDENT,MACRO_WITH_FLOW_CONTROL
 #define BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)    \
 do {                                                                                \
-    cb_write_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
+    ec_write_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
                                                                                     \
     if (g_module_state_info.module_state != ModuleStateEnabled)                     \
     {                                                                               \
-        cb_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
+        ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
         (CONTEXT)->decr_active_call_count_on_exit = false;                          \
         goto pass_through_label;                                                    \
     }                                                                               \
@@ -119,21 +113,21 @@ do {                                                                            
         atomic64_inc_return(&g_module_state_info.module_active_call_count);         \
     }                                                                               \
                                                                                     \
-    cb_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
-    hook_tracking_add_entry((CONTEXT));                                             \
+    ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
+    ec_hook_tracking_add_entry((CONTEXT));                                          \
 } while (false)
 
 #define IF_MODULE_DISABLED_GOTO(CONTEXT, pass_through_label)                        \
 do {                                                                                \
-    cb_write_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
+    ec_write_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
                                                                                     \
     if (g_module_state_info.module_state != ModuleStateEnabled)                     \
     {                                                                               \
-        cb_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
+        ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
         goto pass_through_label;                                                    \
     }                                                                               \
                                                                                     \
-    cb_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
+    ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
 } while (false)
 
 #define MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)  \
@@ -154,7 +148,7 @@ while (false)
 do {                                                                          \
   if ((CONTEXT)->decr_active_call_count_on_exit)                              \
   {                                                                           \
-      hook_tracking_del_entry((CONTEXT));                                     \
+      ec_hook_tracking_del_entry((CONTEXT));                                  \
       ATOMIC64_DEC__CHECK_NEG(&g_module_state_info.module_active_call_count); \
   }                                                                           \
 }                                                                             \
@@ -208,20 +202,20 @@ while (false)
 // ------------------------------------------------
 // Module Helpers
 //
-void cbsensor_shutdown(ProcessContext *context);
-int cbsensor_enable_module(ProcessContext *context);
-int cbsensor_disable_module(ProcessContext *context);
-ModuleState get_module_state(ProcessContext *context);
-bool is_reader_connected(void);
-bool disconnect_reader(pid_t pid);
-void reader_init(void);
+void ec_shutdown(ProcessContext *context);
+int ec_enable_module(ProcessContext *context);
+int ec_disable_module(ProcessContext *context);
+ModuleState ec_get_module_state(ProcessContext *context);
+bool ec_is_reader_connected(void);
+bool ec_disconnect_reader(pid_t pid);
+void ec_reader_init(void);
 
 // ------------------------------------------------
 // Linux Security Module Helpers
 //
-extern bool lsm_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void lsm_shutdown(ProcessContext *context);
-extern bool lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_lsm_initialize(ProcessContext *context, uint64_t enableHooks);
+extern void ec_lsm_shutdown(ProcessContext *context);
+extern bool ec_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
 
 // ------------------------------------------------
 // Linux Syscall Hook Helpers
@@ -229,155 +223,155 @@ extern bool lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
 #define GPF_DISABLE write_cr0(read_cr0() & (~0x10000))
 #define GPF_ENABLE  write_cr0(read_cr0() | 0x10000)
 
-extern bool syscall_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void syscall_shutdown(ProcessContext *context, uint64_t enableHooks);
-extern bool syscall_hooks_changed(ProcessContext *context, uint64_t enableHooks);
-extern void cb_clone_hook(ProcessContext *context, struct task_struct *task);
+extern bool ec_syscall_initialize(ProcessContext *context, uint64_t enableHooks);
+extern void ec_syscall_shutdown(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_syscall_hooks_changed(ProcessContext *context, uint64_t enableHooks);
+extern void ec_clone_hook(ProcessContext *context, struct task_struct *task);
 
 extern struct security_operations *g_original_ops_ptr;
 
 // ------------------------------------------------
 // Netfilter Module Helpers
 //
-extern bool netfilter_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void netfilter_cleanup(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks);
+extern void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks);
 
 // ------------------------------------------------
 // Stats Proc Helper
-bool cb_stats_proc_initialize(ProcessContext *context);
-void cb_stats_proc_shutdown(ProcessContext *context);
-int cb_proc_track_show_table(struct seq_file *m, void *v);
-int cb_proc_track_show_stats(struct seq_file *m, void *v);
-int cb_file_track_show_table(struct seq_file *m, void *v);
+bool ec_stats_proc_initialize(ProcessContext *context);
+void ec_stats_proc_shutdown(ProcessContext *context);
+int ec_proc_track_show_table(struct seq_file *m, void *v);
+int ec_proc_track_show_stats(struct seq_file *m, void *v);
+int ec_file_track_show_table(struct seq_file *m, void *v);
 
-int cb_proc_current_memory_avg(struct seq_file *m, void *v);
-int cb_proc_current_memory_det(struct seq_file *m, void *v);
-int cb_show_active_hooks(struct seq_file *m, void *v);
+int ec_proc_current_memory_avg(struct seq_file *m, void *v);
+int ec_proc_current_memory_det(struct seq_file *m, void *v);
+int ec_show_active_hooks(struct seq_file *m, void *v);
 
 // ------------------------------------------------
 // Logging
 //
-extern bool logger_initialize(ProcessContext *context);
-extern void logger_shutdown(ProcessContext *context);
+extern bool ec_logger_initialize(ProcessContext *context);
+extern void ec_logger_shutdown(ProcessContext *context);
 
-extern PCB_EVENT logger_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context);
-extern void logger_free_event(PCB_EVENT event, ProcessContext *context);
-extern void logger_free_event_on_error(PCB_EVENT event, ProcessContext *context);
-extern void logger_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context);
+extern PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context);
+extern void ec_free_event(PCB_EVENT event, ProcessContext *context);
+extern void ec_free_event_on_error(PCB_EVENT event, ProcessContext *context);
+extern void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context);
 
-extern bool should_log(CB_EVENT_TYPE eventType);
+extern bool ec_logger_should_log(CB_EVENT_TYPE eventType);
 
-extern int user_comm_send_event(struct CB_EVENT *msg, ProcessContext *context);
-extern void fops_comm_wake_up_reader(ProcessContext *context);
-extern bool user_comm_initialize(ProcessContext *context);
-extern void user_comm_shutdown(ProcessContext *context);
+extern int ec_send_event(struct CB_EVENT *msg, ProcessContext *context);
+extern void ec_fops_comm_wake_up_reader(ProcessContext *context);
+extern bool ec_user_comm_initialize(ProcessContext *context);
+extern void ec_user_comm_shutdown(ProcessContext *context);
 
 // ------------------------------------------------
 // File Operations
 //
-extern bool user_devnode_init(ProcessContext *context);
-extern void user_devnode_close(ProcessContext *context);
-extern char *event_type_to_str(CB_EVENT_TYPE event_type);
+extern bool ec_user_devnode_init(ProcessContext *context);
+extern void ec_user_devnode_close(ProcessContext *context);
+extern char *ec_event_type_to_str(CB_EVENT_TYPE event_type);
 
 // ------------------------------------------------
 // Symbol Helpers
 //
-extern void *get_ksym(char *sym_name);
+extern void *ec_get_ksym(char *sym_name);
 
 // ------------------------------------------------
 // General Helpers
 //
 #define ATOMIC_INCREMENT(v)   __sync_fetch_and_add((v), 1)
-uint64_t to_windows_timestamp(const struct timespec *tv);
-time_t get_current_time(void);
-time_t get_null_time(void);
+uint64_t ec_to_windows_timestamp(const struct timespec *tv);
+time_t ec_get_current_time(void);
+time_t ec_get_null_time(void);
 
 #define TO_WIN_SEC(SEC) ((uint64_t)(SEC) * (uint64_t)10000000)
 #define TO_WIN_TIME(SEC, NSEC) (TO_WIN_SEC(SEC) + (uint64_t)116444736000000000 + ((NSEC) / 100))
 
 // ------------------------------------------------
 
-extern int     cb_proc_show_events_avg(struct seq_file *m, void *v);
-extern int     cb_proc_show_events_det(struct seq_file *m, void *v);
-extern ssize_t cb_proc_show_events_rst(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern ssize_t cb_net_track_purge_age(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern ssize_t cb_net_track_purge_all(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int     cb_net_track_show_new(struct seq_file *m, void *v);
-extern int     cb_net_track_show_old(struct seq_file *m, void *v);
+extern int     ec_proc_show_events_avg(struct seq_file *m, void *v);
+extern int     ec_proc_show_events_det(struct seq_file *m, void *v);
+extern ssize_t ec_proc_show_events_rst(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern ssize_t ec_net_track_purge_age(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern ssize_t ec_net_track_purge_all(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int     ec_net_track_show_new(struct seq_file *m, void *v);
+extern int     ec_net_track_show_old(struct seq_file *m, void *v);
 
-extern int cb_syscall_clone_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_clone_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int cb_syscall_fork_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_fork_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int cb_syscall_vfork_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_vfork_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int cb_syscall_recvfrom_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_recvfrom_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int cb_syscall_recvmsg_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int cb_syscall_recvmmsg_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_recvmmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int cb_syscall_write_get(struct seq_file *m, void *v);
-extern ssize_t cb_syscall_write_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_clone_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_clone_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_fork_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_fork_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_vfork_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_vfork_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_recvfrom_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_recvfrom_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_recvmsg_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_recvmmsg_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_recvmmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_syscall_write_get(struct seq_file *m, void *v);
+extern ssize_t ec_syscall_write_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
 
-extern int cb_netfilter_local_out_get(struct seq_file *m, void *v);
-extern ssize_t cb_netfilter_local_out_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_netfilter_local_out_get(struct seq_file *m, void *v);
+extern ssize_t ec_netfilter_local_out_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
 
-int cb_lsm_bprm_check_security_get(struct seq_file *m, void *v);
-int cb_lsm_task_wait_get(struct seq_file *m, void *v);
-int cb_lsm_inode_create_get(struct seq_file *m, void *v);
-int cb_lsm_inode_rename_get(struct seq_file *m, void *v);
-int cb_lsm_inode_unlink_get(struct seq_file *m, void *v);
-int cb_lsm_file_permission_get(struct seq_file *m, void *v);
-int cb_lsm_file_free_security_get(struct seq_file *m, void *v);
-int cb_lsm_socket_connect_get(struct seq_file *m, void *v);
-int cb_lsm_inet_conn_request_get(struct seq_file *m, void *v);
-int cb_lsm_socket_sock_rcv_skb_get(struct seq_file *m, void *v);
-int cb_lsm_socket_post_create_get(struct seq_file *m, void *v);
-int cb_lsm_socket_sendmsg_get(struct seq_file *m, void *v);
-int cb_lsm_socket_recvmsg_get(struct seq_file *m, void *v);
+int ec_lsm_bprm_check_security_get(struct seq_file *m, void *v);
+int ec_lsm_task_wait_get(struct seq_file *m, void *v);
+int ec_lsm_inode_create_get(struct seq_file *m, void *v);
+int ec_lsm_inode_rename_get(struct seq_file *m, void *v);
+int ec_lsm_inode_unlink_get(struct seq_file *m, void *v);
+int ec_lsm_file_permission_get(struct seq_file *m, void *v);
+int ec_lsm_file_free_security_get(struct seq_file *m, void *v);
+int ec_lsm_socket_connect_get(struct seq_file *m, void *v);
+int ec_lsm_inet_conn_request_get(struct seq_file *m, void *v);
+int ec_lsm_socket_sock_rcv_skb_get(struct seq_file *m, void *v);
+int ec_lsm_socket_post_create_get(struct seq_file *m, void *v);
+int ec_lsm_socket_sendmsg_get(struct seq_file *m, void *v);
+int ec_lsm_socket_recvmsg_get(struct seq_file *m, void *v);
 
-ssize_t cb_lsm_bprm_check_security_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_task_wait_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_inode_create_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_inode_rename_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_inode_unlink_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_file_permission_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_file_free_security_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_socket_connect_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_inet_conn_request_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_socket_sock_rcv_skb_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_socket_post_create_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_socket_sendmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t cb_lsm_socket_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_bprm_check_security_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_task_wait_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_inode_create_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_inode_rename_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_inode_unlink_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_file_permission_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_file_free_security_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_socket_connect_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_inet_conn_request_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_socket_sock_rcv_skb_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_socket_post_create_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_socket_sendmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_lsm_socket_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
 
 #if KERNEL_VERSION(3, 10, 0) < LINUX_VERSION_CODE
-int cb_lsm_mmap_file_get(struct seq_file *m, void *v);
-ssize_t cb_lsm_mmap_file_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+int ec_lsm_mmap_file_get(struct seq_file *m, void *v);
+ssize_t ec_lsm_mmap_file_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
 #else
-int cb_lsm_file_mmap_get(struct seq_file *m, void *v);
-ssize_t cb_lsm_file_mmap_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+int ec_lsm_file_mmap_get(struct seq_file *m, void *v);
+ssize_t ec_lsm_file_mmap_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
 #endif
 
-bool disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason);
+bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason);
 
 // ------------------------------------------------
 // File Helpers
 //
-extern bool file_helper_init(ProcessContext *context);
-extern bool file_get_path(struct file *file, char *buffer, unsigned int buflen, char **pathname);
-extern bool dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname);
-extern char *dentry_to_path(struct dentry *dentry, char *buf, int buflen);
-extern char *lsm_dentry_path(struct dentry *dentry, char *path, int len);
-extern struct inode *get_inode_from_file(struct file *file);
-extern void get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode);
-extern struct inode *get_inode_from_dentry(struct dentry *dentry);
-umode_t get_mode_from_file(struct file *file);
-extern struct super_block *get_sb_from_file(struct file *file);
-extern bool is_interesting_file(struct file *file);
-extern bool is_excluded_file(uint64_t device, uint64_t inode);
-extern int is_special_file(char *pathname, int len);
-extern bool may_skip_unsafe_vfs_calls(struct file *file);
+extern bool ec_file_helper_init(ProcessContext *context);
+extern bool ec_file_get_path(struct file *file, char *buffer, unsigned int buflen, char **pathname);
+extern bool ec_dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname);
+extern char *ec_dentry_to_path(struct dentry *dentry, char *buf, int buflen);
+extern char *ec_lsm_dentry_path(struct dentry *dentry, char *path, int len);
+extern struct inode *ec_get_inode_from_file(struct file *file);
+extern void ec_get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode);
+extern struct inode *ec_get_inode_from_dentry(struct dentry *dentry);
+umode_t ec_get_mode_from_file(struct file *file);
+extern struct super_block *ec_get_sb_from_file(struct file *file);
+extern bool ec_is_interesting_file(struct file *file);
+extern bool ec_is_excluded_file(uint64_t device, uint64_t inode);
+extern int ec_is_special_file(char *pathname, int len);
+extern bool ec_may_skip_unsafe_vfs_calls(struct file *file);
 
 // schedulers
 extern const struct sched_class idle_sched_class;

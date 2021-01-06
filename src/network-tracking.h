@@ -4,5 +4,5 @@
 
 #pragma once
 
-bool network_tracking_initialize(ProcessContext *context);
-void network_tracking_shutdown(ProcessContext *context);
+bool ec_network_tracking_initialize(ProcessContext *context);
+void ec_network_tracking_shutdown(ProcessContext *context);

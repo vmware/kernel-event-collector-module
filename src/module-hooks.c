@@ -16,17 +16,17 @@ inline bool is_root_uid(void)
 #endif
 }
 
-long (*cb_orig_sys_delete_module)(const char __user *name_user,
+long (*ec_orig_sys_delete_module)(const char __user *name_user,
                                   unsigned int flags) = NULL;
 
-asmlinkage long cb_sys_delete_module(const char __user *name_user,
+asmlinkage long ec_sys_delete_module(const char __user *name_user,
                                      unsigned int flags)
 {
     const size_t slen = strlen(DRIVER_NAME);
     char name_kernel[slen];
     int rval;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     /* strncpy_from_user() does an access_ok check to see if this is user memory. If it
      * is not user memory, it returns -EFAULT. In that case we'll assume that it is
@@ -45,7 +45,7 @@ asmlinkage long cb_sys_delete_module(const char __user *name_user,
 
     // If the unload request is not for our module, pass it through.
     if (strncmp(name_kernel, DRIVER_NAME, slen))
-        return cb_orig_sys_delete_module(name_user, flags);
+        return ec_orig_sys_delete_module(name_user, flags);
 
     // Don't let non-root users call
     CANCEL(is_root_uid(), -EPERM);
@@ -59,10 +59,10 @@ asmlinkage long cb_sys_delete_module(const char __user *name_user,
      * TODO: Add a version compatability check between the daemon and the
      * module to handle this situation more gracefully.
      */
-    user_devnode_close(&context);
+    ec_user_devnode_close(&context);
 
     // Remove hooks
-    cbsensor_shutdown(&context);
+    ec_shutdown(&context);
 
     // Hooks may not yet be unloaded so return EBUSY.
     return -EBUSY;

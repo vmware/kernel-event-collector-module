@@ -26,7 +26,7 @@ static const char *EICAR_TEST_FILE_1 = "X5O";
  *
  * @return returns a BOOL specifying whether or not the method succeeded
  */
-void determine_file_type(char *buffer, uint32_t bytes_read, CB_FILE_TYPE *pFileType, bool determineDataFiles)
+void ec_determine_file_type(char *buffer, uint32_t bytes_read, CB_FILE_TYPE *pFileType, bool determineDataFiles)
 {
     // Check if it's 32 or 64 bit ELF and parse it accordingly
     if (buffer[EI_CLASS] == ELFCLASS32)
@@ -165,7 +165,7 @@ void determine_file_type(char *buffer, uint32_t bytes_read, CB_FILE_TYPE *pFileT
     *pFileType = filetypeUnknown;
 }
 
-char *file_type_str(CB_FILE_TYPE fileType)
+char *ec_file_type_str(CB_FILE_TYPE fileType)
 {
     char *ret = NULL;
 

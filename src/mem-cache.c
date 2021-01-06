@@ -14,7 +14,7 @@ static struct
     struct list_head  list;
     atomic64_t        generic_buffer_count;
     atomic64_t        generic_buffer_size;
-} s_cb_mem_cache;
+} s_mem_cache;
 
 typedef struct cache_buffer {
     uint32_t  magic;
@@ -27,45 +27,45 @@ static const size_t CACHE_BUFFER_SZ = sizeof(cache_buffer_t);
 #ifdef MEM_DEBUG
     struct list_head mem_debug_list = LIST_HEAD_INIT(mem_debug_list);
 
-    void __cb_mem_cache_generic_report_leaks(void);
+    void __ec_mem_cache_generic_report_leaks(void);
 #endif
 
 // Get the size of this string, and subtract the `\0`
 #define MEM_CACHE_PREFIX_LEN   (sizeof(MEM_CACHE_PREFIX) - 1)
 
-void cb_mem_cache_init(ProcessContext *context)
+void ec_mem_cache_init(ProcessContext *context)
 {
-    atomic64_set(&s_cb_mem_cache.generic_buffer_count, 0);
-    atomic64_set(&s_cb_mem_cache.generic_buffer_size, 0);
-    INIT_LIST_HEAD(&s_cb_mem_cache.list);
+    atomic64_set(&s_mem_cache.generic_buffer_count, 0);
+    atomic64_set(&s_mem_cache.generic_buffer_size, 0);
+    INIT_LIST_HEAD(&s_mem_cache.list);
 
-    // cb_spinlock_init calls cb_mem_cache_alloc_generic, all initialization needs to happen before this call
-    cb_spinlock_init(&s_cb_mem_cache.lock, context);
+    // ec_spinlock_init calls ec_mem_cache_alloc_generic, all initialization needs to happen before this call
+    ec_spinlock_init(&s_mem_cache.lock, context);
 }
 
-void cb_mem_cache_shutdown(ProcessContext *context)
+void ec_mem_cache_shutdown(ProcessContext *context)
 {
     int64_t generic_buffer_count;
 
-    // cp_spinlock_destroy calls cb_mem_cache_free_generic, this must be called before other shutdown
-    cb_spinlock_destroy(&s_cb_mem_cache.lock, context);
+    // cp_spinlock_destroy calls ec_mem_cache_free_generic, this must be called before other shutdown
+    ec_spinlock_destroy(&s_mem_cache.lock, context);
 
-    generic_buffer_count = atomic64_read(&s_cb_mem_cache.generic_buffer_count);
+    generic_buffer_count = atomic64_read(&s_mem_cache.generic_buffer_count);
 
     if (generic_buffer_count != 0)
     {
         TRACE(DL_ERROR, "Exiting with %lld allocated objects (total size: %ld)",
-            generic_buffer_count, atomic64_read(&s_cb_mem_cache.generic_buffer_size));
+            generic_buffer_count, atomic64_read(&s_mem_cache.generic_buffer_size));
     }
 
     // TODO: Check cache list
 
     #ifdef MEM_DEBUG
-        __cb_mem_cache_generic_report_leaks();
+        __ec_mem_cache_generic_report_leaks();
     #endif
 }
 
-bool cb_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, ProcessContext *context)
+bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, ProcessContext *context)
 {
     if (cache)
     {
@@ -85,10 +85,10 @@ bool cb_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
 
         if (cache->kmem_cache)
         {
-            cb_spinlock_init(&cache->lock, context);
-            cb_write_lock(&s_cb_mem_cache.lock, context);
-            list_add(&cache->node, &s_cb_mem_cache.list);
-            cb_write_unlock(&s_cb_mem_cache.lock, context);
+            ec_spinlock_init(&cache->lock, context);
+            ec_write_lock(&s_mem_cache.lock, context);
+            list_add(&cache->node, &s_mem_cache.list);
+            ec_write_unlock(&s_mem_cache.lock, context);
 
             return true;
         }
@@ -96,7 +96,7 @@ bool cb_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
     return false;
 }
 
-void cb_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache_printval_cb printval_callback)
+void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache_printval_cb printval_callback)
 {
     void *value = NULL;
     struct cache_buffer *cb = NULL;
@@ -106,10 +106,10 @@ void cb_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
         uint64_t allocated_count = atomic64_read(&cache->allocated_count);
 
         // cache->node only needs to be deleted from the list if cache->kmem_cache was allocated
-        // otherwise it was never added to s_cb_mem_cache.list and may have invalid next and prev pointers
-        cb_write_lock(&s_cb_mem_cache.lock, context);
+        // otherwise it was never added to s_mem_cache.list and may have invalid next and prev pointers
+        ec_write_lock(&s_mem_cache.lock, context);
         list_del_init(&cache->node);
-        cb_write_unlock(&s_cb_mem_cache.lock, context);
+        ec_write_unlock(&s_mem_cache.lock, context);
 
         if (allocated_count > 0)
         {
@@ -118,7 +118,7 @@ void cb_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
 
             if (printval_callback)
             {
-                cb_write_lock(&cache->lock, context);
+                ec_write_lock(&cache->lock, context);
                 list_for_each_entry(cb, &cache->allocation_list, list)
                 {
                     if (cb)
@@ -127,12 +127,12 @@ void cb_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
                         printval_callback(value, context);
                     }
                 }
-                cb_write_unlock(&cache->lock, context);
+                ec_write_unlock(&cache->lock, context);
 
             }
         }
 
-        cb_spinlock_destroy(&cache->lock, context);
+        ec_spinlock_destroy(&cache->lock, context);
 
         kmem_cache_destroy(cache->kmem_cache);
         cache->kmem_cache = NULL;
@@ -153,7 +153,7 @@ void cb_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
     #define CHECK_GFP(CONTEXT)  GFP_MODE(CONTEXT)
 #endif
 
-void *cb_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
+void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
 {
     void *value = NULL;
 
@@ -166,9 +166,9 @@ void *cb_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
 
             cache_buffer->magic = CACHE_BUFFER_MAGIC;
 
-            cb_write_lock(&cache->lock, context);
+            ec_write_lock(&cache->lock, context);
             list_add(&cache_buffer->list, &cache->allocation_list);
-            cb_write_unlock(&cache->lock, context);
+            ec_write_unlock(&cache->lock, context);
 
             atomic64_inc(&cache->allocated_count);
 
@@ -179,7 +179,7 @@ void *cb_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
     return value;
 }
 
-void cb_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context)
+void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context)
 {
     if (value && cache->kmem_cache)
     {
@@ -187,9 +187,9 @@ void cb_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context
 
         if (cache_buffer->magic == CACHE_BUFFER_MAGIC)
         {
-            cb_write_lock(&cache->lock, context);
+            ec_write_lock(&cache->lock, context);
             list_del(&cache_buffer->list);
-            cb_write_unlock(&cache->lock, context);
+            ec_write_unlock(&cache->lock, context);
 
             kmem_cache_free(cache->kmem_cache, (void *)cache_buffer);
             ATOMIC64_DEC__CHECK_NEG(&cache->allocated_count);
@@ -207,13 +207,13 @@ void cb_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context
 #define CACHE_SIZE(a)      a->buffer_size
 #endif
 
-size_t cb_mem_cache_get_memory_usage(ProcessContext *context)
+size_t ec_mem_cache_get_memory_usage(ProcessContext *context)
 {
     CB_MEM_CACHE *cache;
-    size_t        size = atomic64_read(&s_cb_mem_cache.generic_buffer_size);
+    size_t        size = atomic64_read(&s_mem_cache.generic_buffer_size);
 
-    cb_write_lock(&s_cb_mem_cache.lock, context);
-    list_for_each_entry(cache, &s_cb_mem_cache.list, node) {
+    ec_write_lock(&s_mem_cache.lock, context);
+    list_for_each_entry(cache, &s_mem_cache.list, node) {
             int         cache_size = 0;
 
             if (cache->kmem_cache)
@@ -222,13 +222,13 @@ size_t cb_mem_cache_get_memory_usage(ProcessContext *context)
             }
             size += cache_size * atomic64_read(&(cache->allocated_count));
     }
-    cb_write_unlock(&s_cb_mem_cache.lock, context);
+    ec_write_unlock(&s_mem_cache.lock, context);
 
     return size;
 }
 
 #define SUFFIX_LIST_SIZE  4
-void simplify_size(size_t *size, const char **suffix)
+void __ec_simplify_size(size_t *size, const char **suffix)
 {
     int s_index = 0;
     static const char * const suffix_list[SUFFIX_LIST_SIZE] = { "bytes", "Kb", "Mb", "Gb" };
@@ -244,19 +244,19 @@ void simplify_size(size_t *size, const char **suffix)
     *suffix = suffix_list[s_index];
 }
 
-int cb_mem_cache_show(struct seq_file *m, void *v)
+int ec_mem_cache_show(struct seq_file *m, void *v)
 {
     CB_MEM_CACHE *cache;
     size_t size = 0;
     const char *suffix;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     seq_printf(m, "%40s | %6s | %40s | %9s |\n",
                   "Name", "Alloc", "Cache Name", "Obj. Size");
 
-    cb_write_lock(&s_cb_mem_cache.lock, &context);
-    list_for_each_entry(cache, &s_cb_mem_cache.list, node) {
+    ec_write_lock(&s_mem_cache.lock, &context);
+    list_for_each_entry(cache, &s_mem_cache.list, node) {
             const char *cache_name = "";
             int         cache_size = 0;
             long        count      = atomic64_read(&(cache->allocated_count));
@@ -273,18 +273,18 @@ int cb_mem_cache_show(struct seq_file *m, void *v)
                        cache_size);
             size += count * cache_size;
     }
-    cb_write_unlock(&s_cb_mem_cache.lock, &context);
+    ec_write_unlock(&s_mem_cache.lock, &context);
 
-    simplify_size(&size, &suffix);
+    __ec_simplify_size(&size, &suffix);
 
     seq_puts(m, "\n");
     seq_printf(m, "Allocated Cache Memory         : %ld %s\n", size, suffix);
 
-    size = atomic64_read(&s_cb_mem_cache.generic_buffer_size);
-    simplify_size(&size, &suffix);
+    size = atomic64_read(&s_mem_cache.generic_buffer_size);
+    __ec_simplify_size(&size, &suffix);
 
     seq_printf(m, "Allocated Generic Memory       : %ld %s\n", size, suffix);
-    seq_printf(m, "Allocated Generic Memory Count : %ld\n", atomic64_read(&s_cb_mem_cache.generic_buffer_count));
+    seq_printf(m, "Allocated Generic Memory Count : %ld\n", atomic64_read(&s_mem_cache.generic_buffer_count));
 
     return 0;
 }
@@ -336,7 +336,7 @@ typedef struct generic_buffer {
 #define GENERIC_BUFFER_MAGIC   0xDEADBEEF
 static const size_t GENERIC_BUFFER_SZ = sizeof(generic_buffer_t);
 
-void *__cb_mem_cache_alloc_generic(const size_t size, ProcessContext *context, bool doVirtualAlloc, const char *fn, uint32_t line)
+void *__ec_mem_cache_alloc_generic(const size_t size, ProcessContext *context, bool doVirtualAlloc, const char *fn, uint32_t line)
 {
     void    *new_allocation = NULL;
     size_t   real_size      = size + GENERIC_BUFFER_SZ;
@@ -363,8 +363,8 @@ void *__cb_mem_cache_alloc_generic(const size_t size, ProcessContext *context, b
             generic_buffer->magic     = GENERIC_BUFFER_MAGIC;
             generic_buffer->size      = real_size;
             generic_buffer->isVirtual = doVirtualAlloc;
-            atomic64_inc(&s_cb_mem_cache.generic_buffer_count);
-            atomic64_add(real_size, &s_cb_mem_cache.generic_buffer_size);
+            atomic64_inc(&s_mem_cache.generic_buffer_count);
+            atomic64_add(real_size, &s_mem_cache.generic_buffer_size);
 
             // Init reference count
             atomic64_set(&generic_buffer->ref_count, 1);
@@ -378,7 +378,7 @@ void *__cb_mem_cache_alloc_generic(const size_t size, ProcessContext *context, b
     return new_allocation;
 }
 
-void __cb_mem_cache_free_generic(void *value, const char *fn, uint32_t line)
+void __ec_mem_cache_free_generic(void *value, const char *fn, uint32_t line)
 {
     if (value)
     {
@@ -388,8 +388,8 @@ void __cb_mem_cache_free_generic(void *value, const char *fn, uint32_t line)
         {
             IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&generic_buffer->ref_count,
             {
-                ATOMIC64_DEC__CHECK_NEG(&s_cb_mem_cache.generic_buffer_count);
-                atomic64_sub(generic_buffer->size, &s_cb_mem_cache.generic_buffer_size);
+                ATOMIC64_DEC__CHECK_NEG(&s_mem_cache.generic_buffer_count);
+                atomic64_sub(generic_buffer->size, &s_mem_cache.generic_buffer_size);
                 MEM_DEBUG_DEL_ENTRY(generic_buffer, fn, line);
                 if (!generic_buffer->isVirtual)
                 {
@@ -407,7 +407,7 @@ void __cb_mem_cache_free_generic(void *value, const char *fn, uint32_t line)
     }
 }
 
-void *cb_mem_cache_get_generic(void *value, ProcessContext *context)
+void *ec_mem_cache_get_generic(void *value, ProcessContext *context)
 {
     if (value)
     {
@@ -426,7 +426,7 @@ void *cb_mem_cache_get_generic(void *value, ProcessContext *context)
     return value;
 }
 
-size_t cb_mem_cache_get_size_generic(const void *value)
+size_t ec_mem_cache_get_size_generic(const void *value)
 {
     size_t size = 0;
 
@@ -446,7 +446,7 @@ size_t cb_mem_cache_get_size_generic(const void *value)
     return size;
 }
 
-char *cb_mem_cache_strdup(const char *src, ProcessContext *context)
+char *ec_mem_cache_strdup(const char *src, ProcessContext *context)
 {
     char *dest = NULL;
 
@@ -454,7 +454,7 @@ char *cb_mem_cache_strdup(const char *src, ProcessContext *context)
     {
         size_t len = strlen(src);
 
-        dest = cb_mem_cache_alloc_generic(len + 1, context);
+        dest = ec_mem_cache_alloc_generic(len + 1, context);
         if (dest)
         {
             dest[0] = 0;
@@ -465,16 +465,16 @@ char *cb_mem_cache_strdup(const char *src, ProcessContext *context)
 }
 
 #ifdef MEM_DEBUG
-void __cb_mem_cache_generic_report_leaks(void)
+void __ec_mem_cache_generic_report_leaks(void)
 {
     generic_buffer_t *generic_buffer;
 
     // We can't lock here because it has been destroyed
-    // cb_write_lock(&s_cb_mem_cache.lock, &context);
+    // ec_write_lock(&s_mem_cache.lock, &context);
     list_for_each_entry(generic_buffer, &mem_debug_list, list)
     {
         TRACE(DL_ERROR, "## Buffer size=%ld, from %s", generic_buffer->size, generic_buffer->alloc_source);
     }
-    // cb_write_unlock(&s_cb_mem_cache.lock, &context);
+    // ec_write_unlock(&s_mem_cache.lock, &context);
 }
 #endif

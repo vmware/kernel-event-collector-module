@@ -4,7 +4,7 @@
 
 #include "page-helpers.h"
 
-pte_t *lookup_pte(p_sys_call_table address)
+pte_t *ec_lookup_pte(p_sys_call_table address)
 {
     unsigned int level;
 
@@ -15,7 +15,7 @@ CATCH_DEFAULT:
     return NULL;
 }
 
-bool set_page_state_rw(p_sys_call_table address, unsigned long *old_page_rw)
+bool ec_set_page_state_rw(p_sys_call_table address, unsigned long *old_page_rw)
 {
     unsigned long irq_flags;
     pte_t *pte = NULL;
@@ -23,7 +23,7 @@ bool set_page_state_rw(p_sys_call_table address, unsigned long *old_page_rw)
     local_irq_save(irq_flags);
     local_irq_disable();
 
-    pte = lookup_pte(address);
+    pte = ec_lookup_pte(address);
     if (!pte)
     {
         local_irq_restore(irq_flags);
@@ -38,7 +38,7 @@ bool set_page_state_rw(p_sys_call_table address, unsigned long *old_page_rw)
 }
 
 
-void restore_page_state(p_sys_call_table address, unsigned long page_rw)
+void ec_restore_page_state(p_sys_call_table address, unsigned long page_rw)
 {
     unsigned long irq_flags;
     pte_t *pte = NULL;
@@ -46,7 +46,7 @@ void restore_page_state(p_sys_call_table address, unsigned long page_rw)
     local_irq_save(irq_flags);
     local_irq_disable();
 
-    pte = lookup_pte(address);
+    pte = ec_lookup_pte(address);
     if (!pte)
     {
         TRACE(DL_ERROR, "Unable to restore page state\n");

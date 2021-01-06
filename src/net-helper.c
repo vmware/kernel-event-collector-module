@@ -9,8 +9,8 @@
 
 #define IPV6_SCOPE_DELIMITER '%'
 #define IPV6_SCOPE_ID_LEN sizeof("%nnnnnnnnnn")
-size_t rpc_ntop6_noscopeid(const struct sockaddr *sap,
-                                  char *buf, const int buflen)
+size_t __ec_rpc_ntop6_noscopeid(const struct sockaddr *sap,
+                                char *buf, const int buflen)
 {
     const struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sap;
     const struct in6_addr *addr = &sin6->sin6_addr;
@@ -48,7 +48,7 @@ size_t rpc_ntop6_noscopeid(const struct sockaddr *sap,
 }
 
 
-size_t rpc_ntop6(const struct sockaddr *sap,
+size_t __ec_rpc_ntop6(const struct sockaddr *sap,
                         char *buf, const size_t buflen)
 {
     const struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)sap;
@@ -56,7 +56,7 @@ size_t rpc_ntop6(const struct sockaddr *sap,
     size_t len;
     int rc;
 
-    len = rpc_ntop6_noscopeid(sap, buf, buflen);
+    len = __ec_rpc_ntop6_noscopeid(sap, buf, buflen);
     if (unlikely(len == 0))
         return len;
 
@@ -78,7 +78,7 @@ size_t rpc_ntop6(const struct sockaddr *sap,
     return len;
 }
 
-int rpc_ntop4(const struct sockaddr *sap,
+int __ec_rpc_ntop4(const struct sockaddr *sap,
                      char *buf, const size_t buflen)
 {
     const struct sockaddr_in *sin = (struct sockaddr_in *)sap;
@@ -95,15 +95,15 @@ int rpc_ntop4(const struct sockaddr *sap,
  * Plants a %NUL-terminated string in @buf and returns the length
  * of the string, excluding the %NUL.  Otherwise zero is returned.
  */
-size_t cb_ntop(const struct sockaddr *sap, char *buf, const size_t buflen, uint16_t *port)
+size_t ec_ntop(const struct sockaddr *sap, char *buf, const size_t buflen, uint16_t *port)
 {
     switch (sap->sa_family) {
     case AF_INET:
        *port = ((struct sockaddr_in *)sap)->sin_port;
-        return rpc_ntop4(sap, buf, buflen);
+        return __ec_rpc_ntop4(sap, buf, buflen);
     case AF_INET6:
        *port = ((struct sockaddr_in6 *)sap)->sin6_port;
-        return rpc_ntop6(sap, buf, buflen);
+        return __ec_rpc_ntop6(sap, buf, buflen);
     }
 
     memset(buf, 0, buflen);
@@ -111,7 +111,7 @@ size_t cb_ntop(const struct sockaddr *sap, char *buf, const size_t buflen, uint1
     return 0;
 }
 
-void cb_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port)
+void ec_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port)
 {
     if (addr->sa_addr.sa_family == AF_INET)
     {
@@ -122,18 +122,18 @@ void cb_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port)
     }
 }
 
-void cb_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right)
+void ec_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right)
 {
     if (right->sa_addr.sa_family == AF_INET)
     {
-        cb_copy_sockaddr_in(&left->as_in4, &right->as_in4);
+        ec_copy_sockaddr_in(&left->as_in4, &right->as_in4);
     } else
     {
-        cb_copy_sockaddr_in6(&left->as_in6, &right->as_in6);
+        ec_copy_sockaddr_in6(&left->as_in6, &right->as_in6);
     }
 }
 
-void cb_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right)
+void ec_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right)
 {
     if (left && right)
     {
@@ -143,7 +143,7 @@ void cb_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right)
     }
 }
 
-void cb_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right)
+void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right)
 {
     if (left && right)
     {
@@ -153,7 +153,7 @@ void cb_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right)
     }
 }
 
-void cb_print_address(
+void ec_print_address(
     char                  *msg,
     const struct sock     *sk,
     const struct sockaddr *localAddr,
@@ -165,8 +165,8 @@ void cb_print_address(
     char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
 
-    cb_ntop(remoteAddr, raddr_str, sizeof(raddr_str), &rport);
-    cb_ntop(localAddr,  laddr_str, sizeof(laddr_str), &lport);
+    ec_ntop(remoteAddr, raddr_str, sizeof(raddr_str), &rport);
+    ec_ntop(localAddr,  laddr_str, sizeof(laddr_str), &lport);
     TRACE(DL_NET, "%s proc=%s pid=%d %s-%s laddr=%s:%u raddr=%s:%u",
        (msg ? msg : ""),
        current->comm,

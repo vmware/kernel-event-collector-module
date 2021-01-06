@@ -13,9 +13,9 @@ struct for_each_priv {
     void *priv;
 };
 
-int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
+int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
-bool process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, ProcessContext *context)
+bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, ProcessContext *context)
 {
     SharedTrackingData *shared_data = NULL;
     ProcessTracking *procp = NULL;
@@ -24,10 +24,10 @@ bool process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, Process
     handle->tree = NULL;
     handle->shared_data = NULL;
 
-    procp = process_tracking_get_process(pid, context);
+    procp = ec_process_tracking_get_process(pid, context);
 
     TRY(procp);
-    shared_data = process_tracking_get_shared_data_ref(procp->shared_data, context);
+    shared_data = ec_process_tracking_get_shared_data_ref(procp->shared_data, context);
 
     if (shared_data)
     {
@@ -36,7 +36,7 @@ bool process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, Process
         handle->tree        = shared_data->tracked_files;
     }
 
-    process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
 
     return true;
 
@@ -44,17 +44,17 @@ CATCH_DEFAULT:
     return false;
 }
 
-void process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext *context)
+void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext *context)
 {
     if (handle)
     {
-        process_tracking_release_shared_data_ref(handle->shared_data, context);
+        ec_process_tracking_release_shared_data_ref(handle->shared_data, context);
         handle->tree = NULL;
         handle->shared_data = NULL;
     }
 }
 
-void process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback callback, void *priv, ProcessContext *context)
+void ec_process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback callback, void *priv, ProcessContext *context)
 {
     // TODO: Improve the tree print logic
     //       This loops over all process tracking nodes and prints the tree inside the shared struct.
@@ -62,14 +62,14 @@ void process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback
     //       to add some logic that prints it only once.
     struct for_each_priv local_priv = { callback, priv };
 
-    hashtbl_read_for_each_generic(g_process_tracking_data.table, __hashtbl_for_each_file_tree, &local_priv, context);
+    ec_hashtbl_read_for_each_generic(g_process_tracking_data.table, __ec_hashtbl_for_each_file_tree, &local_priv, context);
 }
 
-// Note: This function is used as a callback by hashtbl_read_for_each_generic called from
-//       process_tracking_for_each, and is called from inside a spinlock.
+// Note: This function is used as a callback by ec_hashtbl_read_for_each_generic called from
+//       ec_process_tracking_for_each, and is called from inside a spinlock.
 //       Therefore, in the future if modifications are required be aware that any function call that may
 //       sleep should be avoided.
-int __hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     ProcessTracking *procp      = NULL;
     struct for_each_priv *local_priv = NULL;

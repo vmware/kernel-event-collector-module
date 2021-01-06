@@ -8,9 +8,9 @@
 #include "priv.h"
 #include "cb-spinlock.h"
 
-void _send_process_discovery(void *data, void *priv, ProcessContext *context);
+void __ec_send_process_discovery(void *data, void *priv, ProcessContext *context);
 
-void process_tracking_send_process_discovery(ProcessContext *context)
+void ec_process_tracking_send_process_discovery(ProcessContext *context)
 {
     // Because this can add events to the queue, we want to treat this like a
     // hook and make sure it is done before allowing the module to be disabled.
@@ -31,27 +31,27 @@ void process_tracking_send_process_discovery(ProcessContext *context)
     //    We explicitly wake up the reader after we have relased the lock, and
     //      enable the wake up logic.
     DISABLE_WAKE_UP(context);
-    sorted_tracking_table_for_each(_send_process_discovery, NULL, context);
+    ec_sorted_tracking_table_for_each(__ec_send_process_discovery, NULL, context);
     ENABLE_WAKE_UP(context);
 
-    fops_comm_wake_up_reader(context);
+    ec_fops_comm_wake_up_reader(context);
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(context);
 }
 
-void _send_process_discovery(void *data, void *priv, ProcessContext *context)
+void __ec_send_process_discovery(void *data, void *priv, ProcessContext *context)
 {
-    ProcessTracking *procp = sorted_tracking_table_get_process(data, context);
+    ProcessTracking *procp = ec_sorted_tracking_table_get_process(data, context);
 
     TRY(procp);
 
-    event_send_start(procp,
-                    process_tracking_should_track_user() ? procp->uid : (uid_t)-1,
+    ec_event_send_start(procp,
+                    ec_process_tracking_should_track_user() ? procp->uid : (uid_t)-1,
                     CB_PROCESS_START_BY_DISCOVER,
                     context);
 
 CATCH_DEFAULT:
-    process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
     return;
 }

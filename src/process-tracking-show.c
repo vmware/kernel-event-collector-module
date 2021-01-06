@@ -6,22 +6,22 @@
 #include "cb-test.h"
 #include "task-helper.h"
 
-void _show_process_tracking_table(void *data, void *priv, ProcessContext *context);
+void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *context);
 
-int cb_proc_track_show_table(struct seq_file *m, void *v)
+int ec_proc_track_show_table(struct seq_file *m, void *v)
 {
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     seq_printf(m, "%20s | %6s | %12s | %6s | %6s | %6s | %10s | %10s | %5s |\n",
                 "Name", "RPID", "RPPID", "PID", "PPID", "TID", "Inode", "Exec Count", "Alive");
 
-    sorted_tracking_table_for_each(_show_process_tracking_table, m, &context);
+    ec_sorted_tracking_table_for_each(__ec_show_process_tracking_table, m, &context);
 
     return 0;
 }
 
-const char *process_tracking_get_proc_name(const char *path)
+const char *ec_process_tracking_get_proc_name(const char *path)
 {
     const char *proc_name = "<unknown>";
 
@@ -39,19 +39,19 @@ const char *process_tracking_get_proc_name(const char *path)
     return proc_name;
 }
 
-void _show_process_tracking_table(void *data, void *priv, ProcessContext *context)
+void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *context)
 {
     struct seq_file    *seq_file     = (struct seq_file *)priv;
-    ProcessTracking    *procp        = sorted_tracking_table_get_process(data, context);
+    ProcessTracking    *procp        = ec_sorted_tracking_table_get_process(data, context);
     const char         *proc_name    = NULL;
     struct task_struct *task         = NULL;
     uint64_t            shared_count = 0;
 
     TRY(procp && seq_file);
 
-    task = cb_find_task(procp->posix_details.pid);
+    task = ec_find_task(procp->posix_details.pid);
 
-    proc_name = process_tracking_get_proc_name(procp->shared_data->path);
+    proc_name = ec_process_tracking_get_proc_name(procp->shared_data->path);
 
     shared_count = atomic64_read(&procp->shared_data->reference_count);
 
@@ -64,14 +64,14 @@ void _show_process_tracking_table(void *data, void *priv, ProcessContext *contex
                   (uint64_t)procp->tid,
                   procp->posix_details.inode,
                   shared_count,
-                  (is_task_alive(task) ? "yes" : "no"));
+                  (ec_is_task_alive(task) ? "yes" : "no"));
 
 CATCH_DEFAULT:
-    process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
     return;
 }
 
-int cb_proc_track_show_stats(struct seq_file *m, void *v)
+int ec_proc_track_show_stats(struct seq_file *m, void *v)
 {
     seq_printf(m, "%22s | %6llu |\n", "Total Changes",   g_process_tracking_data.op_cnt);
     seq_printf(m, "%22s | %6llu |\n", "Process Creates", g_process_tracking_data.create);

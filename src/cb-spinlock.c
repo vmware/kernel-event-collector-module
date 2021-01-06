@@ -95,28 +95,28 @@ typedef struct {
     unsigned long flags;
 } linuxSpinlock_t;
 
-void cb_spinlock_init(uint64_t *sp, ProcessContext *context)
+void ec_spinlock_init(uint64_t *sp, ProcessContext *context)
 {
-    linuxSpinlock_t *new_spinlock = cb_mem_cache_alloc_generic(sizeof(linuxSpinlock_t), context);
+    linuxSpinlock_t *new_spinlock = ec_mem_cache_alloc_generic(sizeof(linuxSpinlock_t), context);
 
     if (new_spinlock)
     {
         SPINLOCK_INIT(new_spinlock->sp);
-        new_spinlock->create_pid = gettid(current);
+        new_spinlock->create_pid = ec_gettid(current);
         new_spinlock->owner_pid  = 0;
         new_spinlock->flags      = 0;
         *sp = (uint64_t)new_spinlock;
     } else
     {
-        pr_err("%s failed initialize spinlock pid=%d\n", __func__, gettid(current));
+        pr_err("%s failed initialize spinlock pid=%d\n", __func__, ec_gettid(current));
         *sp = 0;
     }
 }
 
-void cb_write_lock(uint64_t *sp, ProcessContext *context)
+void ec_write_lock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
-    pid_t tid = gettid(current);
+    pid_t tid = ec_gettid(current);
 
     DO_FOR_DEBUG({
         if (spinlockp->owner_pid == tid && !WRITE_CAN_LOCK(&spinlockp->sp))
@@ -134,15 +134,15 @@ void cb_write_lock(uint64_t *sp, ProcessContext *context)
     }
 }
 
-void cb_write_unlock(uint64_t *sp, ProcessContext *context)
+void ec_write_unlock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
 
     DO_FOR_DEBUG({
-        if ((spinlockp->owner_pid != 0 && spinlockp->owner_pid != gettid(current)) ||
+        if ((spinlockp->owner_pid != 0 && spinlockp->owner_pid != ec_gettid(current)) ||
             WRITE_CAN_LOCK(&spinlockp->sp))
         {
-            pr_err("%s already UNLOCKED pid=%d owner=%d\n", __func__, gettid(current), spinlockp->owner_pid);
+            pr_err("%s already UNLOCKED pid=%d owner=%d\n", __func__, ec_gettid(current), spinlockp->owner_pid);
         }
     });
 
@@ -152,10 +152,10 @@ void cb_write_unlock(uint64_t *sp, ProcessContext *context)
     WRITE_UNLOCK(&spinlockp->sp, spinlockp->flags, context);
 }
 
-void cb_read_lock(uint64_t *sp, ProcessContext *context)
+void ec_read_lock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
-    pid_t tid = gettid(current);
+    pid_t tid = ec_gettid(current);
 
     DO_FOR_DEBUG({
         if (spinlockp->owner_pid == tid && !READ_CAN_LOCK(&spinlockp->sp))
@@ -173,15 +173,15 @@ void cb_read_lock(uint64_t *sp, ProcessContext *context)
     }
 }
 
-void cb_read_unlock(uint64_t *sp, ProcessContext *context)
+void ec_read_unlock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
 
     DO_FOR_DEBUG({
-        if ((spinlockp->owner_pid != 0 && spinlockp->owner_pid != gettid(current)) ||
+        if ((spinlockp->owner_pid != 0 && spinlockp->owner_pid != ec_gettid(current)) ||
             WRITE_CAN_LOCK(&spinlockp->sp))//If write can lock, we can not have the read lock.  (Best I can do.)
         {
-            pr_err("%s already UNLOCKED pid=%d owner=%d\n", __func__, gettid(current), spinlockp->owner_pid);
+            pr_err("%s already UNLOCKED pid=%d owner=%d\n", __func__, ec_gettid(current), spinlockp->owner_pid);
         }
     });
 
@@ -191,16 +191,16 @@ void cb_read_unlock(uint64_t *sp, ProcessContext *context)
     READ_UNLOCK(&spinlockp->sp, spinlockp->flags, context);
 }
 
-void cb_spinlock_destroy(uint64_t *sp, ProcessContext *context)
+void ec_spinlock_destroy(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
 
     DO_FOR_DEBUG({
         if (!WRITE_CAN_LOCK(&spinlockp->sp))
         {
-            pr_err("%s LOCKED and being destroyed pid=%d owner=%d\n", __func__, gettid(current), spinlockp->owner_pid);
+            pr_err("%s LOCKED and being destroyed pid=%d owner=%d\n", __func__, ec_gettid(current), spinlockp->owner_pid);
         }
     });
     //  pr_err("%s sp=%p\n", __FUNCTION__, spinlockp);
-    cb_mem_cache_free_generic((linuxSpinlock_t *)spinlockp);
+    ec_mem_cache_free_generic((linuxSpinlock_t *)spinlockp);
 }

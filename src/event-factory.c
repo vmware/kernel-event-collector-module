@@ -7,7 +7,7 @@
 #include "file-types.h"
 #include "priv.h"
 
-const char *StartAction_ToString(int start_action)
+const char *ec_StartAction_ToString(int start_action)
 {
     switch (start_action)
     {
@@ -21,12 +21,12 @@ const char *StartAction_ToString(int start_action)
     return "??";
 }
 
-PCB_EVENT factory_alloc_event(ProcessTracking *procp,
-                                     CB_EVENT_TYPE   eventType,
-                                     int             trace_level,
-                                     const char *type_msg,
-                                     const char *status_msg,
-                                     ProcessContext *context)
+PCB_EVENT ec_factory_alloc_event(ProcessTracking *procp,
+                                 CB_EVENT_TYPE   eventType,
+                                 int             trace_level,
+                                 const char *type_msg,
+                                 const char *status_msg,
+                                 ProcessContext *context)
 {
     PCB_EVENT event = NULL;
 
@@ -43,16 +43,16 @@ PCB_EVENT factory_alloc_event(ProcessTracking *procp,
     }
 
     // This will return a NULL event if we are configured to not send this event type
-    event = logger_alloc_event(eventType, context);
+    event = ec_alloc_event(eventType, context);
 
     // We still call this even for a NULL event to give the process_tracking a chance
     //  to clean up any private data
-    process_tracking_set_event_info(procp, eventType, event, context);
+    ec_process_tracking_set_event_info(procp, eventType, event, context);
 
     return event;
 }
 
-void event_send_start(ProcessTracking *procp,
+void ec_event_send_start(ProcessTracking *procp,
                       uid_t            uid,
                       int              start_action,
                       ProcessContext *context)
@@ -61,11 +61,11 @@ void event_send_start(ProcessTracking *procp,
 
     CANCEL_VOID(procp);
 
-    event = factory_alloc_event(
+    event = ec_factory_alloc_event(
         procp,
         start_action != CB_PROCESS_START_BY_FORK ? CB_EVENT_TYPE_PROCESS_START_EXEC : CB_EVENT_TYPE_PROCESS_START_FORK,
         DL_PROCESS,
-        StartAction_ToString(start_action),
+        ec_StartAction_ToString(start_action),
         (procp && procp->is_real_start ? "" : " <FAKE>"),
         context);
 
@@ -78,14 +78,14 @@ void event_send_start(ProcessTracking *procp,
 
     if (procp->shared_data->cmdline)
     {
-        event->processStart.path = cb_mem_cache_get_generic(procp->shared_data->cmdline, context);
+        event->processStart.path = ec_mem_cache_get_generic(procp->shared_data->cmdline, context);
     }
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }
 
-void event_send_last_exit(PCB_EVENT        event,
+void ec_event_send_last_exit(PCB_EVENT        event,
                           ProcessContext  *context)
 {
     CANCEL_VOID(event);
@@ -98,17 +98,17 @@ void event_send_last_exit(PCB_EVENT        event,
            event->procInfo.all_process_details.array[EXEC_PARENT].pid);
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }
 
-void event_send_exit(ProcessTracking *procp,
+void ec_event_send_exit(ProcessTracking *procp,
                      bool             was_last_active_process,
                      ProcessContext  *context)
 {
     // We need to know if this is the last running proccess when we allocate
     //  the event because we may not be sending exits for all forks
     char      *status_msg           = "";
-    PCB_EVENT  event                = factory_alloc_event(
+    PCB_EVENT  event                = ec_factory_alloc_event(
         procp,
         was_last_active_process ? CB_EVENT_TYPE_PROCESS_LAST_EXIT : CB_EVENT_TYPE_PROCESS_EXIT,
         0,              // No message will be printed
@@ -123,11 +123,11 @@ void event_send_exit(ProcessTracking *procp,
             // This is a fork exit, so send it now
             //  Note: This exit event may be collected by the agent before events
             //        produced by this fork.
-            user_comm_send_event(event, context);
+            ec_send_event(event, context);
             status_msg = "<SEND> ";
         } else
         {
-            process_tracking_store_exit_event(procp, event, context);
+            ec_process_tracking_store_exit_event(procp, event, context);
             status_msg = "<HOLD-LAST> ";
         }
     } else
@@ -147,7 +147,7 @@ void event_send_exit(ProcessTracking *procp,
     }
 }
 
-void event_send_block(ProcessTracking *procp,
+void ec_event_send_block(ProcessTracking *procp,
                      uint32_t          type,
                      uint32_t          reason,
                      uint32_t          details,
@@ -155,7 +155,7 @@ void event_send_block(ProcessTracking *procp,
                      char             *cmdline,
                      ProcessContext *context)
 {
-    PCB_EVENT event = factory_alloc_event(
+    PCB_EVENT event = ec_factory_alloc_event(
         procp,
         CB_EVENT_TYPE_PROCESS_BLOCKED,
         DL_PROCESS,
@@ -173,17 +173,17 @@ void event_send_block(ProcessTracking *procp,
 
     if (cmdline)
     {
-        event->blockResponse.path = cb_mem_cache_strdup(cmdline, context);
+        event->blockResponse.path = ec_mem_cache_strdup(cmdline, context);
     }
 
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }
 
 #define MSG_SIZE   200
 
-void event_send_file(
+void ec_event_send_file(
     ProcessTracking *procp,
     CB_EVENT_TYPE    event_type,
     uint64_t         device,
@@ -208,11 +208,11 @@ void event_send_file(
         status_msgp[MSG_SIZE] = 0;
     }
 
-    event = factory_alloc_event(
+    event = ec_factory_alloc_event(
         procp,
         event_type,
         DL_FILE,
-        event_type_to_str(event_type),
+        ec_event_type_to_str(event_type),
         status_msgp,
         context);
 
@@ -225,14 +225,14 @@ void event_send_file(
 
     if (path)
     {
-        event->fileGeneric.path = cb_mem_cache_strdup(path, context);
+        event->fileGeneric.path = ec_mem_cache_strdup(path, context);
     }
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }
 
-void event_send_modload(
+void ec_event_send_modload(
     ProcessTracking *procp,
     CB_EVENT_TYPE    event_type,
     uint64_t         device,
@@ -266,7 +266,7 @@ void event_send_modload(
         status_msgp[MSG_SIZE] = 0;
     }
 
-    event = factory_alloc_event(
+    event = ec_factory_alloc_event(
         procp,
         event_type,
         DL_MODLOAD,
@@ -283,14 +283,14 @@ void event_send_modload(
 
     if (path)
     {
-        event->moduleLoad.path = cb_mem_cache_strdup(path, context);
+        event->moduleLoad.path = ec_mem_cache_strdup(path, context);
     }
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }
 
-void event_send_net_proxy(
+void ec_event_send_net_proxy(
     ProcessTracking *procp,
     char            *msg,
     CB_EVENT_TYPE    net_event_type,
@@ -302,7 +302,7 @@ void event_send_net_proxy(
     void             *sk,
     ProcessContext   *context)
 {
-    PCB_EVENT event = factory_alloc_event(
+    PCB_EVENT event = ec_factory_alloc_event(
         procp,
         net_event_type,
         0,              // No message will be printed
@@ -313,24 +313,24 @@ void event_send_net_proxy(
     CANCEL_VOID(event);
 
     // Populate the event
-    cb_copy_sockaddr(&event->netConnect.localAddr,  localAddr);
-    cb_copy_sockaddr(&event->netConnect.remoteAddr, remoteAddr);
+    ec_copy_sockaddr(&event->netConnect.localAddr,  localAddr);
+    ec_copy_sockaddr(&event->netConnect.remoteAddr, remoteAddr);
 
     event->netConnect.protocol         = protocol;
     event->netConnect.actual_port      = actual_port;
 
     if (actual_server)
     {
-        event->netConnect.actual_server = cb_mem_cache_strdup(actual_server, context);
+        event->netConnect.actual_server = ec_mem_cache_strdup(actual_server, context);
     }
 
-    cb_print_address(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
+    ec_print_address(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }
 
-void event_send_net(
+void ec_event_send_net(
     ProcessTracking *procp,
     char            *msg,
     CB_EVENT_TYPE    net_event_type,
@@ -340,7 +340,7 @@ void event_send_net(
     void             *sk,
     ProcessContext   *context)
 {
-    return event_send_net_proxy(
+    return ec_event_send_net_proxy(
         procp,
         msg,
         net_event_type,
@@ -353,13 +353,13 @@ void event_send_net(
         context);
 }
 
-void event_send_dns(
+void ec_event_send_dns(
     CB_EVENT_TYPE   net_event_type,
     char           *data,
     uint32_t        len,
     ProcessContext *context)
 {
-    PCB_EVENT event = factory_alloc_event(
+    PCB_EVENT event = ec_factory_alloc_event(
         NULL,           // The procInfo is ignored for this event type
         net_event_type,
         0,              // No message will be printed
@@ -373,12 +373,12 @@ void event_send_dns(
     len = min_t(uint32_t, len, sizeof(event->dnsResponse.data));
 
     event->dnsResponse.length = len;
-    event->dnsResponse.data = cb_mem_cache_alloc_generic(len, context);
+    event->dnsResponse.data = ec_mem_cache_alloc_generic(len, context);
     memcpy(event->dnsResponse.data, data, len);
 
     TRACE(DL_NET, "UDP-DNS response len:%d id:%X flags:%X",
           len, event->dnsResponse.dnsheader->id, event->dnsResponse.dnsheader->flags);
 
     // Queue it to be sent to usermode
-    user_comm_send_event(event, context);
+    ec_send_event(event, context);
 }

@@ -23,7 +23,7 @@
 
 uint32_t g_traceLevel = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARNING | DL_ERROR);
 uint64_t g_enableHooks = HOOK_MASK;
-uid_t    g_cb_server_uid = (uid_t)-1;
+uid_t    g_edr_server_uid = (uid_t)-1;
 int64_t  g_cb_ignored_pid_count;
 pid_t    g_cb_ignored_pids[CB_SENSOR_MAX_PIDS];
 int64_t  g_cb_ignored_uid_count;
@@ -59,36 +59,36 @@ atomic64_t       module_used      = ATOMIC64_INIT(0);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
-bool module_state_info_initialize(ProcessContext *context);
+bool ec_module_state_info_initialize(ProcessContext *context);
 
-void module_state_info_shutdown(ProcessContext *context);
+void ec_module_state_info_shutdown(ProcessContext *context);
 
-int _cb_sensor_enable_module_initialize_memory(ProcessContext *context);
+int ec_sensor_enable_module_initialize_memory(ProcessContext *context);
 
-void _cb_sensor_disable_module_shutdown(ProcessContext *context);
+void ec_sensor_disable_module_shutdown(ProcessContext *context);
 
-void set_module_state(ProcessContext *context, ModuleState newState);
+void ec_set_module_state(ProcessContext *context, ModuleState newState);
 
-bool disable_peer_modules(ProcessContext *context);
+bool ec_disable_peer_modules(ProcessContext *context);
 
-bool cb_proc_initialize(ProcessContext *context);
+bool ec_proc_initialize(ProcessContext *context);
 
-void cb_proc_shutdown(ProcessContext *context);
+void ec_proc_shutdown(ProcessContext *context);
 
 struct proc_dir_entry *g_cb_proc_dir;
 
-bool disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason)
+bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason)
 {
     TRACE(DL_INIT, "In %s received call to disable from module %s", __func__, src_module_name);
 
-    if (is_reader_connected())
+    if (ec_is_reader_connected())
     {
         *failure_reason = "Cannot disable " CB_APP_MODULE_NAME " is connected to reader.";
         return false;
     }
 
     {
-        int ret = cbsensor_disable_module(context);
+        int ret = ec_disable_module(context);
 
         if (ret < 0)
         {
@@ -101,12 +101,12 @@ bool disable_if_not_connected(ProcessContext *context, char *src_module_name, ch
     return true;
 }
 
-int cb_proc_state(struct seq_file *m, void *v)
+int ec_proc_state(struct seq_file *m, void *v)
 {
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     char *state_str = NULL;
-    ModuleState state = get_module_state(&context);
+    ModuleState state = ec_get_module_state(&context);
 
     switch (state)
     {
@@ -129,14 +129,14 @@ int cb_proc_state(struct seq_file *m, void *v)
     return 0;
 }
 
-int cb_proc_state_open(struct inode *inode, struct file *file)
+int ec_proc_state_open(struct inode *inode, struct file *file)
 {
-    return single_open(file, cb_proc_state, PDE_DATA(inode));
+    return single_open(file, ec_proc_state, PDE_DATA(inode));
 }
 
-static const struct file_operations cb_fops = {
+static const struct file_operations ec_fops = {
         .owner      = THIS_MODULE,
-        .open       = cb_proc_state_open,
+        .open       = ec_proc_state_open,
         .read       = seq_read,
         .write      = NULL,
         .release    = single_release,
@@ -144,9 +144,9 @@ static const struct file_operations cb_fops = {
 
 const char *PROC_STATE_FILENAME = CB_APP_MODULE_NAME "_state";
 
-int __init cbsensor_init(void)
+int __init ec_init(void)
 {
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
     // Here we look up symbols at runtime to fill in the CB_RESOLVED_SYMS struct.
 #undef CB_RESOLV_VARIABLE
 #undef CB_RESOLV_FUNCTION
@@ -173,18 +173,18 @@ int __init cbsensor_init(void)
     memset(&g_cb_ignored_uids[0], 0xFF, sizeof(uid_t)*CB_SENSOR_MAX_PIDS);
 
     // Actually do the lookup
-    cb_findsyms_init(&context, symbols);
+    ec_findsyms_init(&context, symbols);
 
-    cb_mem_cache_init(&context);
-    hashtbl_generic_init(&context);
-    reader_init();
+    ec_mem_cache_init(&context);
+    ec_hashtbl_generic_init(&context);
+    ec_reader_init();
 
-    TRY_STEP(DEFAULT,    module_state_info_initialize(&context));
-    TRY_STEP(STATE_INFO, netfilter_initialize(&context, g_enableHooks));
-    TRY_STEP(NET_FIL,    lsm_initialize(&context, g_enableHooks));
-    TRY_STEP(LSM,        syscall_initialize(&context, g_enableHooks));
-    TRY_STEP(SYSCALL,    user_devnode_init(&context));
-    TRY_STEP(USER_DEV_NODE,  hook_tracking_initialize(&context));
+    TRY_STEP(DEFAULT,    ec_module_state_info_initialize(&context));
+    TRY_STEP(STATE_INFO, ec_netfilter_initialize(&context, g_enableHooks));
+    TRY_STEP(NET_FIL,    ec_lsm_initialize(&context, g_enableHooks));
+    TRY_STEP(LSM,        ec_syscall_initialize(&context, g_enableHooks));
+    TRY_STEP(SYSCALL,    ec_user_devnode_init(&context));
+    TRY_STEP(USER_DEV_NODE,  ec_hook_tracking_initialize(&context));
 
     if (g_run_self_tests)
     {
@@ -196,10 +196,10 @@ int __init cbsensor_init(void)
         // We need everything initialized for running the self-tests but we don't
         // want the hooks enabled so we do a separate init/shutdown just for the
         // tests. The shutdown here will warn if we fail to free anything.
-        // Everything will be re-inited by cbsensor_enable_module().
-        _cb_sensor_enable_module_initialize_memory(&context);
+        // Everything will be re-inited by ec_enable_module().
+        ec_sensor_enable_module_initialize_memory(&context);
         passed = run_tests(&context);
-        _cb_sensor_disable_module_shutdown(&context);
+        ec_sensor_disable_module_shutdown(&context);
 
         ENABLE_SEND_EVENTS(&context);
         ENABLE_WAKE_UP(&context);
@@ -220,50 +220,50 @@ int __init cbsensor_init(void)
      *
      */
 
-    TRY_STEP(USER_DEV_NODE, !cbsensor_enable_module(&context));
+    TRY_STEP(USER_DEV_NODE, !ec_enable_module(&context));
 
     TRACE(DL_INIT, "Kernel sensor initialization complete");
     return 0;
 
 CATCH_USER_DEV_NODE:
-    user_devnode_close(&context);
+    ec_user_devnode_close(&context);
 CATCH_SYSCALL:
-    syscall_shutdown(&context, g_enableHooks);
+    ec_syscall_shutdown(&context, g_enableHooks);
 CATCH_LSM:
-    lsm_shutdown(&context);
+    ec_lsm_shutdown(&context);
 CATCH_NET_FIL:
-    netfilter_cleanup(&context, g_enableHooks);
+    ec_netfilter_cleanup(&context, g_enableHooks);
 CATCH_STATE_INFO:
-    module_state_info_shutdown(&context);
+    ec_module_state_info_shutdown(&context);
 CATCH_DEFAULT:
     return -1;
 }
 
 
-void cbsensor_shutdown(ProcessContext *context)
+void ec_shutdown(ProcessContext *context)
 {
     // If the hooks have been modified abort the shutdown.
-    CANCEL_VOID_MSG(!(syscall_hooks_changed(context, g_enableHooks) || lsm_hooks_changed(context, g_enableHooks)),
+    CANCEL_VOID_MSG(!(ec_syscall_hooks_changed(context, g_enableHooks) || ec_lsm_hooks_changed(context, g_enableHooks)),
                     DL_WARNING, "Hooks have changed, unable to shutdown");
 
     /**
      *
      * Disables the module & free up the memory resources.
-     * Refer to function header for cbsensor_disable_module, to get more details.
+     * Refer to function header for ec_disable_module, to get more details.
      */
-    CANCEL_VOID((cbsensor_disable_module(context) == 0));
+    CANCEL_VOID((ec_disable_module(context) == 0));
 
     // Remove hooks
-    syscall_shutdown(context, g_enableHooks);
-    lsm_shutdown(context);
-    netfilter_cleanup(context, g_enableHooks);
+    ec_syscall_shutdown(context, g_enableHooks);
+    ec_lsm_shutdown(context);
+    ec_netfilter_cleanup(context, g_enableHooks);
 }
 
-void __exit cbsensor_cleanup(void)
+void __exit ec_cleanup(void)
 {
     uint64_t l_module_used;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     TRACE(DL_SHUTDOWN, "Cleaning up module...");
 
@@ -279,10 +279,10 @@ void __exit cbsensor_cleanup(void)
         ssleep(5);
     }
 
-    hook_tracking_shutdown(&context);
-    module_state_info_shutdown(&context);
-    hashtbl_generic_destoy(&context);
-    cb_mem_cache_shutdown(&context);
+    ec_hook_tracking_shutdown(&context);
+    ec_module_state_info_shutdown(&context);
+    ec_hashtbl_generic_destoy(&context);
+    ec_mem_cache_shutdown(&context);
 
     tracepoint_synchronize_unregister();
 
@@ -322,27 +322,27 @@ void __exit cbsensor_cleanup(void)
  *    reasons for dropping this.
  *
  */
-int cbsensor_disable_module(ProcessContext *context)
+int ec_disable_module(ProcessContext *context)
 {
     int print_count         = 0;
 
-    cb_write_lock(&g_module_state_info.module_state_lock, context);
+    ec_write_lock(&g_module_state_info.module_state_lock, context);
 
     switch (g_module_state_info.module_state)
     {
         case ModuleStateDisabled:
             TRACE(DL_INFO, "%s Received a request to disable a module that's already disabled, so no-op. ", __func__);
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return 0;
 
         case ModuleStateDisabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to disable module while module is in disabling state", __func__);
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return -EPERM;
 
         case ModuleStateEnabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to disable module while module is in enabling state", __func__);
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return -EPERM;
 
         case ModuleStateEnabled:
@@ -351,7 +351,7 @@ int cbsensor_disable_module(ProcessContext *context)
             break;
     }
 
-    cb_write_unlock(&g_module_state_info.module_state_lock, context);
+    ec_write_unlock(&g_module_state_info.module_state_lock, context);
 
     while (true)
     {
@@ -364,7 +364,7 @@ int cbsensor_disable_module(ProcessContext *context)
             if ((++print_count % 5) == 0)
             {
                 TRACE(DL_INIT,  "%s Module has %lld active hooks, delaying disable...",  __func__, l_active_call_count);
-                hook_tracking_print_active(context);
+                ec_hook_tracking_print_active(context);
             }
             ssleep(1);
             continue;
@@ -377,9 +377,9 @@ int cbsensor_disable_module(ProcessContext *context)
 
     DISABLE_WAKE_UP(context);
 
-    _cb_sensor_disable_module_shutdown(context);
+    ec_sensor_disable_module_shutdown(context);
 
-    set_module_state(context, ModuleStateDisabled);
+    ec_set_module_state(context, ModuleStateDisabled);
 
     TRACE(DL_INIT,  "%s: Module successfully disabled.", __func__);
 
@@ -392,22 +392,22 @@ int cbsensor_disable_module(ProcessContext *context)
 /**
  * Using the lock here, just to get a consistent read for the module_state enum.
  */
-ModuleState get_module_state(ProcessContext *context)
+ModuleState ec_get_module_state(ProcessContext *context)
 {
     ModuleState _state;
 
-    cb_write_lock(&g_module_state_info.module_state_lock, context);
+    ec_write_lock(&g_module_state_info.module_state_lock, context);
     _state = g_module_state_info.module_state;
-    cb_write_unlock(&g_module_state_info.module_state_lock, context);
+    ec_write_unlock(&g_module_state_info.module_state_lock, context);
 
     return _state;
 }
 
-void set_module_state(ProcessContext *context, ModuleState newState)
+void ec_set_module_state(ProcessContext *context, ModuleState newState)
 {
-    cb_write_lock(&g_module_state_info.module_state_lock, context);
+    ec_write_lock(&g_module_state_info.module_state_lock, context);
     g_module_state_info.module_state = newState;
-    cb_write_unlock(&g_module_state_info.module_state_lock, context);
+    ec_write_unlock(&g_module_state_info.module_state_lock, context);
 }
 
 /**
@@ -424,56 +424,56 @@ void set_module_state(ProcessContext *context, ModuleState newState)
  * - Lets this thread release the state-lock, this is very important (I ended up chasing my tail
  *  trying to figure this out.). The calls that initialize memory do call kmem_cache_create, deep
  *  in kmem_cache_create's call-stack it attempts to send some notification over a UDS socket,
- *  which then ends up calling the hook "on_sock_rcv_skb". This call will also attempt to do
+ *  which then ends up calling the hook "ec_on_sock_rcv_skb". This call will also attempt to do
  *  the state check so will try to grab the same lock. Thus the need to release the lock before
  *  making the calls to initialize memory.
  *
  */
-int cbsensor_enable_module(ProcessContext *context)
+int ec_enable_module(ProcessContext *context)
 {
-    cb_write_lock(&g_module_state_info.module_state_lock, context);
+    ec_write_lock(&g_module_state_info.module_state_lock, context);
 
     switch (g_module_state_info.module_state)
     {
         case ModuleStateDisabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to enable module while module is in disabling state", __func__);
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return -EPERM;
 
         case ModuleStateEnabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to enable module while module is in enabling state", __func__);
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return -EPERM;
         case ModuleStateEnabled:
         {
             TRACE(DL_INFO, "%s Received a request to enable a module that's already enabled, so no-op. ", __func__);
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return 0;
         }
         case ModuleStateDisabled:
         {
             g_module_state_info.module_state = ModuleStateEnabling;
-            cb_write_unlock(&g_module_state_info.module_state_lock, context);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
 
             {
-                DECLARE_ATOMIC_CONTEXT(atomic_context, getpid(current));
+                DECLARE_ATOMIC_CONTEXT(atomic_context, ec_getpid(current));
 
-                int result = _cb_sensor_enable_module_initialize_memory(context);
+                int result = ec_sensor_enable_module_initialize_memory(context);
 
                 if (result != 0)
                 {
                     TRACE(DL_ERROR,
-                          "Call _cb_sensor_enable_module_initialize_memory failed with error %d",
+                          "Call ec_sensor_enable_module_initialize_memory failed with error %d",
                           result);
 
-                    set_module_state(context, ModuleStateDisabled);
+                    ec_set_module_state(context, ModuleStateDisabled);
                     return result;
                 }
 
-                enumerate_and_track_all_tasks(&atomic_context);
+                ec_enumerate_and_track_all_tasks(&atomic_context);
             }
 
-            set_module_state(context, ModuleStateEnabled);
+            ec_set_module_state(context, ModuleStateEnabled);
             TRACE(DL_INIT, "%s Module enable operation succeeded. ", __func__);
         }
             break;
@@ -483,74 +483,74 @@ int cbsensor_enable_module(ProcessContext *context)
 }
 
 
-int _cb_sensor_enable_module_initialize_memory(ProcessContext *context)
+int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
-    TRY_STEP(DEFAULT,   disable_peer_modules(context));
-    TRY_STEP(DEFAULT,   path_buffers_init(context));
-    TRY_STEP(BUFFERS,   cb_proc_initialize(context));
-    TRY_STEP(PROC_DIR,  user_comm_initialize(context));
-    TRY_STEP(USER_COMM, logger_initialize(context));
-    TRY_STEP(LOGGER,    process_tracking_initialize(context));
-    TRY_STEP(PROC,      network_tracking_initialize(context));
-    TRY_STEP(NET_TR,    cbBanningInitialize(context));
-    TRY_STEP(BAN,       !CbInitializeNetworkIsolation(context));
-    TRY_STEP(NET_IS,    file_helper_init(context));
-    TRY_STEP(NET_IS,    task_initialize(context));
-    TRY_STEP(TASK,      file_process_tracking_init(context));
-    TRY_STEP(FILE_PROC, cb_stats_proc_initialize(context));
+    TRY_STEP(DEFAULT,   ec_disable_peer_modules(context));
+    TRY_STEP(DEFAULT,   ec_path_buffers_init(context));
+    TRY_STEP(BUFFERS,   ec_proc_initialize(context));
+    TRY_STEP(PROC_DIR,  ec_user_comm_initialize(context));
+    TRY_STEP(USER_COMM, ec_logger_initialize(context));
+    TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
+    TRY_STEP(PROC,      ec_network_tracking_initialize(context));
+    TRY_STEP(NET_TR,    ec_banning_initialize(context));
+    TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
+    TRY_STEP(NET_IS,    ec_file_helper_init(context));
+    TRY_STEP(NET_IS,    ec_task_initialize(context));
+    TRY_STEP(TASK,      ec_file_process_tracking_init(context));
+    TRY_STEP(FILE_PROC, ec_stats_proc_initialize(context));
 
     return 0;
 
 CATCH_FILE_PROC:
-    file_process_tracking_shutdown(context);
+    ec_file_process_tracking_shutdown(context);
 CATCH_TASK:
-    task_shutdown(context);
+    ec_task_shutdown(context);
 CATCH_NET_IS:
-    CbDestroyNetworkIsolation(context);
+    ec_DestroyNetworkIsolation(context);
 CATCH_BAN:
-    cbBanningShutdown(context);
+    ec_banning_shutdown(context);
 CATCH_NET_TR:
-    network_tracking_shutdown(context);
+    ec_network_tracking_shutdown(context);
 CATCH_PROC:
-    process_tracking_shutdown(context);
+    ec_process_tracking_shutdown(context);
 CATCH_LOGGER:
-    logger_shutdown(context);
+    ec_logger_shutdown(context);
 CATCH_USER_COMM:
-    user_comm_shutdown(context);
+    ec_user_comm_shutdown(context);
 CATCH_PROC_DIR:
-    cb_proc_shutdown(context);
+    ec_proc_shutdown(context);
 CATCH_BUFFERS:
-    path_buffers_shutdown(context);
+    ec_path_buffers_shutdown(context);
 CATCH_DEFAULT:
     return -ENOMEM;
 }
 
-void _cb_sensor_disable_module_shutdown(ProcessContext *context)
+void ec_sensor_disable_module_shutdown(ProcessContext *context)
 {
     /**
      * Shutdown the different subsystems, note order is important here.
      * Need to shutdown subsystems in the reverse order of dependency.
      */
-    cb_stats_proc_shutdown(context);
-    task_shutdown(context);
-    CbDestroyNetworkIsolation(context);
-    cbBanningShutdown(context);
-    user_comm_shutdown(context);
-    network_tracking_shutdown(context);
-    process_tracking_shutdown(context);
-    logger_shutdown(context);
-    file_process_tracking_shutdown(context);
-    path_buffers_shutdown(context);
-    cb_proc_shutdown(context);
+    ec_stats_proc_shutdown(context);
+    ec_task_shutdown(context);
+    ec_DestroyNetworkIsolation(context);
+    ec_banning_shutdown(context);
+    ec_user_comm_shutdown(context);
+    ec_network_tracking_shutdown(context);
+    ec_process_tracking_shutdown(context);
+    ec_logger_shutdown(context);
+    ec_file_process_tracking_shutdown(context);
+    ec_path_buffers_shutdown(context);
+    ec_proc_shutdown(context);
 }
 
-bool disable_peer_modules(ProcessContext *context)
+bool ec_disable_peer_modules(ProcessContext *context)
 {
     struct list_head peer_modules = LIST_HEAD_INIT(peer_modules);
     struct PEER_MODULE *elem = NULL;
     bool result = false;
 
-    result = lookup_peer_module_symbols(context, &peer_modules);
+    result = ec_lookup_peer_module_symbols(context, &peer_modules);
     if (!result)
     {
         goto Exit;
@@ -577,29 +577,29 @@ bool disable_peer_modules(ProcessContext *context)
     }
 
 Exit:
-    free_peer_module_symbols(&peer_modules);
+    ec_free_peer_module_symbols(&peer_modules);
 
     return result;
 }
 
-bool module_state_info_initialize(ProcessContext *context)
+bool ec_module_state_info_initialize(ProcessContext *context)
 {
-    cb_spinlock_init(&g_module_state_info.module_state_lock, context);
+    ec_spinlock_init(&g_module_state_info.module_state_lock, context);
 
     g_module_state_info.module_state = ModuleStateDisabled;
 
-    proc_create(PROC_STATE_FILENAME, 0400, NULL, &cb_fops);
+    proc_create(PROC_STATE_FILENAME, 0400, NULL, &ec_fops);
 
     return true;
 }
 
-void module_state_info_shutdown(ProcessContext *context)
+void ec_module_state_info_shutdown(ProcessContext *context)
 {
     remove_proc_entry(PROC_STATE_FILENAME, NULL);
-    cb_spinlock_destroy(&g_module_state_info.module_state_lock, context);
+    ec_spinlock_destroy(&g_module_state_info.module_state_lock, context);
 }
 
-bool cb_proc_initialize(ProcessContext *context)
+bool ec_proc_initialize(ProcessContext *context)
 {
     g_cb_proc_dir = proc_mkdir(CB_APP_PROC_DIR, NULL);
     TRY(g_cb_proc_dir);
@@ -610,7 +610,7 @@ CATCH_DEFAULT:
     return false;
 }
 
-void cb_proc_shutdown(ProcessContext *context)
+void ec_proc_shutdown(ProcessContext *context)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     proc_remove(g_cb_proc_dir);
@@ -620,7 +620,7 @@ void cb_proc_shutdown(ProcessContext *context)
 }
 
 
-module_init(cbsensor_init);
-module_exit(cbsensor_cleanup);
+module_init(ec_init);
+module_exit(ec_cleanup);
 
 MODULE_LICENSE("GPL");

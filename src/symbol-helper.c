@@ -10,7 +10,7 @@ typedef struct _on_symbol_context {
 }
 on_symbol_context;
 
-int onsym(void *data, const char *name, struct module *module_name,
+int __ec_onsym(void *data, const char *name, struct module *module_name,
           unsigned long addr)
 {
     if (!data)
@@ -34,14 +34,14 @@ int onsym(void *data, const char *name, struct module *module_name,
     return 0;
 }
 
-void *get_ksym(char *sym_name)
+void *ec_get_ksym(char *sym_name)
 {
     on_symbol_context ctx;
 
     ctx.function_name = sym_name;
     ctx.function = 0;
 
-    kallsyms_on_each_symbol(onsym, &ctx);
+    kallsyms_on_each_symbol(__ec_onsym, &ctx);
     pr_info("%s found at 0x%p\n", ctx.function_name, ctx.function);
 
     return ctx.function;
