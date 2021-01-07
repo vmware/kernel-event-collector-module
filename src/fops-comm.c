@@ -963,7 +963,7 @@ static long device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsig
         {
             PCB_TRUSTED_PATH pathData = (PCB_TRUSTED_PATH)page;
 
-            if (copy_from_user(page, (void *)arg, sizeof(CB_TRUSTED_PATH)))
+            if (copy_from_user(page, (void *)arg, size))
             {
                 TRACE(DL_ERROR, "%s: failed to copy arg", __func__);
                 free_page((unsigned long)page);

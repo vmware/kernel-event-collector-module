@@ -312,7 +312,7 @@ void cbSetIgnoredProcess(ProcessContext *context, pid_t pid)
         g_cb_ignored_pids[max] = pid;
         max += 1;
         atomic64_set((atomic64_t *)&g_cb_ignored_pid_count, max);
-        TRACE(DL_WARNING, "Adding pid=%u at %lld", pid, max);
+        TRACE(DL_INFO, "Adding pid=%u at %lld", pid, max);
     }
 }
 

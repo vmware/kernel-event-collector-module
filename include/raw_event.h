@@ -440,7 +440,7 @@ typedef struct {
 
 typedef struct CB_TRUSTED_PATH {
   char path[PATH_MAX + 1];
-} CB_TRUSTED_PATH, *PCB_TRUSTED_PATH;
+} *PCB_TRUSTED_PATH;
 
 #define EBPF_MIN_KERN_MAJOR 4
 #define EBPF_MIN_KERN_MINOR 4
