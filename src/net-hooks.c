@@ -103,12 +103,17 @@ LIST_HEAD(g_net_age_list);
             /* If the module is exiting we need to return from the function. */                          \
             if (g_exiting)                                                                               \
             {                                                                                            \
-                /* If this is a timeout value that we asked for than simulate receiving a zero           \
-                 * byte packet.  Otherwise we will return with a possibly collected packet.              \
+                /* CB-26764                                                                              \
+                 * If we set the timeout then don't return 0 because it may cause the consumer           \
+                 * to think the socket was closed. Instead, return -EINTR to indicate that we            \
+                 * returned sooner than requested.                                                       \
                  */                                                                                      \
                 if (our_timeout && return_code == -EAGAIN)                                               \
                 {                                                                                        \
-                    return_code = 0;                                                                     \
+                    TRACE(DL_VERBOSE,                                                                    \
+                          "g_exiting=TRUE, pid=%d, sock=0x%p, dlta=%ld sec, returning -EINTR\n",         \
+                          current->pid, sock, dlta/HZ);                                                  \
+                    return_code = -EINTR;                                                                \
                 }                                                                                        \
                 break;                                                                                   \
             }                                                                                            \
@@ -1272,6 +1277,10 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
     //    - Set MSG_UDP_HOOK flag to skip LSM hook
     //    - Call original syscall with original flags and user buffer
 
+    // If the module is disabled, we want to avoid interactions with the messages that could affect
+    // another active kernel module. This also saves some CPU cycles for disabled modules, as they
+    // can jump right to handling the original syscall
+    IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
     CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek);
 
     if (bUdpPeek)
@@ -1282,6 +1291,7 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
         struct iovec iovec_peek = {0};
         char iovec_peek_buf[IOV_FOR_MSG_PEEK_SIZE] = {0};
         char cbuf[CMSG_SPACE(sizeof(struct in6_pktinfo))] = {0};
+
 
         msg_peek.msg_iovlen = 1;
         msg_peek.msg_iov = &iovec_peek;
@@ -1295,6 +1305,7 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
         // We're going to work with msg_peek struct which is allocated in kernel space
         oldfs = get_fs();
         set_fs(get_ds());
+
         // Peek at the message to determine remote IP address and port
         PEEK(&context, cb_orig_sys_recvmsg(fd, &msg_peek, _flags), sock, msg_peek, sk_rcvtimeo_dlta, weSetTimeout, flags, xcode);
         set_fs(oldfs);
@@ -1308,6 +1319,7 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
         flags |= MSG_UDP_HOOK;
     }
 
+CATCH_DISABLED:
     // Get the actual data which will be copied to the buffer provided by caller
     TIMED_RECV(cb_orig_sys_recvmsg(fd, msg, flags), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
 
@@ -1319,6 +1331,7 @@ CATCH_DEFAULT:
         sockfd_put(sock);
     }
     MODULE_PUT();
+
     return xcode;
 }
 
@@ -1393,6 +1406,10 @@ asmlinkage long cb_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
         }
     }
 
+    // If the module is disabled, we want to avoid interactions with the messages that could affect
+    // another active kernel module. This also saves some CPU cycles for disabled modules, as they
+    // can jump right to handling the original syscall
+    IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
     CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek);
 
     if (bUdpPeek)
@@ -1451,6 +1468,7 @@ asmlinkage long cb_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
         flags |= MSG_UDP_HOOK;
     }
 
+CATCH_DISABLED:
     // This call can block here for a long time if the caller passes a big timeout value or doesn't specify the timeout at all.
     // In this case recvmmsg() will call recvmsg() in a loop until either of the following conditions are met:
     // 1. Caller's timeout expires (if it's set)
@@ -1541,6 +1559,10 @@ asmlinkage long cb_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
     //    the standard syscall. I need to do this because kernel_recvmsg logic below messes up some
     //    non-ip sockets (Specifically I noticed a problem with PF_NETLINK.)
 
+    // If the module is disabled, we want to avoid interactions with the messages that could affect
+    // another active kernel module. This also saves some CPU cycles for disabled modules, as they
+    // can jump right to handling the original syscall
+    IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
     CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek);
 
     if (bUdpPeek)
@@ -1575,6 +1597,7 @@ asmlinkage long cb_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
         flags |= MSG_UDP_HOOK;
     }
 
+CATCH_DISABLED:
     // Call original syscall which should populate all the buffers and variables that a caller passed in
     TIMED_RECV(cb_orig_sys_recvfrom(fd, ubuf, size, flags, addr, addr_len),
                sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
