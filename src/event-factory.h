@@ -30,7 +30,6 @@ void ec_event_send_file(ProcessTracking *procp,
                         CB_EVENT_TYPE    event_type,
                         uint64_t         device,
                         uint64_t         inode,
-                        CB_FILE_TYPE     file_type,
                         const char *path,
                         ProcessContext *context);
 

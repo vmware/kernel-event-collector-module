@@ -4,7 +4,6 @@
 
 #include "event-factory.h"
 #include "net-helper.h"
-#include "file-types.h"
 #include "priv.h"
 
 const char *ec_StartAction_ToString(int start_action)
@@ -188,7 +187,6 @@ void ec_event_send_file(
     CB_EVENT_TYPE    event_type,
     uint64_t         device,
     uint64_t         inode,
-    CB_FILE_TYPE     file_type,
     const char *path,
     ProcessContext *context)
 {
@@ -221,7 +219,6 @@ void ec_event_send_file(
     // Populate the event
     event->fileGeneric.device    = device;
     event->fileGeneric.inode     = inode;
-    event->fileGeneric.file_type = file_type;
 
     if (path)
     {

@@ -109,25 +109,6 @@ typedef enum CB_EVENT_TYPE {
   CB_EVENT_TYPE_MAX
 } CB_EVENT_TYPE;
 
-// TODO: This enum list is taken from the protobuf.  My preference would be to
-// get it from that header instead.
-typedef enum CB_FILE_TYPE {
-  filetypeUnknown = 0x0000,
-  filetypePe = 0x0001,           // windows
-  filetypeElf = 0x0002,          // linux
-  filetypeUniversalBin = 0x0003, // osx
-  filetypeEicar = 0x0008,
-  filetypeOfficeLegacy = 0x0010,
-  filetypeOfficeOpenXml = 0x0011,
-  filetypePdf = 0x0030,
-  filetypeArchivePkzip = 0x0040,
-  filetypeArchiveLzh = 0x0041,
-  filetypeArchiveLzw = 0x0042,
-  filetypeArchiveRar = 0x0043,
-  filetypeArchiveTar = 0x0044,
-  filetypeArchive7zip = 0x0045
-} CB_FILE_TYPE;
-
 typedef struct process_details {
     uint64_t          device;
     uint64_t          inode;
@@ -182,7 +163,6 @@ typedef struct _CB_EVENT_MODULE_LOAD {
 
 typedef struct _CB_EVENT_FILE_GENERIC {
     char *path;
-    CB_FILE_TYPE file_type;
     uint64_t device;
     uint64_t inode;
 } CB_EVENT_FILE_GENERIC, *PCB_EVENT_FILE_GENERIC;

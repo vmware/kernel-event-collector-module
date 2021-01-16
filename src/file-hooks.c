@@ -3,7 +3,6 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "priv.h"
-#include "file-types.h"
 #include "process-tracking.h"
 #include "file-process-tracking.h"
 #include "cb-spinlock.h"
@@ -343,7 +342,6 @@ void __ec_do_generic_file_event(ProcessContext *context,
         eventType,
         file_data->device,
         file_data->inode,
-        filetypeUnknown,
         file_data->name,
         context);
 
@@ -465,7 +463,6 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                     eventType,
                     device,
                     inode,
-                    fileProcess->fileType,
                     pathname,
                     context);
             }
@@ -481,7 +478,6 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                 eventType,
                 device,
                 inode,
-                fileProcess->fileType,
                 pathname,
                 context);
         }
@@ -513,22 +509,10 @@ long (*ec_orig_sys_unlink)(const char __user *filename);
 long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int flag);
 long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
 
-// This detects the file type after the first write happens.  We still send the events
-//  from the LSM hook because the kernel panics the second time a file is opened when we
-//  attempt to read the path from this hook.
-// Because we detect the type after the first write, I added logic that will redetect the
-//  type  on a write to the beginning of the file.  (So if the file type changes we will
-//  detect it.)
-// NOTE: I have to read the file type here so I have access to the numer bytes written to
-//  the file.  I need this to decide if we wrote into the area that will help us identify
-//  the file type.
 asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t count)
 {
-    long                ret;
-    uint64_t            device        = 0;
-    uint64_t            inode         = 0;
-    FILE_PROCESS_VALUE *fileProcess   = NULL;
-    struct file *file                 = NULL;
+    long         ret;
+    struct file *file = NULL;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
@@ -548,58 +532,7 @@ asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t cou
 
     __ec_do_file_event(&context, file, CB_EVENT_TYPE_FILE_WRITE);
 
-    TRY(S_ISREG(ec_get_mode_from_file(file)));
-
-    ec_get_devinfo_from_file(file, &device, &inode);
-
-    fileProcess = ec_file_process_status(device, inode, ec_getpid(current), &context);
-
-    // I did not bother to do all the checks we do in the other hook to see if this file
-    //  should be ignored.  If this check passes we know this is a file we care about
-    if (fileProcess && !fileProcess->isSpecialFile)
-    {
-        loff_t         pos_orig      = file->f_pos;
-
-        // If we detect this is the first write or that a write happened near the start of the file attempt to detect the type.
-        if (!fileProcess->didReadType || (pos_orig - ret) < MAX_FILE_BYTES_TO_DETERMINE_TYPE)
-        {
-            char           buffer[MAX_FILE_BYTES_TO_DETERMINE_TYPE];
-            CB_FILE_TYPE   fileType = filetypeUnknown;
-            loff_t         pos      = 0;
-            ssize_t        size     = 0;
-            mm_segment_t   oldfs    = get_fs();
-            fmode_t        mode;
-
-            // Seek to the beginning of the file so we can read the data we want.
-            TRY(-1 < vfs_llseek(file, 0, SEEK_SET));
-
-            // Save the real mode and force the ability to read in case the file was opened write only
-            mode = file->f_mode;
-            file->f_mode |= FMODE_READ;
-
-            // Disable memory checks because we are passing in a kernel buffer instead of a user buffer
-            set_fs(KERNEL_DS);
-            size = vfs_read(file, buffer, MAX_FILE_BYTES_TO_DETERMINE_TYPE, &pos);
-            set_fs(oldfs);
-
-            // Restore the real file mode
-            file->f_mode = mode;
-
-            if (size > 0)
-            {
-                ec_determine_file_type(buffer, size, &fileType, true);
-                TRACE(DL_VERBOSE, "Detected file %s of type %s", fileProcess->path, ec_file_type_str(fileType));
-                fileProcess->fileType    = fileType;
-                fileProcess->didReadType = true;
-            }
-
-            // Seek back to where the file was be so that the next write will work
-            TRY(-1 < vfs_llseek(file, pos_orig, SEEK_SET));
-        }
-    }
-
 CATCH_DEFAULT:
-    ec_file_process_put_ref(fileProcess, &context);
     if (file)
     {
         fput(file);

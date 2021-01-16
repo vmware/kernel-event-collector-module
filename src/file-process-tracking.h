@@ -23,7 +23,6 @@ typedef struct FILE_PROCESS_VALUE {
     FILE_PROCESS_KEY    key;
     pid_t               pid;
     FILE_PROCESS_STATUS status;
-    CB_FILE_TYPE        fileType;
     bool                didReadType;
     bool                isSpecialFile;
     char               *path;
