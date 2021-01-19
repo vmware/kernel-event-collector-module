@@ -35,12 +35,12 @@
 // ------------------------------------------------
 // Network Helpers
 //
-size_t cb_ntop(const struct sockaddr *sap, char *buf, const size_t buflen, uint16_t *port);
-void cb_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port);
-void cb_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right);
-void cb_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right);
-void cb_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right);
-void cb_print_address(
+size_t ec_ntop(const struct sockaddr *sap, char *buf, const size_t buflen, uint16_t *port);
+void ec_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port);
+void ec_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right);
+void ec_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right);
+void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right);
+void ec_print_address(
     char                  *msg,
     const struct sock     *sk,
     const struct sockaddr *localAddr,

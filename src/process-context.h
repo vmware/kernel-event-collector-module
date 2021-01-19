@@ -12,7 +12,7 @@
 #include <linux/gfp.h>
 #include "dbg.h"
 
-extern struct timespec get_current_timespec(void);
+extern struct timespec ec_get_current_timespec(void);
 
 #define __CONTEXT_INITIALIZER(NAME, MODE, PID) {                               \
     .gfp_mode              = { (MODE), },                                      \
@@ -21,7 +21,7 @@ extern struct timespec get_current_timespec(void);
     .allow_wake_up         = true,                                             \
     .allow_send_events     = true,                                             \
     .hook_name             = __func__,                                         \
-    .enter_time            = get_current_timespec(),                           \
+    .enter_time            = ec_get_current_timespec(),                        \
     .list                  = LIST_HEAD_INIT((NAME).list),                      \
     .decr_active_call_count_on_exit = false                                    \
 }

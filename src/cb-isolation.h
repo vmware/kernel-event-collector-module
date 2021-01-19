@@ -77,22 +77,22 @@ typedef struct _CB_ISOLATION_STATS {
     ULONGLONG   isolationAllowedOutboundIp6Packets;
 } CB_ISOLATION_STATS, *PCB_ISOLATION_STATS;
 
-NTSTATUS CbInitializeNetworkIsolation(ProcessContext *context);
+NTSTATUS ec_InitializeNetworkIsolation(ProcessContext *context);
 
-VOID CbDestroyNetworkIsolation(ProcessContext *context);
+VOID ec_DestroyNetworkIsolation(ProcessContext *context);
 
-VOID CbSetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode);
+VOID ec_SetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode);
 
-VOID CbDisableNetworkIsolation(ProcessContext *context);
+VOID ec_DisableNetworkIsolation(ProcessContext *context);
 
-CB_ISOLATION_MODE CbGetCurrentIsolationMode(ProcessContext *context);
+CB_ISOLATION_MODE ec_GetCurrentIsolationMode(ProcessContext *context);
 
-VOID CbIsolationIntercept(ProcessContext *context,
+VOID ec_IsolationIntercept(ProcessContext *context,
                           ULONG  remoteIpAddress,
                           CB_ISOLATION_INTERCEPT_RESULT *isolationResult);
 
 
-NTSTATUS CbProcessIsolationIoctl(
+NTSTATUS ec_ProcessIsolationIoctl(
     ProcessContext *context,
     ULONG           IoControlCode,
     PVOID           pBuf,
@@ -101,7 +101,7 @@ NTSTATUS CbProcessIsolationIoctl(
 //	DWORD       OutputBufLen,
 //ULONG_PTR*  bytesXfered);
 
-VOID CbIsolationInterceptByAddrProtoPort(
+VOID ec_IsolationInterceptByAddrProtoPort(
     ProcessContext *context,
     ULONG                                   remoteIpAddress,
     bool                                    isIpV4,

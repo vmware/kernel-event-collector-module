@@ -18,31 +18,31 @@ static PCB_ISOLATION_MODE_CONTROL   _pCurrentCbIsolationModeControl;
 uint64_t                            _pControlLock;
 static BOOLEAN                      _isInitialized = FALSE;
 
-static BOOLEAN ACQUIRE_RESOURCE(ProcessContext *context)
+BOOLEAN ACQUIRE_RESOURCE(ProcessContext *context)
 {
     if (_isInitialized == FALSE)
     {
         return FALSE;
     }
 
-    cb_write_lock(&_pControlLock, context);
+    ec_write_lock(&_pControlLock, context);
     return TRUE;
 }
 
-static VOID RELEASE_RESOURCE(ProcessContext *context)
+VOID RELEASE_RESOURCE(ProcessContext *context)
 {
-    cb_write_unlock(&_pControlLock, context);
+    ec_write_unlock(&_pControlLock, context);
 }
 
-NTSTATUS CbInitializeNetworkIsolation(ProcessContext *context)
+NTSTATUS ec_InitializeNetworkIsolation(ProcessContext *context)
 {
-    cb_spinlock_init(&_pControlLock, context);
+    ec_spinlock_init(&_pControlLock, context);
     atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
     atomic_set((atomic_t *)&_isInitialized, TRUE);
     return STATUS_SUCCESS;
 }
 
-VOID CbDestroyNetworkIsolation(ProcessContext *context)
+VOID ec_DestroyNetworkIsolation(ProcessContext *context)
 {
     atomic_set((atomic_t *)&_isInitialized, FALSE);
     atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
@@ -51,31 +51,31 @@ VOID CbDestroyNetworkIsolation(ProcessContext *context)
     {
         if (_pCurrentCbIsolationModeControl)
         {
-            cb_mem_cache_free_generic(_pCurrentCbIsolationModeControl);
+            ec_mem_cache_free_generic(_pCurrentCbIsolationModeControl);
             _pCurrentCbIsolationModeControl = NULL;
         }
 
         RELEASE_RESOURCE(context);
     }
 
-    cb_spinlock_destroy(&_pControlLock, context);
+    ec_spinlock_destroy(&_pControlLock, context);
 }
 
-VOID CbSetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode)
+VOID ec_SetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode)
 {
     atomic_set((atomic_t *)&CBIsolationMode, isolationMode);
     g_cbIsolationStats.isolationEnabled = isolationMode == IsolationModeOn;
     TRACE(DL_INFO, "CB ISOLATION MODE: %s", isolationMode == IsolationModeOff ? "DISABLED" : "ENABLED");
 }
 
-VOID CbDisableNetworkIsolation(ProcessContext *context)
+VOID ec_DisableNetworkIsolation(ProcessContext *context)
 {
     atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
     g_cbIsolationStats.isolationEnabled = FALSE;
     TRACE(DL_INFO, "CB ISOLATION MODE: DISABLED");
 }
 
-NTSTATUS CbProcessIsolationIoctl(
+NTSTATUS ec_ProcessIsolationIoctl(
     ProcessContext *context,
     ULONG IoControlCode,
     PVOID pBuf,
@@ -88,7 +88,7 @@ NTSTATUS CbProcessIsolationIoctl(
     TRY_SET_MSG(IoControlCode == IOCTL_SET_ISOLATION_MODE, STATUS_INVALID_PARAMETER_4,
                  DL_WARNING, "CB_ISOLATION_MODE_CONTROL size is invalid");
 
-    tmpIsolationModeControl = (PCB_ISOLATION_MODE_CONTROL)cb_mem_cache_alloc_generic(InputBufLen, context);
+    tmpIsolationModeControl = (PCB_ISOLATION_MODE_CONTROL)ec_mem_cache_alloc_generic(InputBufLen, context);
 
     TRY_SET_MSG(tmpIsolationModeControl, STATUS_INSUFFICIENT_RESOURCES,
                  DL_ERROR, "%s: failed to allocate memory for network isolation control\n", __func__);
@@ -108,12 +108,12 @@ NTSTATUS CbProcessIsolationIoctl(
 
     if (_pCurrentCbIsolationModeControl)
     {
-        cb_mem_cache_free_generic(_pCurrentCbIsolationModeControl);
+        ec_mem_cache_free_generic(_pCurrentCbIsolationModeControl);
     }
 
     _pCurrentCbIsolationModeControl = tmpIsolationModeControl;
     tmpIsolationModeControl         = NULL;
-    CbSetNetworkIsolationMode(_pCurrentCbIsolationModeControl->isolationMode);
+    ec_SetNetworkIsolationMode(_pCurrentCbIsolationModeControl->isolationMode);
 
     if (_pCurrentCbIsolationModeControl->isolationMode == IsolationModeOff)
     {
@@ -135,16 +135,16 @@ CATCH_RESOURCE:
     RELEASE_RESOURCE(context);
 
 CATCH_DEFAULT:
-    cb_mem_cache_free_generic(tmpIsolationModeControl);
+    ec_mem_cache_free_generic(tmpIsolationModeControl);
     return xcode;
 }
 
-CB_ISOLATION_MODE CbGetCurrentIsolationMode(ProcessContext *context)
+CB_ISOLATION_MODE ec_GetCurrentIsolationMode(ProcessContext *context)
 {
     return atomic_read((atomic_t *)&CBIsolationMode);
 }
 
-VOID CbIsolationIntercept(ProcessContext *context,
+VOID ec_IsolationIntercept(ProcessContext *context,
                           ULONG remoteIpAddress,
                           CB_ISOLATION_INTERCEPT_RESULT *isolationResult)
 {
@@ -180,7 +180,7 @@ VOID CbIsolationIntercept(ProcessContext *context,
     isolationResult->isolationAction = IsolationActionBlock;
 }
 
-VOID CbIsolationInterceptByAddrProtoPort(
+VOID ec_IsolationInterceptByAddrProtoPort(
     ProcessContext *context,
     ULONG                                   remoteIpAddress,
     bool                                    isIpV4,

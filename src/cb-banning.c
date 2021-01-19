@@ -31,13 +31,13 @@ HashTbl * g_banning_table = NULL;
 int64_t  g_banned_process_by_inode_count;
 uint32_t g_protectionModeEnabled = PROTECTION_ENABLED; // Default to enabled
 
-static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino);
+void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino);
 
-bool cbBanningInitialize(ProcessContext *context)
+bool ec_banning_initialize(ProcessContext *context)
 {
     g_protectionModeEnabled = PROTECTION_ENABLED;
     g_banned_process_by_inode_count = 0;
-    g_banning_table = hashtbl_init_generic(context,
+    g_banning_table = ec_hashtbl_init_generic(context,
                                            8192,
                                            sizeof(BanningEntry),
                                            CB_BANNING_CACHE_OBJ_SZ,
@@ -56,15 +56,15 @@ bool cbBanningInitialize(ProcessContext *context)
     return true;
 }
 
-void cbBanningShutdown(ProcessContext *context)
+void ec_banning_shutdown(ProcessContext *context)
 {
     if (g_banning_table)
     {
-        hashtbl_shutdown_generic(g_banning_table, context);
+        ec_hashtbl_shutdown_generic(g_banning_table, context);
     }
 }
 
-void cbSetProtectionState(ProcessContext *context, uint32_t new_state)
+void ec_banning_SetProtectionState(ProcessContext *context, uint32_t new_state)
 {
     uint32_t current_state = atomic_read((atomic_t *)&g_protectionModeEnabled);
 
@@ -77,14 +77,14 @@ void cbSetProtectionState(ProcessContext *context, uint32_t new_state)
     atomic_set((atomic_t *)&g_protectionModeEnabled, new_state);
 }
 
-bool cbSetBannedProcessInodeWithoutKillingProcs(ProcessContext *context, uint64_t device, uint64_t ino)
+bool ec_banning_SetBannedProcessInodeWithoutKillingProcs(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     BanningEntry *bep;
     int64_t i = atomic64_read((atomic64_t *)&g_banned_process_by_inode_count);
 
     TRACE(DL_INFO, "Recevied [%llu:%llu] inode count=%lld", device, ino, i);
 
-    bep = (BanningEntry *)hashtbl_alloc_generic(g_banning_table, context);
+    bep = (BanningEntry *)ec_hashtbl_alloc_generic(g_banning_table, context);
     if (bep == NULL)
     {
         return false;
@@ -96,9 +96,9 @@ bool cbSetBannedProcessInodeWithoutKillingProcs(ProcessContext *context, uint64_
     bep->device = device;
     bep->inode = ino;
 
-    if (hashtbl_add_generic_safe(g_banning_table, bep, context) < 0)
+    if (ec_hashtbl_add_generic_safe(g_banning_table, bep, context) < 0)
     {
-        hashtbl_free_generic(g_banning_table, bep, context);
+        ec_hashtbl_free_generic(g_banning_table, bep, context);
         return false;
     }
 
@@ -106,17 +106,17 @@ bool cbSetBannedProcessInodeWithoutKillingProcs(ProcessContext *context, uint64_
     return true;
 }
 
-bool cbSetBannedProcessInode(ProcessContext *context, uint64_t device, uint64_t ino)
+bool ec_banning_SetBannedProcessInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     bool retval;
 
-    retval = cbSetBannedProcessInodeWithoutKillingProcs(context, device, ino);
-    cbKillRunningBannedProcessByInode(context, device, ino);
+    retval = ec_banning_SetBannedProcessInodeWithoutKillingProcs(context, device, ino);
+    ec_banning_KillRunningBannedProcessByInode(context, device, ino);
 
     return retval;
 }
 
-inline bool cbClearBannedProcessInode(ProcessContext *context, uint64_t device, uint64_t ino)
+inline bool ec_banning_ClearBannedProcessInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     int64_t count = atomic64_read((atomic64_t *)&g_banned_process_by_inode_count);
     BanningEntry *bep;
@@ -127,19 +127,19 @@ inline bool cbClearBannedProcessInode(ProcessContext *context, uint64_t device, 
         return false;
     }
 
-    bep = (BanningEntry *) hashtbl_del_by_key_generic(g_banning_table, &key, context);
+    bep = (BanningEntry *) ec_hashtbl_del_by_key_generic(g_banning_table, &key, context);
     if (!bep)
     {
         return false;
     }
     TRACE(DL_INFO, "Clearing banned file [%llu:%llu] count=%lld", device, ino, count);
 
-    hashtbl_free_generic(g_banning_table, bep, context);
+    ec_hashtbl_free_generic(g_banning_table, bep, context);
     atomic64_dec((atomic64_t *)&g_banned_process_by_inode_count);
     return true;
 }
 
-void cbClearAllBans(ProcessContext *context)
+void ec_banning_ClearAllBans(ProcessContext *context)
 {
     int64_t count = atomic64_read((atomic64_t *)&g_banned_process_by_inode_count);
 
@@ -150,10 +150,10 @@ void cbClearAllBans(ProcessContext *context)
 
     TRACE(DL_INFO, "Clearing all bans");
     atomic64_set((atomic64_t *)&g_banned_process_by_inode_count, 0);
-    hashtbl_clear_generic(g_banning_table, context);
+    ec_hashtbl_clear_generic(g_banning_table, context);
 }
 
-bool cbKillBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
+bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     int64_t count;
     BanningEntry *bep;
@@ -172,7 +172,7 @@ bool cbKillBannedProcessByInode(ProcessContext *context, uint64_t device, uint64
         goto kbpbi_exit;
     }
 
-    bep = (BanningEntry *) hashtbl_get_generic(g_banning_table, &key, context);
+    bep = (BanningEntry *) ec_hashtbl_get_generic(g_banning_table, &key, context);
     if (!bep)
     {
         TRACE(DL_INFO, "kill banned process failed to find [%llu:%llu]", device, ino);
@@ -189,7 +189,7 @@ kbpbi_exit:
     return false;
 }
 
-static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
+void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     pid_t pid;
     struct siginfo info;
@@ -218,7 +218,7 @@ static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t 
     sRunningInodesToBan.count  = 0;
     INIT_LIST_HEAD(&sRunningInodesToBan.BanList.list);
 
-    is_process_tracked_get_state_by_inode(&sRunningInodesToBan, context);
+    ec_is_process_tracked_get_state_by_inode(&sRunningInodesToBan, context);
 
     if (!sRunningInodesToBan.count)
     {
@@ -233,7 +233,7 @@ static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t 
         procp = (ProcessTracking *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->procp);
         pid = procp->pt_key.pid;
 
-        task = cb_find_task(pid);
+        task = ec_find_task(pid);
         if (task)
         {
             ret = send_sig_info(SIGKILL, &info, task);
@@ -242,11 +242,11 @@ static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t 
                 TRACE(DL_ERROR, "%s: killed process with [%llu:%llu] pid=%d", __func__, device, ino, pid);
 
                 // Send the event
-                event_send_block(procp,
+                ec_event_send_block(procp,
                                  ProcessTerminatedAfterStartup,
                                  TerminateFailureReasonNone,
                                  0,
-                                 process_tracking_should_track_user() ? procp->uid : (uid_t)-1,
+                                 ec_process_tracking_should_track_user() ? procp->uid : (uid_t)-1,
                                  NULL,
                                  context);
                 continue;
@@ -261,13 +261,13 @@ static void cbKillRunningBannedProcessByInode(ProcessContext *context, uint64_t 
     {
         temp = list_entry(pos, RUNNING_PROCESSES_TO_BAN, list);
         list_del(pos);
-        cb_mem_cache_free_generic(temp);
+        ec_mem_cache_free_generic(temp);
     }
 
     memset(&sRunningInodesToBan, 0, sizeof(RUNNING_BANNED_INODE_S));
 }
 
-bool cbIgnoreProcess(ProcessContext *context, pid_t pid)
+bool ec_banning_IgnoreProcess(ProcessContext *context, pid_t pid)
 {
     int64_t i;
     int64_t max = atomic64_read((atomic64_t *)&g_cb_ignored_pid_count);
@@ -292,7 +292,7 @@ ignore_process_exit:
     return false;
 }
 
-void cbSetIgnoredProcess(ProcessContext *context, pid_t pid)
+void ec_banning_SetIgnoredProcess(ProcessContext *context, pid_t pid)
 {
     int64_t i;
     int64_t max = atomic64_read((atomic64_t *)&g_cb_ignored_pid_count);
@@ -316,7 +316,7 @@ void cbSetIgnoredProcess(ProcessContext *context, pid_t pid)
     }
 }
 
-bool cbIngoreUid(ProcessContext *context, pid_t uid)
+bool ec_banning_IgnoreUid(ProcessContext *context, pid_t uid)
 {
     int64_t i;
     int64_t max = atomic64_read((atomic64_t *)&g_cb_ignored_uid_count);
@@ -341,7 +341,7 @@ ignore_uid_exit:
     return false;
 }
 
-void cbSetIgnoredUid(ProcessContext *context, uid_t uid)
+void ec_banning_SetIgnoredUid(ProcessContext *context, uid_t uid)
 {
     int64_t i;
     int64_t max = atomic64_read((atomic64_t *)&g_cb_ignored_uid_count);

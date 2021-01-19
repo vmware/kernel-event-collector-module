@@ -6,42 +6,42 @@
 #include "hash-table-generic.h"
 #include "cb-spinlock.h"
 
-static inline atomic64_t *get_refcountp(const HashTbl *hashTblp, void *datap)
+static inline atomic64_t *__ec_get_refcountp(const HashTbl *hashTblp, void *datap)
 {
     return (atomic64_t *)(datap + hashTblp->refcount_offset);
 }
-static inline void *get_datap(const HashTbl *hashTblp, HashTableNode *nodep)
+static inline void *__ec_get_datap(const HashTbl *hashTblp, HashTableNode *nodep)
 {
     return (void *)(nodep - hashTblp->node_offset);
 }
-static inline HashTableNode *get_nodep(const HashTbl *hashTblp, void *datap)
+inline HashTableNode *__ec_get_nodep(const HashTbl *hashTblp, void *datap)
 {
     return (HashTableNode *)(datap + hashTblp->node_offset);
 }
 
 static int debug;
 
-static uint64_t g_hashtbl_generic_lock;
-static LIST_HEAD(g_hashtbl_generic);
+static uint64_t s_hashtbl_generic_lock;
+static LIST_HEAD(s_hashtbl_generic);
 
 #define HASHTBL_PRINT(fmt, ...)    do { if (debug) pr_err("hash-tbl: " fmt, ##__VA_ARGS__); } while (0)
 
-static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
+int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
 
-void debug_on(void)
+void ec_hashtable_debug_on(void)
 {
     debug = 1;
 }
 
-void debug_off(void)
+void ec_hashtable_debug_off(void)
 {
     debug = 0;
 }
 
-char *key_in_hex(ProcessContext *context, unsigned char *key, int key_len)
+char *__ec_key_in_hex(ProcessContext *context, unsigned char *key, int key_len)
 {
     int i;
-    char *str = (char *) cb_mem_cache_alloc_generic(key_len * 3, context);
+    char *str = (char *) ec_mem_cache_alloc_generic(key_len * 3, context);
 
     for (i = 0; i < key_len; i++)
     {
@@ -51,51 +51,51 @@ char *key_in_hex(ProcessContext *context, unsigned char *key, int key_len)
     return str;
 }
 
-inline void *get_key_ptr(HashTbl *hashTblp, void *datap)
+inline void *__ec_get_key_ptr(HashTbl *hashTblp, void *datap)
 {
     return (void *) datap + hashTblp->key_offset;
 }
 
-void hashtbl_generic_init(ProcessContext *context)
+void ec_hashtbl_generic_init(ProcessContext *context)
 {
-    cb_spinlock_init(&g_hashtbl_generic_lock, context);
+    ec_spinlock_init(&s_hashtbl_generic_lock, context);
 }
 
-void hashtbl_generic_destoy(ProcessContext *context)
+void ec_hashtbl_generic_destoy(ProcessContext *context)
 {
-    cb_spinlock_destroy(&g_hashtbl_generic_lock, context);
+    ec_spinlock_destroy(&s_hashtbl_generic_lock, context);
 }
 
-static inline u32 hashtbl_hash_key(HashTbl *hashTblp,
+static inline u32 ec_hashtbl_hash_key(HashTbl *hashTblp,
                    unsigned char *key)
 {
     return jhash(key, hashTblp->key_len, hashTblp->secret);
 }
-static inline int hashtbl_bkt_index(HashTbl *hashTblp, u32 hash)
+static inline int ec_hashtbl_bkt_index(HashTbl *hashTblp, u32 hash)
 {
     return hash & (hashTblp->numberOfBuckets - 1);
 }
 
-static void hashtbl_bkt_read_lock(HashTableBkt *bkt, ProcessContext *context)
+static void ec_hashtbl_bkt_read_lock(HashTableBkt *bkt, ProcessContext *context)
 {
-    cb_read_lock(&bkt->lock, context);
+    ec_read_lock(&bkt->lock, context);
 }
-static void hashtbl_bkt_read_unlock(HashTableBkt *bkt, ProcessContext *context)
+static void ec_hashtbl_bkt_read_unlock(HashTableBkt *bkt, ProcessContext *context)
 {
-    cb_read_unlock(&bkt->lock, context);
-}
-
-static void hashtbl_bkt_write_lock(HashTableBkt *bkt, ProcessContext *context)
-{
-    cb_write_lock(&bkt->lock, context);
-}
-static void hashtbl_bkt_write_unlock(HashTableBkt *bkt, ProcessContext *context)
-{
-    cb_write_unlock(&bkt->lock, context);
+    ec_read_unlock(&bkt->lock, context);
 }
 
+static void ec_hashtbl_bkt_write_lock(HashTableBkt *bkt, ProcessContext *context)
+{
+    ec_write_lock(&bkt->lock, context);
+}
+static void ec_hashtbl_bkt_write_unlock(HashTableBkt *bkt, ProcessContext *context)
+{
+    ec_write_unlock(&bkt->lock, context);
+}
 
-HashTbl *hashtbl_init_generic(ProcessContext *context,
+
+HashTbl *ec_hashtbl_init_generic(ProcessContext *context,
                               uint64_t numberOfBuckets,
                               uint64_t datasize,
                               uint64_t sizehint,
@@ -122,7 +122,7 @@ HashTbl *hashtbl_init_generic(ProcessContext *context,
     //kmalloc however, it should be noted that this is a little less efficient. The reason for this is
     //fragmentation that can occur on systems. We noticed this happening in the field, and if highly
     //fragmented, our driver will fail to load with a normal kmalloc
-    tbl_storage_p  = cb_mem_cache_valloc_generic(tableSize, context);
+    tbl_storage_p  = ec_mem_cache_valloc_generic(tableSize, context);
 
 
     if (tbl_storage_p  == NULL)
@@ -158,9 +158,9 @@ HashTbl *hashtbl_init_generic(ProcessContext *context,
 
     if (cache_elem_size)
     {
-        if (!cb_mem_cache_create(&hashTblp->hash_cache, hashtble_name, cache_elem_size, context))
+        if (!ec_mem_cache_create(&hashTblp->hash_cache, hashtble_name, cache_elem_size, context))
         {
-            cb_mem_cache_free_generic(hashTblp);
+            ec_mem_cache_free_generic(hashTblp);
             return 0;
         }
     }
@@ -170,59 +170,59 @@ HashTbl *hashtbl_init_generic(ProcessContext *context,
 
     for (i = 0; i < hashTblp->numberOfBuckets; i++)
     {
-        cb_spinlock_init(&hashTblp->tablePtr[i].lock, context);
+        ec_spinlock_init(&hashTblp->tablePtr[i].lock, context);
         INIT_HLIST_HEAD(&hashTblp->tablePtr[i].head);
     }
 
-    cb_write_lock(&g_hashtbl_generic_lock, context);
-    list_add(&(hashTblp->genTables), &g_hashtbl_generic);
-    cb_write_unlock(&g_hashtbl_generic_lock, context);
+    ec_write_lock(&s_hashtbl_generic_lock, context);
+    list_add(&(hashTblp->genTables), &s_hashtbl_generic);
+    ec_write_unlock(&s_hashtbl_generic_lock, context);
 
     HASHTBL_PRINT("Size=%lu NumberOfBuckets=%llu\n", tableSize, numberOfBuckets);
     HASHTBL_PRINT("ADDR=%p TADDR=%p OFFSET=%lu\n", hashTblp, hashTblp->tablePtr, sizeof(HashTbl));
     return hashTblp;
 }
 
-static int _hashtbl_delete_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_hashtbl_delete_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     return ACTION_DELETE;
 }
 
-static void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context);
+void __ec_hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context);
 
-void hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
+void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
 {
     unsigned int i;
 
     CANCEL_VOID(hashTblp != NULL);
     atomic64_set(&(hashTblp->tableShutdown), 1);
 
-    cb_write_lock(&g_hashtbl_generic_lock, context);
+    ec_write_lock(&s_hashtbl_generic_lock, context);
     list_del(&(hashTblp->genTables));
-    cb_write_unlock(&g_hashtbl_generic_lock, context);
+    ec_write_unlock(&s_hashtbl_generic_lock, context);
 
-    __hashtbl_for_each_generic(hashTblp, _hashtbl_delete_callback, NULL, true, context);
+    __ec_hashtbl_for_each_generic(hashTblp, __ec_hashtbl_delete_callback, NULL, true, context);
 
     HASHTBL_PRINT("hash shutdown inst=%ld alloc=%ld\n", atomic64_read(&(hashTblp->tableInstance)),
         atomic64_read(&(hashTblp->hash_cache.allocated_count)));
 
     for (i = 0; i < hashTblp->numberOfBuckets; i++)
     {
-        cb_spinlock_destroy(&hashTblp->tablePtr[i].lock, context);
+        ec_spinlock_destroy(&hashTblp->tablePtr[i].lock, context);
     }
 
-    cb_mem_cache_destroy(&hashTblp->hash_cache, context, NULL);
-    cb_mem_cache_free_generic(hashTblp);
+    ec_mem_cache_destroy(&hashTblp->hash_cache, context, NULL);
+    ec_mem_cache_free_generic(hashTblp);
 }
 
-void hashtbl_clear_generic(HashTbl *hashTblp, ProcessContext *context)
+void ec_hashtbl_clear_generic(HashTbl *hashTblp, ProcessContext *context)
 {
     HASHTBL_PRINT("ADDR=%p TADDR=%p OFFSET=%lu\n", hashTblp, hashTblp->tablePtr, sizeof(HashTbl));
 
-    hashtbl_write_for_each_generic(hashTblp, _hashtbl_delete_callback, NULL, context);
+    ec_hashtbl_write_for_each_generic(hashTblp, __ec_hashtbl_delete_callback, NULL, context);
 }
 
-void hashtbl_write_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context)
+void ec_hashtbl_write_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context)
 {
     if (!hashTblp)
     {
@@ -233,10 +233,10 @@ void hashtbl_write_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_
         return;
     }
 
-    __hashtbl_for_each_generic(hashTblp, callback, priv, true, context);
+    __ec_hashtbl_for_each_generic(hashTblp, callback, priv, true, context);
 }
 
-void hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context)
+void ec_hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context)
 {
     if (!hashTblp)
     {
@@ -247,33 +247,33 @@ void hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_c
         return;
     }
 
-    __hashtbl_for_each_generic(hashTblp, callback, priv, false, context);
+    __ec_hashtbl_for_each_generic(hashTblp, callback, priv, false, context);
 }
 
-static void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context)
+void __ec_hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, bool haveWriteLock, ProcessContext *context)
 {
     unsigned int i;
     uint64_t numberOfBuckets;
-    HashTableBkt *hashtbl_tbl  = NULL;
+    HashTableBkt *ec_hashtbl_tbl  = NULL;
 
     if (!hashTblp) return;
 
-    hashtbl_tbl = hashTblp->tablePtr;
+    ec_hashtbl_tbl = hashTblp->tablePtr;
     numberOfBuckets  = hashTblp->numberOfBuckets;
 
     // May need to walk the lists too
     for (i = 0; i < numberOfBuckets; ++i)
     {
-        HashTableBkt *bucketp = &hashtbl_tbl[i];
+        HashTableBkt *bucketp = &ec_hashtbl_tbl[i];
         HashTableNode *nodep = 0;
         struct hlist_node *tmp;
 
         if (haveWriteLock)
         {
-            hashtbl_bkt_write_lock(bucketp, context);
+            ec_hashtbl_bkt_write_lock(bucketp, context);
         } else
         {
-            hashtbl_bkt_read_lock(bucketp, context);
+            ec_hashtbl_bkt_read_lock(bucketp, context);
         }
 
         if (!hlist_empty(&bucketp->head))
@@ -287,22 +287,22 @@ static void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_gener
 #endif
             {
 
-                switch ((*callback)(hashTblp, get_datap(hashTblp, nodep), priv, context))
+                switch ((*callback)(hashTblp, __ec_get_datap(hashTblp, nodep), priv, context))
                 {
                 case ACTION_DELETE:
                     // This should never be called with only a read lock
                     BUG_ON(!haveWriteLock);
                     hlist_del(&nodep->link);
                     atomic64_dec(&(hashTblp->tableInstance));
-                    hashtbl_free_generic(hashTblp, nodep, context);
+                    ec_hashtbl_free_generic(hashTblp, nodep, context);
                     break;
                 case ACTION_STOP:
                     if (haveWriteLock)
                     {
-                        hashtbl_bkt_write_unlock(bucketp, context);
+                        ec_hashtbl_bkt_write_unlock(bucketp, context);
                     } else
                     {
-                        hashtbl_bkt_read_unlock(bucketp, context);
+                        ec_hashtbl_bkt_read_unlock(bucketp, context);
                     }
                     goto Exit;
                     break;
@@ -315,10 +315,10 @@ static void __hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_gener
 
         if (haveWriteLock)
         {
-            hashtbl_bkt_write_unlock(bucketp, context);
+            ec_hashtbl_bkt_write_unlock(bucketp, context);
         } else
         {
-            hashtbl_bkt_read_unlock(bucketp, context);
+            ec_hashtbl_bkt_read_unlock(bucketp, context);
         }
     }
 
@@ -329,7 +329,7 @@ Exit:
 }
 
 
-static HashTableNode *__hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u32 hash, const void *key)
+HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u32 hash, const void *key)
 {
     HashTableNode *tableNode = NULL;
     struct hlist_node *hlistTmp = NULL;
@@ -342,7 +342,7 @@ static HashTableNode *__hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *hea
 #endif
     {
         if (hash == tableNode->hash &&
-            memcmp(key, get_key_ptr(hashTblp, get_datap(hashTblp, tableNode)), hashTblp->key_len) == 0)
+            memcmp(key, __ec_get_key_ptr(hashTblp, __ec_get_datap(hashTblp, tableNode)), hashTblp->key_len) == 0)
         {
             return tableNode;
         }
@@ -351,7 +351,7 @@ static HashTableNode *__hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *hea
     return NULL;
 }
 
-int hashtbl_add_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
+int ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     u32 hash;
     uint64_t bucket_indx;
@@ -369,33 +369,33 @@ int hashtbl_add_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
         return -1;
     }
 
-    hash = hashtbl_hash_key(hashTblp, get_key_ptr(hashTblp, datap));
-    bucket_indx = hashtbl_bkt_index(hashTblp, hash);
+    hash = ec_hashtbl_hash_key(hashTblp, __ec_get_key_ptr(hashTblp, datap));
+    bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
 
-    nodep = get_nodep(hashTblp, datap);
+    nodep = __ec_get_nodep(hashTblp, datap);
     nodep->hash = hash;
 
     if (debug)
     {
-        key_str = key_in_hex(context, get_key_ptr(hashTblp, datap), hashTblp->key_len);
+        key_str = __ec_key_in_hex(context, __ec_get_key_ptr(hashTblp, datap), hashTblp->key_len);
         HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        cb_mem_cache_free_generic(key_str);
+        ec_mem_cache_free_generic(key_str);
     }
 
-    hashtbl_bkt_write_lock(bucketp, context);
+    ec_hashtbl_bkt_write_lock(bucketp, context);
     hlist_add_head(&nodep->link, &bucketp->head);
     if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
     {
-        atomic64_inc(get_refcountp(hashTblp, datap));
+        atomic64_inc(__ec_get_refcountp(hashTblp, datap));
     }
     atomic64_inc(&(hashTblp->tableInstance));
-    hashtbl_bkt_write_unlock(bucketp, context);
+    ec_hashtbl_bkt_write_unlock(bucketp, context);
 
     return 0;
 }
 
-int hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *context)
+int ec_hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     u32 hash;
     uint64_t bucket_indx;
@@ -416,41 +416,41 @@ int hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *con
         return -1;
     }
 
-    key = get_key_ptr(hashTblp, datap);
-    hash = hashtbl_hash_key(hashTblp, key);
-    bucket_indx = hashtbl_bkt_index(hashTblp, hash);
+    key = __ec_get_key_ptr(hashTblp, datap);
+    hash = ec_hashtbl_hash_key(hashTblp, key);
+    bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
 
-    nodep = get_nodep(hashTblp, datap);
+    nodep = __ec_get_nodep(hashTblp, datap);
     nodep->hash = hash;
 
     if (debug)
     {
-        key_str = key_in_hex(context, key, hashTblp->key_len);
+        key_str = __ec_key_in_hex(context, key, hashTblp->key_len);
         HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        cb_mem_cache_free_generic(key_str);
+        ec_mem_cache_free_generic(key_str);
     }
 
     ret = -EEXIST;
 
-    hashtbl_bkt_write_lock(bucketp, context);
-    old_node = __hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
+    ec_hashtbl_bkt_write_lock(bucketp, context);
+    old_node = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
     if (!old_node)
     {
         ret = 0;
         hlist_add_head(&nodep->link, &bucketp->head);
         if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
         {
-            atomic64_inc(get_refcountp(hashTblp, datap));
+            atomic64_inc(__ec_get_refcountp(hashTblp, datap));
         }
         atomic64_inc(&(hashTblp->tableInstance));
     }
-    hashtbl_bkt_write_unlock(bucketp, context);
+    ec_hashtbl_bkt_write_unlock(bucketp, context);
 
     return ret;
 }
 
-void *hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
+void *ec_hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
 {
     u32 hash;
     uint64_t bucket_indx;
@@ -469,59 +469,59 @@ void *hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
         return NULL;
     }
 
-    hash = hashtbl_hash_key(hashTblp, key);
-    bucket_indx = hashtbl_bkt_index(hashTblp, hash);
+    hash = ec_hashtbl_hash_key(hashTblp, key);
+    bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
 
     if (debug)
     {
-        key_str = key_in_hex(context, key, hashTblp->key_len);
+        key_str = __ec_key_in_hex(context, key, hashTblp->key_len);
         HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        cb_mem_cache_free_generic(key_str);
+        ec_mem_cache_free_generic(key_str);
     }
 
-    hashtbl_bkt_read_lock(bucketp, context);
-    nodep = __hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
+    ec_hashtbl_bkt_read_lock(bucketp, context);
+    nodep = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
     if (nodep)
     {
-        datap = get_datap(hashTblp, nodep);
+        datap = __ec_get_datap(hashTblp, nodep);
 
         if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
         {
-            atomic64_inc(get_refcountp(hashTblp, datap));
+            atomic64_inc(__ec_get_refcountp(hashTblp, datap));
         }
     }
-    hashtbl_bkt_read_unlock(bucketp, context);
+    ec_hashtbl_bkt_read_unlock(bucketp, context);
 
     return datap;
 }
 
-static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
+int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
-    HashTableNode *nodep = get_nodep(hashTblp, datap);
+    HashTableNode *nodep = __ec_get_nodep(hashTblp, datap);
 
-    // This protects against hashtbl_del_generic being called twice for the same datap
+    // This protects against ec_hashtbl_del_generic being called twice for the same datap
     if ((&nodep->link)->pprev != NULL)
     {
         hlist_del_init(&nodep->link);
 
         if (atomic64_read(&(hashTblp->tableInstance)) == 0)
         {
-            HASHTBL_PRINT("hashtbl_del: underflow!!\n");
+            HASHTBL_PRINT("ec_hashtbl_del: underflow!!\n");
         } else
         {
             atomic64_dec(&(hashTblp->tableInstance));
         }
 
-        // The only reason this should happen is if hashtbl_del_generic and
-        // hashtbl_put_generic are called out of order,
-        // e.g. hashtbl_put_generic -> hashtbl_del_generic
+        // The only reason this should happen is if ec_hashtbl_del_generic and
+        // ec_hashtbl_put_generic are called out of order,
+        // e.g. ec_hashtbl_put_generic -> ec_hashtbl_del_generic
         if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
         {
-            WARN(atomic64_read(get_refcountp(hashTblp, datap)) == 1, "hashtbl will free while lock held");
+            WARN(atomic64_read(__ec_get_refcountp(hashTblp, datap)) == 1, "hashtbl will free while lock held");
         }
 
-        hashtbl_put_generic(hashTblp, datap, context);
+        ec_hashtbl_put_generic(hashTblp, datap, context);
 
         return 0;
     } else
@@ -532,7 +532,7 @@ static int hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessC
     return -1;
 }
 
-void *hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
+void *ec_hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
 {
     u32 hash;
     uint64_t bucket_indx;
@@ -550,31 +550,31 @@ void *hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext *c
         return NULL;
     }
 
-    hash = hashtbl_hash_key(hashTblp, key);
-    bucket_indx = hashtbl_bkt_index(hashTblp, hash);
+    hash = ec_hashtbl_hash_key(hashTblp, key);
+    bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
 
-    hashtbl_bkt_write_lock(bucketp, context);
-    nodep = __hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
+    ec_hashtbl_bkt_write_lock(bucketp, context);
+    nodep = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
     if (nodep)
     {
-        datap = get_datap(hashTblp, nodep);
+        datap = __ec_get_datap(hashTblp, nodep);
 
-        // Will be needed as long hashtbl_del_generic_lockheld is used
+        // Will be needed as long ec_hashtbl_del_generic_lockheld is used
         if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
         {
-            atomic64_inc(get_refcountp(hashTblp, datap));
+            atomic64_inc(__ec_get_refcountp(hashTblp, datap));
         }
 
-        hashtbl_del_generic_lockheld(hashTblp, datap, context);
+        ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
     }
-    hashtbl_bkt_write_unlock(bucketp, context);
+    ec_hashtbl_bkt_write_unlock(bucketp, context);
 
     // caller must put or free (if no reference count)
     return datap;
 }
 
-void hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
+void ec_hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     uint64_t bucket_indx;
     HashTableBkt *bucketp;
@@ -584,43 +584,43 @@ void hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *context
     CANCEL_VOID(datap != NULL);
     CANCEL_VOID(atomic64_read(&(hashTblp->tableShutdown)) != 1);
 
-    nodep = get_nodep(hashTblp, datap);
-    bucket_indx = hashtbl_bkt_index(hashTblp, nodep->hash);
+    nodep = __ec_get_nodep(hashTblp, datap);
+    bucket_indx = ec_hashtbl_bkt_index(hashTblp, nodep->hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
 
-    hashtbl_bkt_write_lock(bucketp, context);
-    hashtbl_del_generic_lockheld(hashTblp, datap, context);
-    hashtbl_bkt_write_unlock(bucketp, context);
+    ec_hashtbl_bkt_write_lock(bucketp, context);
+    ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
+    ec_hashtbl_bkt_write_unlock(bucketp, context);
 }
 
-void *hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
+void *ec_hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
 {
     void *datap;
 
     CANCEL(hashTblp != NULL, NULL);
     CANCEL(atomic64_read(&(hashTblp->tableShutdown)) != 1, NULL);
 
-    datap = cb_mem_cache_alloc(&hashTblp->hash_cache, context);
+    datap = ec_mem_cache_alloc(&hashTblp->hash_cache, context);
     CANCEL(datap, NULL);
 
-    INIT_HLIST_NODE(&get_nodep(hashTblp, datap)->link);
+    INIT_HLIST_NODE(&__ec_get_nodep(hashTblp, datap)->link);
     return datap;
 }
 
-void hashtbl_put_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
+void ec_hashtbl_put_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     CANCEL_VOID(hashTblp != NULL);
     CANCEL_VOID(datap != NULL);
 
     if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
     {
-         IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(get_refcountp(hashTblp, datap), {
-            hashtbl_free_generic(hashTblp, datap, context);
+         IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(__ec_get_refcountp(hashTblp, datap), {
+            ec_hashtbl_free_generic(hashTblp, datap, context);
         });
     }
 }
 
-void hashtbl_free_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
+void ec_hashtbl_free_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     CANCEL_VOID(hashTblp != NULL);
 
@@ -628,9 +628,9 @@ void hashtbl_free_generic(HashTbl *hashTblp, void *datap, ProcessContext *contex
     {
         if (hashTblp->delete_callback)
         {
-            hashTblp->delete_callback(get_datap(hashTblp, datap), context);
+            hashTblp->delete_callback(__ec_get_datap(hashTblp, datap), context);
         }
-        cb_mem_cache_free(&hashTblp->hash_cache, datap, context);
+        ec_mem_cache_free(&hashTblp->hash_cache, datap, context);
     }
 }
 
@@ -641,16 +641,16 @@ void hashtbl_free_generic(HashTbl *hashTblp, void *datap, ProcessContext *contex
 #endif
 
 // Loop over each hash table and calculate the memory used
-size_t hashtbl_get_memory(ProcessContext *context)
+size_t ec_hashtbl_get_memory(ProcessContext *context)
 {
     HashTbl *hashTblp;
     size_t   size = 0;
 
-    cb_read_lock(&g_hashtbl_generic_lock, context);
-    list_for_each_entry(hashTblp, &g_hashtbl_generic, genTables) {
+    ec_read_lock(&s_hashtbl_generic_lock, context);
+    list_for_each_entry(hashTblp, &s_hashtbl_generic, genTables) {
             size += hashTblp->base_size;
     }
-    cb_read_unlock(&g_hashtbl_generic_lock, context);
+    ec_read_unlock(&s_hashtbl_generic_lock, context);
 
     return size;
 }

@@ -23,12 +23,12 @@ static CB_MEM_CACHE s_event_cache;
 
 static const struct timespec null_time = {0, 0};
 
-uint64_t to_windows_timestamp(const struct timespec *tv)
+uint64_t ec_to_windows_timestamp(const struct timespec *tv)
 {
     return TO_WIN_TIME(tv->tv_sec, tv->tv_nsec);
 }
 
-struct timespec get_current_timespec(void)
+struct timespec ec_get_current_timespec(void)
 {
     struct timespec     current_time;
 
@@ -36,20 +36,20 @@ struct timespec get_current_timespec(void)
     return current_time;
 }
 
-time_t get_current_time(void)
+time_t ec_get_current_time(void)
 {
     struct timespec     current_time;
 
     getnstimeofday(&current_time);
-    return to_windows_timestamp(&current_time);
+    return ec_to_windows_timestamp(&current_time);
 }
 
-time_t get_null_time(void)
+time_t ec_get_null_time(void)
 {
     return TO_WIN_TIME(0, 0);
 }
 
-void logger_free_event(PCB_EVENT event, ProcessContext *context)
+void ec_free_event(PCB_EVENT event, ProcessContext *context)
 {
     if (event)
     {
@@ -58,34 +58,34 @@ void logger_free_event(PCB_EVENT event, ProcessContext *context)
         // Free the stored process data
         //  This may cause a stored exit event to be sent if this is the last event
         //  for a process.
-        logger_set_process_data(event, NULL, context);
+        ec_event_set_process_data(event, NULL, context);
 
-        cb_mem_cache_free_generic(event->procInfo.path);
+        ec_mem_cache_free_generic(event->procInfo.path);
         event->procInfo.path = NULL;
 
-        cb_mem_cache_free_generic(event->generic_data.data);
+        ec_mem_cache_free_generic(event->generic_data.data);
         event->generic_data.data = NULL;
 
-        cb_mem_cache_free(&s_event_cache, node, context);
+        ec_mem_cache_free(&s_event_cache, node, context);
     }
 }
 
-void logger_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context)
+void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context)
 {
     if (event)
     {
         CB_EVENT_NODE *node = container_of(event, CB_EVENT_NODE, data);
 
         // If we have something stored free it now
-        process_tracking_release_shared_data_ref(node->process_data, context);
+        ec_process_tracking_release_shared_data_ref(node->process_data, context);
 
         // Save the process data in the event node and increase the ref
         //  We don't actually do anything with this.  We only release it later.
-        node->process_data = process_tracking_get_shared_data_ref(process_data, context);
+        node->process_data = ec_process_tracking_get_shared_data_ref(process_data, context);
     }
 }
 
-bool should_log(CB_EVENT_TYPE eventType)
+bool ec_logger_should_log(CB_EVENT_TYPE eventType)
 {
     switch (eventType)
     {
@@ -160,17 +160,17 @@ bool should_log(CB_EVENT_TYPE eventType)
 }
 
 
-bool shouldExcludeByUID(ProcessContext *context, uid_t uid)
+bool ec_shouldExcludeByUID(ProcessContext *context, uid_t uid)
 {
-    if (g_cb_server_uid == uid)
+    if (g_edr_server_uid == uid)
     {
         return true;
     }
 
-    return cbIngoreUid(context, uid);
+    return ec_banning_IgnoreUid(context, uid);
 }
 
-PCB_EVENT logger_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
+PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
 {
     CB_EVENT_NODE *node = NULL;
     PCB_EVENT event = NULL;
@@ -178,10 +178,10 @@ PCB_EVENT logger_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     CB_EVENT_TYPE resolvedEventType = eventType;
 
     // We use some semi-private event types to provide some extra granularity.
-    //  Depending on the config structure, the should_log function may reject the
+    //  Depending on the config structure, the ec_logger_should_log function may reject the
     //  event. The collector does not care about this extra granularitiy, so once
     //  we know the event should be logged, we set it to the more generic event type.
-    TRY(should_log(eventType));
+    TRY(ec_logger_should_log(eventType));
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
@@ -195,9 +195,9 @@ PCB_EVENT logger_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
         break;
     }
 
-    TRY(!shouldExcludeByUID(context, uid));
+    TRY(!ec_shouldExcludeByUID(context, uid));
 
-    node = (CB_EVENT_NODE *)cb_mem_cache_alloc(&s_event_cache, context);
+    node = (CB_EVENT_NODE *)ec_mem_cache_alloc(&s_event_cache, context);
 
     TRY_DO(node, {
         TRACE(DL_WARNING, "Error allocating event with mode %s", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL");
@@ -210,7 +210,7 @@ PCB_EVENT logger_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     event->eventType  = resolvedEventType;
     event->canary     = 0;
 
-    event->procInfo.event_time  = get_current_time();
+    event->procInfo.event_time  = ec_get_current_time();
     event->procInfo.path_found = false;
     event->procInfo.path       = NULL;
     event->generic_data.data   = NULL;
@@ -220,17 +220,17 @@ CATCH_DEFAULT:
     return event;
 }
 
-void logger_free_event_on_error(PCB_EVENT event, ProcessContext *context)
+void ec_free_event_on_error(PCB_EVENT event, ProcessContext *context)
 {
-    logger_free_event(event, context);
+    ec_free_event(event, context);
 }
 
-bool logger_initialize(ProcessContext *context)
+bool ec_logger_initialize(ProcessContext *context)
 {
     TRACE(DL_INFO, "Initializing Logger");
     TRACE(DL_INFO, "CB_EVENT size is %ld (0x%lx)", sizeof(struct CB_EVENT), sizeof(struct CB_EVENT));
 
-    if (!cb_mem_cache_create(&s_event_cache, "event_cache", sizeof(CB_EVENT_NODE), context))
+    if (!ec_mem_cache_create(&s_event_cache, "event_cache", sizeof(CB_EVENT_NODE), context))
     {
         return false;
     }
@@ -238,8 +238,8 @@ bool logger_initialize(ProcessContext *context)
     return true;
 }
 
-void logger_shutdown(ProcessContext *context)
+void ec_logger_shutdown(ProcessContext *context)
 {
-    cb_mem_cache_destroy(&s_event_cache, context, NULL);
+    ec_mem_cache_destroy(&s_event_cache, context, NULL);
 }
 

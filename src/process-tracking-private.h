@@ -20,13 +20,13 @@ typedef struct process_tracking_data {
 
 extern process_tracking_data g_process_tracking_data;
 
-void process_tracking_update_op_cnts(ProcessTracking *procp, CB_EVENT_TYPE event_type, int action);
-void sorted_tracking_table_for_each(cb_for_rbtree_node callback, void *priv, ProcessContext *context);
-ProcessTracking *sorted_tracking_table_get_process(void *data, ProcessContext *context);
-const char *process_tracking_get_proc_name(const char *path);
+void ec_process_tracking_update_op_cnts(ProcessTracking *procp, CB_EVENT_TYPE event_type, int action);
+void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, ProcessContext *context);
+ProcessTracking *ec_sorted_tracking_table_get_process(void *data, ProcessContext *context);
+const char *ec_process_tracking_get_proc_name(const char *path);
 
-void process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
-void process_tracking_set_parent_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
+void ec_process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
+void ec_process_tracking_set_parent_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
 
 // #define _REF_DEBUGGING
 #ifdef _REF_DEBUGGING

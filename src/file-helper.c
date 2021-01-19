@@ -6,18 +6,18 @@
 #include "cb-banning.h"
 #include <linux/magic.h>
 
-bool file_helper_init(ProcessContext *context)
+bool ec_file_helper_init(ProcessContext *context)
 {
     return true;
 }
 
-char *dentry_to_path(struct dentry *dentry, char *buf, int buflen)
+char *ec_dentry_to_path(struct dentry *dentry, char *buf, int buflen)
 {
     CANCEL_CB_RESOLVED(dentry_path, NULL);
     return CB_RESOLVED(dentry_path)(dentry, buf, buflen);
 }
 
-bool file_get_path(struct file *file, char *buffer, unsigned int buflen, char **pathname)
+bool ec_file_get_path(struct file *file, char *buffer, unsigned int buflen, char **pathname)
 {
     struct path *path  = NULL;
     bool         xcode = true;
@@ -45,7 +45,7 @@ bool file_get_path(struct file *file, char *buffer, unsigned int buflen, char **
     // default to the d_path option
     if (CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
     {
-        (*pathname) = dentry_to_path(path->dentry, buffer, buflen);
+        (*pathname) = ec_dentry_to_path(path->dentry, buffer, buflen);
     } else
     {
         (*pathname) = d_path(path, buffer, buflen);
@@ -67,7 +67,7 @@ bool file_get_path(struct file *file, char *buffer, unsigned int buflen, char **
     return xcode;
 }
 
-bool dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname)
+bool ec_dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname)
 {
     bool xcode = true;
 
@@ -75,7 +75,7 @@ bool dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, c
     CANCEL(buffer, false);
     CANCEL(pathname, false);
 
-    (*pathname) = dentry_to_path(dentry, buffer, buflen);
+    (*pathname) = ec_dentry_to_path(dentry, buffer, buflen);
 
     if (IS_ERR_OR_NULL((*pathname)))
     {
@@ -91,7 +91,7 @@ bool dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, c
     return xcode;
 }
 
-struct inode *get_inode_from_dentry(struct dentry *dentry)
+struct inode *ec_get_inode_from_dentry(struct dentry *dentry)
 {
     // Skip if dentry is null
     if (!dentry) return NULL;
@@ -101,7 +101,7 @@ struct inode *get_inode_from_dentry(struct dentry *dentry)
     return dentry->d_inode;
 }
 
-struct inode *get_inode_from_file(struct file *file)
+struct inode *ec_get_inode_from_file(struct file *file)
 {
     if (!file) return NULL;
 
@@ -109,7 +109,7 @@ struct inode *get_inode_from_file(struct file *file)
     // The cached inode may be NULL, but the calling code will handle that
     return file->f_inode;
 #else
-    return get_inode_from_dentry(file->f_path.dentry);
+    return ec_get_inode_from_dentry(file->f_path.dentry);
 #endif
 }
 
@@ -127,7 +127,7 @@ struct inode *get_inode_from_file(struct file *file)
         // The nosec version is needed because SELinux was rejecting our access to some files.
         //  (You would see messages like this in the log.)
         //  SELinux is preventing /usr/bin/dbus-daemon from getattr access on the fifo_file /run/systemd/sessions/1.ref.
-        static int cb_getattr(struct path *path, struct kstat *stat)
+        int ec_getattr(struct path *path, struct kstat *stat)
         {
             int ret = 0;
             bool should_remove_private = false;
@@ -146,11 +146,11 @@ struct inode *get_inode_from_file(struct file *file)
             }
             return ret;
         }
-        #define VFS_GETATTR(PATH, KS)   cb_getattr((PATH), (KS))
+        #define VFS_GETATTR(PATH, KS)   ec_getattr((PATH), (KS))
     #endif
 #endif
 
-void get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode)
+void ec_get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     struct super_block *sb = NULL;
@@ -199,13 +199,13 @@ void get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode)
 #endif
 }
 
-umode_t get_mode_from_file(struct file *file)
+umode_t ec_get_mode_from_file(struct file *file)
 {
     umode_t mode = 0;
 
     if (file)
     {
-        struct inode *inode = get_inode_from_file(file);
+        struct inode *inode = ec_get_inode_from_file(file);
 
         if (inode)
         {
@@ -216,14 +216,14 @@ umode_t get_mode_from_file(struct file *file)
     return mode;
 }
 
-static struct super_block *get_sb_from_dentry(struct dentry *dentry)
+struct super_block *ec_get_sb_from_dentry(struct dentry *dentry)
 {
     struct super_block *sb = NULL;
 
     if (dentry)
     {
         // Get super_block from inode first
-        struct inode *inode = get_inode_from_dentry(dentry);
+        struct inode *inode = ec_get_inode_from_dentry(dentry);
 
         if (inode)
         {
@@ -239,14 +239,14 @@ static struct super_block *get_sb_from_dentry(struct dentry *dentry)
     return sb;
 }
 
-struct super_block *get_sb_from_file(struct file *file)
+struct super_block *ec_get_sb_from_file(struct file *file)
 {
     struct super_block *sb = NULL;
 
     if (file)
     {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-        struct inode *inode = get_inode_from_file(file);
+        struct inode *inode = ec_get_inode_from_file(file);
 
         if (inode)
         {
@@ -255,13 +255,13 @@ struct super_block *get_sb_from_file(struct file *file)
 #endif
         if (!sb)
         {
-            sb = get_sb_from_dentry(file->f_path.dentry);
+            sb = ec_get_sb_from_dentry(file->f_path.dentry);
         }
     }
     return sb;
 }
 
-static bool is_network_filesystem(struct super_block *sb)
+bool ec_is_network_filesystem(struct super_block *sb)
 {
     if (!sb)
     {
@@ -281,9 +281,9 @@ static bool is_network_filesystem(struct super_block *sb)
     return false;
 }
 
-bool may_skip_unsafe_vfs_calls(struct file *file)
+bool ec_may_skip_unsafe_vfs_calls(struct file *file)
 {
-    struct super_block *sb = get_sb_from_file(file);
+    struct super_block *sb = ec_get_sb_from_file(file);
 
     // Since we still don't know the file system type
     // it's safer to not perform any VFS ops on the file.
@@ -296,5 +296,5 @@ bool may_skip_unsafe_vfs_calls(struct file *file)
     // before trying to do a vfs operation.
 
     // Eventually expand to stacked file systems
-    return is_network_filesystem(sb);
+    return ec_is_network_filesystem(sb);
 }

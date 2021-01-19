@@ -6,27 +6,27 @@
 #include "cb-spinlock.h"
 #include "priv.h"
 
-static struct rb_node *_get_left_most_node(struct rb_node *node);
+struct rb_node *__ec_get_left_most_node(struct rb_node *node);
 
-static bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context);
-static bool __is_valid_tree(CB_RBTREE *tree);
-static void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context);
+bool __ec_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context);
+bool __ec_is_valid_tree(CB_RBTREE *tree);
+void __ec_rbtree_for_each_locked(CB_RBTREE *tree, for_rbtree_node callback, void *priv, ProcessContext *context);
 
 #define get_data_ptr(tree, ptr)  ((void *)((ptr) - (tree)->node_offset))
 #define get_node_ptr(tree, ptr)  ((struct rb_node *)((ptr) + (tree)->node_offset))
 #define get_key_ptr(tree, ptr)   ((void *)((ptr) + (tree)->key_offset))
 
-static bool __is_valid_tree(CB_RBTREE *tree)
+bool __ec_is_valid_tree(CB_RBTREE *tree)
 {
     return (tree && tree->valid);
 }
 
-bool cb_rbtree_init(CB_RBTREE *tree,
+bool ec_rbtree_init(CB_RBTREE *tree,
                     int                  key_offset,
                     int                  node_offset,
-                    cb_compare_callback  compare_cb,
-                    cb_ref_callback      get_ref,
-                    cb_ref_callback      put_ref,
+                    compare_callback  compare_cb,
+                    ref_callback      get_ref,
+                    ref_callback      put_ref,
                     ProcessContext *context)
 {
     if (tree && compare_cb && get_ref && put_ref)
@@ -38,7 +38,7 @@ bool cb_rbtree_init(CB_RBTREE *tree,
         tree->compare     = compare_cb;
         tree->get_ref     = get_ref;
         tree->put_ref     = put_ref;
-        cb_spinlock_init(&tree->lock, context);
+        ec_spinlock_init(&tree->lock, context);
         atomic64_set(&tree->count, 0);
         return true;
     }
@@ -46,44 +46,44 @@ bool cb_rbtree_init(CB_RBTREE *tree,
     return false;
 }
 
-void cb_rbtree_destroy(CB_RBTREE *tree, ProcessContext *context)
+void ec_rbtree_destroy(CB_RBTREE *tree, ProcessContext *context)
 {
-    if (__is_valid_tree(tree))
+    if (__ec_is_valid_tree(tree))
     {
-        cb_rbtree_clear(tree, context);
+        ec_rbtree_clear(tree, context);
         tree->valid   = false;
         tree->root    = RB_ROOT;
         tree->compare = NULL;
         tree->get_ref = NULL;
         tree->put_ref = NULL;
-        cb_spinlock_destroy(&tree->lock, context);
+        ec_spinlock_destroy(&tree->lock, context);
         atomic64_set(&tree->count, 0);
     }
 }
 
-static void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key);
+void *ec_rbtree_search_locked(CB_RBTREE *tree, void *key);
 
-void *cb_rbtree_search(CB_RBTREE *tree, void *key, ProcessContext *context)
+void *ec_rbtree_search(CB_RBTREE *tree, void *key, ProcessContext *context)
 {
     void *data = NULL;
 
-    if (__is_valid_tree(tree) && key)
+    if (__ec_is_valid_tree(tree) && key)
     {
-        cb_read_lock(&tree->lock, context);
-        data = cb_rbtree_search_locked(tree, key);
+        ec_read_lock(&tree->lock, context);
+        data = ec_rbtree_search_locked(tree, key);
         tree->get_ref(data, context);
-        cb_read_unlock(&tree->lock, context);
+        ec_read_unlock(&tree->lock, context);
     }
 
     return data;
 }
 
-static void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key)
+void *ec_rbtree_search_locked(CB_RBTREE *tree, void *key)
 {
     void *return_data = NULL;
     struct rb_node *node = NULL;
 
-    if (__is_valid_tree(tree) && key)
+    if (__ec_is_valid_tree(tree) && key)
     {
         node = tree->root.rb_node;
         while (node)
@@ -112,18 +112,18 @@ static void *cb_rbtree_search_locked(CB_RBTREE *tree, void *key)
     return return_data;
 }
 
-bool cb_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
+bool ec_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
 {
     bool             didInsert    = false;
     struct rb_node **insert_point = NULL;
     struct rb_node *parent       = NULL;
 
-    if (__is_valid_tree(tree) && new_data)
+    if (__ec_is_valid_tree(tree) && new_data)
     {
         void *new_key  = NULL;
         void *new_node = NULL;
 
-        cb_write_lock(&tree->lock, context);
+        ec_write_lock(&tree->lock, context);
         new_key  = get_key_ptr(tree, new_data);
         new_node = get_node_ptr(tree, new_data);
 
@@ -162,26 +162,26 @@ bool cb_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
 
             didInsert = true;
         }
-        cb_write_unlock(&tree->lock, context);
+        ec_write_unlock(&tree->lock, context);
     }
 
     return didInsert;
 }
 
-bool cb_rbtree_delete_by_key(CB_RBTREE *tree, void *key, ProcessContext *context)
+bool ec_rbtree_delete_by_key(CB_RBTREE *tree, void *key, ProcessContext *context)
 {
     bool didDelete = false;
 
-    if (__is_valid_tree(tree))
+    if (__ec_is_valid_tree(tree))
     {
         void *data = NULL;
 
-        cb_write_lock(&tree->lock, context);
+        ec_write_lock(&tree->lock, context);
 
-        data = cb_rbtree_search_locked(tree, key);
-        didDelete = __cb_rbtree_delete_locked(tree, data, context);
+        data = ec_rbtree_search_locked(tree, key);
+        didDelete = __ec_rbtree_delete_locked(tree, data, context);
 
-        cb_write_unlock(&tree->lock, context);
+        ec_write_unlock(&tree->lock, context);
 
         // Release the reference outside the lock just in case cleanup code does something
         //  stupid (like scheduling).  This is safe because no other thread can now find
@@ -192,17 +192,17 @@ bool cb_rbtree_delete_by_key(CB_RBTREE *tree, void *key, ProcessContext *context
     return didDelete;
 }
 
-bool cb_rbtree_delete(CB_RBTREE *tree, void *data, ProcessContext *context)
+bool ec_rbtree_delete(CB_RBTREE *tree, void *data, ProcessContext *context)
 {
     bool didDelete = false;
 
-    if (__is_valid_tree(tree))
+    if (__ec_is_valid_tree(tree))
     {
-        cb_write_lock(&tree->lock, context);
+        ec_write_lock(&tree->lock, context);
 
-        didDelete = __cb_rbtree_delete_locked(tree, data, context);
+        didDelete = __ec_rbtree_delete_locked(tree, data, context);
 
-        cb_write_unlock(&tree->lock, context);
+        ec_write_unlock(&tree->lock, context);
 
         // Release the reference outside the lock just in case cleanup code does something
         //  stupid (like scheduling).  This is safe because no other thread can now find
@@ -213,11 +213,11 @@ bool cb_rbtree_delete(CB_RBTREE *tree, void *data, ProcessContext *context)
     return didDelete;
 }
 
-static bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context)
+bool __ec_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *context)
 {
     bool didDelete = false;
 
-    if (__is_valid_tree(tree) && data)
+    if (__ec_is_valid_tree(tree) && data)
     {
         struct rb_node *node = get_node_ptr(tree, data);
 
@@ -233,27 +233,27 @@ static bool __cb_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContex
     return didDelete;
 }
 
-void cb_rbtree_read_for_each(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context)
+void ec_rbtree_read_for_each(CB_RBTREE *tree, for_rbtree_node callback, void *priv, ProcessContext *context)
 {
-    if (__is_valid_tree(tree) && callback)
+    if (__ec_is_valid_tree(tree) && callback)
     {
-        cb_read_lock(&tree->lock, context);
-        __rbtree_for_each_locked(tree, callback, priv, context);
-        cb_read_unlock(&tree->lock, context);
+        ec_read_lock(&tree->lock, context);
+        __ec_rbtree_for_each_locked(tree, callback, priv, context);
+        ec_read_unlock(&tree->lock, context);
     }
 }
 
-void cb_rbtree_write_for_each(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context)
+void ec_rbtree_write_for_each(CB_RBTREE *tree, for_rbtree_node callback, void *priv, ProcessContext *context)
 {
-    if (__is_valid_tree(tree) && callback)
+    if (__ec_is_valid_tree(tree) && callback)
     {
-        cb_write_lock(&tree->lock, context);
-        __rbtree_for_each_locked(tree, callback, priv, context);
-        cb_write_unlock(&tree->lock, context);
+        ec_write_lock(&tree->lock, context);
+        __ec_rbtree_for_each_locked(tree, callback, priv, context);
+        ec_write_unlock(&tree->lock, context);
     }
 }
 
-static void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callback, void *priv, ProcessContext *context)
+void __ec_rbtree_for_each_locked(CB_RBTREE *tree, for_rbtree_node callback, void *priv, ProcessContext *context)
 {
     struct rb_node *node;
 
@@ -263,23 +263,23 @@ static void __rbtree_for_each_locked(CB_RBTREE *tree, cb_for_rbtree_node callbac
     }
 }
 
-static void __rotate_child(struct rb_node *node)
+void __ec_rotate_child(struct rb_node *node)
 {
     node->rb_left  = node->rb_right;
     node->rb_right = NULL;
 }
 
-void cb_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
+void ec_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
 {
     struct rb_node *node;
     uint64_t count = 0;
 
-    if (__is_valid_tree(tree))
+    if (__ec_is_valid_tree(tree))
     {
         // Start with the left most node.  Delete that and walk our way back up.
         //  The logic moves the right brach to the left and keeps walking left.
-        cb_write_lock(&tree->lock, context);
-        node = _get_left_most_node(tree->root.rb_node);
+        ec_write_lock(&tree->lock, context);
+        node = __ec_get_left_most_node(tree->root.rb_node);
         while (node)
         {
             if (node->rb_right)
@@ -287,8 +287,8 @@ void cb_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
                 // This node has a right child so we can not delete it yet
                 //  Make it this nodes left child, and re-discover the left most
                 //  child.
-                __rotate_child(node);
-                node = _get_left_most_node(node);
+                __ec_rotate_child(node);
+                node = __ec_get_left_most_node(node);
             } else
             {
                 // Get the `data` pointer from the current node
@@ -316,11 +316,11 @@ void cb_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
         }
 
         tree->root = RB_ROOT;
-        cb_write_unlock(&tree->lock, context);
+        ec_write_unlock(&tree->lock, context);
     }
 }
 
-static struct rb_node *_get_left_most_node(struct rb_node *node)
+struct rb_node *__ec_get_left_most_node(struct rb_node *node)
 {
     if (node)
     {

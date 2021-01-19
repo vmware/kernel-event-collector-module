@@ -30,21 +30,21 @@ typedef struct FILE_PROCESS_VALUE {
     atomic64_t          reference_count;
 } FILE_PROCESS_VALUE;
 
-void file_process_get_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
-void file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
+void ec_file_process_get_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
+void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
 
-bool file_process_tracking_init(ProcessContext *context);
-void file_process_tracking_shutdown(ProcessContext *context);
-FILE_PROCESS_VALUE *file_process_status(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context);
-FILE_PROCESS_VALUE *file_process_status_open(uint64_t       device,
+bool ec_file_process_tracking_init(ProcessContext *context);
+void ec_file_process_tracking_shutdown(ProcessContext *context);
+FILE_PROCESS_VALUE *ec_file_process_status(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context);
+FILE_PROCESS_VALUE *ec_file_process_status_open(uint64_t       device,
                                              uint64_t       inode,
                                              uint32_t       pid,
                                              char *path,
                                              bool           isSpecialFile,
                                              ProcessContext *context);
-void file_process_status_close(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context);
-void check_open_file_list_on_exit(CB_RBTREE *tree, ProcessContext *context);
+void ec_file_process_status_close(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context);
+void ec_check_open_file_list_on_exit(CB_RBTREE *tree, ProcessContext *context);
 
 
-void file_process_tree_init(void **tree, ProcessContext *context);
-void file_process_tree_destroy(void **tree, ProcessContext *context);
+void ec_file_process_tree_init(void **tree, ProcessContext *context);
+void ec_file_process_tree_destroy(void **tree, ProcessContext *context);

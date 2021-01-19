@@ -6,5 +6,5 @@
 
 #define MAX_FILE_BYTES_TO_DETERMINE_TYPE 68
 
-void determine_file_type(char *buffer, uint32_t bytes_read, CB_FILE_TYPE *pFileType, bool determineDataFiles);
-char *file_type_str(CB_FILE_TYPE fileType);
+void ec_determine_file_type(char *buffer, uint32_t bytes_read, CB_FILE_TYPE *pFileType, bool determineDataFiles);
+char *ec_file_type_str(CB_FILE_TYPE fileType);

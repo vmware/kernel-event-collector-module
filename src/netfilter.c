@@ -20,21 +20,21 @@
 #include "event-factory.h"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-    #define cb_ipv6_skip_exthdr(skb, ptr, pProtocol) (ptr = ipv6_skip_exthdr(skb, ptr, pProtocol))
+    #define ec_ipv6_skip_exthdr(skb, ptr, pProtocol) (ptr = ipv6_skip_exthdr(skb, ptr, pProtocol))
 #else
-    #define cb_ipv6_skip_exthdr(skb, ptr, pProtocol) do {     \
+    #define ec_ipv6_skip_exthdr(skb, ptr, pProtocol) do {     \
         __be16          frag_off;                               \
         ptr = ipv6_skip_exthdr(skb, ptr, pProtocol, &frag_off); \
     } while (0)
 #endif
 
 #define NUM_HOOKS     2
-static struct nf_hook_ops nfho_local_out[NUM_HOOKS];
+struct nf_hook_ops nfho_local_out[NUM_HOOKS];
 
-static int find_char_offset(const struct sk_buff *skb, int offset, char target);
-static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb);
+int __ec_find_char_offset(const struct sk_buff *skb, int offset, char target);
+int __ec_web_proxy_request_check(ProcessContext *context, struct sk_buff *skb);
 
-static unsigned int hook_func_local_out(
+unsigned int ec_hook_func_local_out(
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     unsigned int hooknum,
 #else
@@ -58,7 +58,7 @@ static unsigned int hook_func_local_out(
 
     CB_ISOLATION_INTERCEPT_RESULT isolation_result;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
@@ -87,7 +87,7 @@ static unsigned int hook_func_local_out(
 
         // Use the ipv6_skip_exthdr function to skip past any extended headers that may be present.
         // We dont actually care about the returned pointer, just the protocol for the next header
-        cb_ipv6_skip_exthdr(skb, ptr, &protocol);
+        ec_ipv6_skip_exthdr(skb, ptr, &protocol);
     }
 
     if (g_cbIsolationStats.isolationEnabled)
@@ -96,7 +96,7 @@ static unsigned int hook_func_local_out(
         {
             udp_header = (struct udphdr *) skb_transport_header(skb);
 
-            CbIsolationInterceptByAddrProtoPort(&context, ntohl(*(uint32_t *)daddr), true, protocol, udp_header->dest, &isolation_result);
+            ec_IsolationInterceptByAddrProtoPort(&context, ntohl(*(uint32_t *)daddr), true, protocol, udp_header->dest, &isolation_result);
             if (isolation_result.isolationAction == IsolationActionBlock)
             {
                 xcode = NF_DROP;
@@ -107,7 +107,7 @@ static unsigned int hook_func_local_out(
 
     if (protocol == IPPROTO_TCP)
     {
-        web_proxy_request_check(&context, skb);
+        __ec_web_proxy_request_check(&context, skb);
     }
 
 
@@ -116,7 +116,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
+int __ec_web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
 {
     char tmp[10];
     char url[PROXY_SERVER_MAX_LEN + 1];
@@ -161,7 +161,7 @@ static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
             goto CATCH_DEFAULT;
         }
 
-        space_offset = find_char_offset(skb, payload_offset + HTTP_METHODS_LEN[i] + 2, ' ');
+        space_offset = __ec_find_char_offset(skb, payload_offset + HTTP_METHODS_LEN[i] + 2, ' ');
         if (space_offset == -1)
         {
             goto CATCH_DEFAULT;
@@ -191,7 +191,7 @@ static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
 
         url[url_len] = 0;
 
-        TRACE(DL_INFO, "%s: will send proxy event for pid %lld to %s\n", __func__, (uint64_t)getpid(current), url);
+        TRACE(DL_INFO, "%s: will send proxy event for pid %lld to %s\n", __func__, (uint64_t)ec_getpid(current), url);
 
         localAddr. sa_addr.sa_family = family;
         remoteAddr.sa_addr.sa_family = family;
@@ -217,7 +217,7 @@ static int web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
         }
 
         // We don't track the DNS events
-        event_send_net_proxy(
+        ec_event_send_net_proxy(
             NULL,
             "PROXY",
             CB_EVENT_TYPE_WEB_PROXY,
@@ -234,7 +234,7 @@ CATCH_DEFAULT:
     return 0;
 }
 
-static int find_char_offset(const struct sk_buff *skb, int offset, char target)
+int __ec_find_char_offset(const struct sk_buff *skb, int offset, char target)
 {
     char *ptr;
     char *frag_addr;
@@ -274,15 +274,15 @@ static int find_char_offset(const struct sk_buff *skb, int offset, char target)
     return -1;
 }
 
-bool netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
+bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
 {
 
-    nfho_local_out[0].hook     = hook_func_local_out;
+    nfho_local_out[0].hook     = ec_hook_func_local_out;
     nfho_local_out[0].hooknum  = NF_INET_LOCAL_OUT;
     nfho_local_out[0].pf       = PF_INET;
     nfho_local_out[0].priority = NF_IP_PRI_FIRST;
 
-    nfho_local_out[1].hook     = hook_func_local_out;
+    nfho_local_out[1].hook     = ec_hook_func_local_out;
     nfho_local_out[1].hooknum  = NF_INET_LOCAL_OUT;
     nfho_local_out[1].pf       = PF_INET6;
     nfho_local_out[1].priority = NF_IP_PRI_FIRST;
@@ -295,14 +295,14 @@ bool netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
     return true;
 }
 
-void netfilter_cleanup(ProcessContext *context, uint64_t enableHooks)
+void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks)
 {
     TRACE(DL_SHUTDOWN, "Netfilter hook has been unregistered");
     if (enableHooks & CB__NF_local_out) nf_unregister_hooks(nfho_local_out, NUM_HOOKS);
 }
 
 #ifdef HOOK_SELECTOR
-static void setNetfilter(const char *buf, const char *name, uint32_t call, void *cb_hook, int cb_hook_nr)
+void setNetfilter(const char *buf, const char *name, uint32_t call, void *cb_hook, int cb_hook_nr)
 {
     if (0 == strncmp("1", buf, sizeof(char)))
     {
@@ -321,15 +321,15 @@ static void setNetfilter(const char *buf, const char *name, uint32_t call, void 
     }
 }
 
-static int getNetfilter(uint32_t call, struct seq_file *m)
+int getNetfilter(uint32_t call, struct seq_file *m)
 {
     seq_printf(m, (g_enableHooks & call ? "1\n" : "0\n"));
     return 0;
 }
 
-int cb_netfilter_local_out_get(struct seq_file *m, void *v) { return getNetfilter(CB__NF_local_out, m); }
+int ec_netfilter_local_out_get(struct seq_file *m, void *v) { return getNetfilter(CB__NF_local_out, m); }
 
-ssize_t cb_netfilter_local_out_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_netfilter_local_out_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setNetfilter(buf, "local_out", CB__NF_local_out, nfho_local_out, NUM_HOOKS);
     return size;

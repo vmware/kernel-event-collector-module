@@ -9,47 +9,47 @@
 
 #include <linux/binfmts.h>
 
-static struct file *get_file_from_mm(struct mm_struct *mm);
+struct file *__ec_get_file_from_mm(struct mm_struct *mm);
 
-pid_t gettid(struct task_struct *task)
+pid_t ec_gettid(struct task_struct *task)
 {
     return task->pid; // this is the thread id
 }
 
-pid_t getpid(struct task_struct *task)
+pid_t ec_getpid(struct task_struct *task)
 {
     return task->tgid; // task_tgid_vnr(task);
 }
 
-pid_t getcurrentpid(void)
+pid_t ec_getcurrentpid(void)
 {
-    return getpid(current);
+    return ec_getpid(current);
 }
 
-pid_t getppid(struct task_struct *task)
+pid_t ec_getppid(struct task_struct *task)
 {
     if (task->real_parent) // @@review: use parent?
     {
-        return getpid(task->real_parent);
+        return ec_getpid(task->real_parent);
     }
-    pr_err("no  parent for task %d", getpid(task));
+    pr_err("no  parent for task %d", ec_getpid(task));
     return -1;
 }
 
-bool is_task_valid(struct task_struct *task)
+bool ec_is_task_valid(struct task_struct *task)
 {
     // This tells us if the task_struct data is safe to access
     return (task && pid_alive(task));
 }
 
-bool is_task_alive(struct task_struct *task)
+bool ec_is_task_alive(struct task_struct *task)
 {
     // This tells us if the process is actually alive
-    return (is_task_valid(task) &&
+    return (ec_is_task_valid(task) &&
           !(task->state == TASK_DEAD || task->exit_state == EXIT_DEAD));
 }
 
-struct task_struct *cb_find_task(pid_t pid)
+struct task_struct *ec_find_task(pid_t pid)
 {
     struct task_struct *task  = NULL;
 
@@ -60,7 +60,7 @@ struct task_struct *cb_find_task(pid_t pid)
     return task;
 }
 
-void get_starttime(struct timespec *start_time)
+void ec_get_starttime(struct timespec *start_time)
 {
     // to interpret see http://www.fieldses.org/~bfields/kernel/time.txt
     //struct timespec boottime
@@ -80,7 +80,7 @@ void get_starttime(struct timespec *start_time)
     set_normalized_timespec(start_time, current_time.tv_sec, current_time.tv_nsec);
 }
 
-bool task_get_path(struct task_struct *task, char *buffer, unsigned int buflen, char **pathname)
+bool ec_task_get_path(struct task_struct *task, char *buffer, unsigned int buflen, char **pathname)
 {
     bool ret = true;
 
@@ -88,7 +88,7 @@ bool task_get_path(struct task_struct *task, char *buffer, unsigned int buflen, 
     CANCEL(buffer, false);
     CANCEL(pathname, false);
 
-    ret = file_get_path(get_file_from_mm(task->mm), buffer, buflen, pathname);
+    ret = ec_file_get_path(__ec_get_file_from_mm(task->mm), buffer, buflen, pathname);
 
     if (!ret)
     {
@@ -100,13 +100,13 @@ bool task_get_path(struct task_struct *task, char *buffer, unsigned int buflen, 
     return ret;
 }
 
-void get_devinfo_from_task(struct task_struct *task, uint64_t *device, uint64_t *inode)
+void ec_get_devinfo_from_task(struct task_struct *task, uint64_t *device, uint64_t *inode)
 {
     CANCEL_VOID(task);
-    get_devinfo_from_file(get_file_from_mm(task->mm), device, inode);
+    ec_get_devinfo_from_file(__ec_get_file_from_mm(task->mm), device, inode);
 }
 
-struct inode *get_inode_from_task(struct task_struct *task)
+struct inode *ec_get_inode_from_task(struct task_struct *task)
 {
     struct inode *pInode = NULL;
 
@@ -114,31 +114,31 @@ struct inode *get_inode_from_task(struct task_struct *task)
     {
         // TODO: We should be locking the task here, but I do not want to add it right now.
         //task_lock(task);
-        pInode = get_inode_from_file(get_file_from_mm(task->mm));
+        pInode = ec_get_inode_from_file(__ec_get_file_from_mm(task->mm));
         //task_unlock(task);
     }
 
     return pInode;
 }
 
-static bool _get_cmdline(struct task_struct *task,
+bool __ec_get_cmdline(struct task_struct *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,
                          char *cmdLine,
                          size_t              cmdLineSize);
 
-bool get_cmdline_from_task(struct task_struct *task, char *cmdLine, size_t cmdLineSize)
+bool __ec_get_cmdline_from_task(struct task_struct *task, char *cmdLine, size_t cmdLineSize)
 {
     CANCEL(task && task->mm, false);
 
     // This will be bound only by the size of the target buffer and memory range
     //  defined in the mm struct.
     // Note that `arg_end` is not valid during exec hooks
-    return _get_cmdline(task, task->mm->arg_start, task->mm->arg_end, 0xFFFF, cmdLine, cmdLineSize);
+    return __ec_get_cmdline(task, task->mm->arg_start, task->mm->arg_end, 0xFFFF, cmdLine, cmdLineSize);
 }
 
-bool get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t cmdLineSize)
+bool ec_get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t cmdLineSize)
 {
     CANCEL(bprm && current->mm, false);
 
@@ -147,7 +147,7 @@ bool get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t cm
     // Note that the memory range will include the arg list and the env.  Unfortunately
     //  the `arg_end` varaible is not set yet.  We are relying on the arc in this
     //  case to keep us from including anything from the env.
-    return _get_cmdline(current, bprm->p, bprm->exec, bprm->argc - 1, cmdLine, cmdLineSize);
+    return __ec_get_cmdline(current, bprm->p, bprm->exec, bprm->argc - 1, cmdLine, cmdLineSize);
     // the way we get the command line has always been a little bit hacky.
     // we have to go into the process virtual memory and extract it,
     // but at the time of doing so the mm struct dosent have all the values set
@@ -166,7 +166,7 @@ bool get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t cm
 
 }
 
-static bool _get_cmdline(struct task_struct *task,
+bool __ec_get_cmdline(struct task_struct *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,
@@ -183,7 +183,7 @@ static bool _get_cmdline(struct task_struct *task,
     // Verify the buffer exists
     if (cmdLine == NULL)
     {
-        TRACE(DL_WARNING, "couldn't allocate cmdline buffer pid:%d", getpid(task));
+        TRACE(DL_WARNING, "couldn't allocate cmdline buffer pid:%d", ec_getpid(task));
         return false;
     }
     cmdLine[0] = 0;
@@ -217,7 +217,7 @@ static bool _get_cmdline(struct task_struct *task,
     return true;
 }
 
-static struct file *get_file_from_mm(struct mm_struct *mm)
+struct file *__ec_get_file_from_mm(struct mm_struct *mm)
 {
     struct vm_area_struct *vma;
     struct file *filep = NULL;
@@ -294,13 +294,13 @@ struct task_stack {
 // FIRST_TASK and NEXT_TASK provide local dereferenced pointers so we don't need to dereference here
 #define HAS_MORE_TASKS(stack)  (!list_empty((stack)->child->sibling.next) && (&(stack)->child->sibling != &(stack)->task->children))
 
-static bool add_tracking_for_child_and_update_stack(
+bool __ec_add_tracking_for_child_and_update_stack(
     struct task_stack *top,
     struct task_stack *next,
     char              *path_buffer,
     time_t             start_time,
     ProcessContext *context);
-static void add_tracking_for_task(
+void __ec_add_tracking_for_task(
     struct task_struct *task,
     time_t              start_time,
     char               *path_buffer,
@@ -309,7 +309,7 @@ static void add_tracking_for_task(
 // Assuming no system will have > 10000 processes, break out of the loop if we exceed this.
 #define MAX_ENUMERATE_LOOPS 10000
 
-void enumerate_and_track_all_tasks(ProcessContext *context)
+void ec_enumerate_and_track_all_tasks(ProcessContext *context)
 {
     struct task_stack *stack = NULL;
     char *path_buffer = NULL;
@@ -319,9 +319,9 @@ void enumerate_and_track_all_tasks(ProcessContext *context)
 
     // Allocate stack space for walking the process tree
     //  We allocate one more than we need, so that the logic never accesses invalid memory
-    stack       = cb_mem_cache_alloc_generic((MAX_TASK_STACK + 1) * sizeof(struct task_stack), context);
-    path_buffer = get_path_buffer(context);
-    start_time  = get_current_time() - TO_WIN_SEC(2);
+    stack       = ec_mem_cache_alloc_generic((MAX_TASK_STACK + 1) * sizeof(struct task_stack), context);
+    path_buffer = ec_get_path_buffer(context);
+    start_time  = ec_get_current_time() - TO_WIN_SEC(2);
 
     // I would prefer to hold the tasklist_lock here, but it causes a softlok
     rcu_read_lock();
@@ -345,7 +345,7 @@ void enumerate_and_track_all_tasks(ProcessContext *context)
         // TODO: the infinite looping problem should be fixed, it we don't see it any more remove MAX_ENUMERATE_LOOPS.
         while (num_loops < MAX_ENUMERATE_LOOPS && NEXT_TASK(&stack[index]) && HAS_MORE_TASKS(&stack[index]))
         {
-            if (add_tracking_for_child_and_update_stack(&stack[index],
+            if (__ec_add_tracking_for_child_and_update_stack(&stack[index],
                                                         &stack[index + 1],
                                                         path_buffer,
                                                         start_time++,
@@ -384,11 +384,11 @@ void enumerate_and_track_all_tasks(ProcessContext *context)
 
 CATCH_DEFAULT:
     rcu_read_unlock();
-    put_path_buffer(path_buffer);
-    cb_mem_cache_free_generic(stack);
+    ec_put_path_buffer(path_buffer);
+    ec_mem_cache_free_generic(stack);
 }
 
-static bool add_tracking_for_child_and_update_stack(
+bool __ec_add_tracking_for_child_and_update_stack(
     struct task_stack *top,
     struct task_stack *next,
     char              *path_buffer,
@@ -402,9 +402,9 @@ static bool add_tracking_for_child_and_update_stack(
         if (top->child->mm != NULL &&
             top->child->state != TASK_DEAD &&
             top->child->exit_state == 0 &&
-            getpid(top->child) == gettid(top->child))
+            ec_getpid(top->child) == ec_gettid(top->child))
         {
-            add_tracking_for_task(top->child, start_time, path_buffer, context);
+            __ec_add_tracking_for_task(top->child, start_time, path_buffer, context);
 
             // initialize the next stack entry so we can enumerate the children
             // of this task
@@ -420,7 +420,7 @@ static bool add_tracking_for_child_and_update_stack(
     return found_child;
 }
 
-static void add_tracking_for_task(
+void __ec_add_tracking_for_task(
     struct task_struct *task,
     time_t              start_time,
     char               *path_buffer,
@@ -432,13 +432,13 @@ static void add_tracking_for_task(
 
     if (path_buffer)
     {
-        // task_get_path() uses dpath which builds the path efficently
+        // ec_task_get_path() uses dpath which builds the path efficently
         //  by walking back to the root. It starts with a string terminator
         //  in the last byte of the target buffer.
         //
         // The `path` variable will point to the start of the string, so we will
         //  use that directly later to copy into the tracking entry and event.
-        path_found = task_get_path(task, path_buffer, PATH_MAX, &path);
+        path_found = ec_task_get_path(task, path_buffer, PATH_MAX, &path);
         path_buffer[PATH_MAX] = 0;
     }
 
@@ -454,15 +454,15 @@ static void add_tracking_for_task(
     //     be 100, but each fork uses its own pid as the exec pid.  This is not
     //     ideal since it causes two reported processes when there should
     //     only be one.
-    if (task->did_exec || getppid(task) == 1)
+    if (task->did_exec || ec_getppid(task) == 1)
     {
         uint64_t device;
         uint64_t inode;
 
-        get_devinfo_from_task(task, &device, &inode);
-        procp = process_tracking_update_process(
-                getpid(task),
-                gettid(task),
+        ec_get_devinfo_from_task(task, &device, &inode);
+        procp = ec_process_tracking_update_process(
+                ec_getpid(task),
+                ec_gettid(task),
                 TASK_UID(task),
                 TASK_EUID(task),
                 device,
@@ -478,17 +478,17 @@ static void add_tracking_for_task(
 
         if (procp && path_buffer)
         {
-            if (get_cmdline_from_task(task, path_buffer, PATH_MAX))
+            if (__ec_get_cmdline_from_task(task, path_buffer, PATH_MAX))
             {
-                process_tracking_set_cmdline(procp, path_buffer, context);
+                ec_process_tracking_set_cmdline(procp, path_buffer, context);
             }
         }
     } else
     {
-        procp = process_tracking_create_process(
-                getpid(task),
-                getppid(task),
-                gettid(task),
+        procp = ec_process_tracking_create_process(
+                ec_getpid(task),
+                ec_getppid(task),
+                ec_gettid(task),
                 TASK_UID(task),
                 TASK_EUID(task),
                 start_time,
@@ -498,5 +498,5 @@ static void add_tracking_for_task(
                 context);
     }
 
-    process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(procp, context);
 }

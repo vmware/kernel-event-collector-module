@@ -18,13 +18,13 @@
 #define KPTR_RESTRICT_LEN 1
 #define KPTR_RESTRICT_PATH "/proc/sys/kernel/kptr_restrict"
 
-static bool parse_module_name(char *line, char **module_name);
-static bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules);
-static int get_kptr_restrict(void);
-static void set_kptr_restrict(int new_kptr_restrict);
+bool __ec_parse_module_name(char *line, char **module_name);
+bool __ec_lookup_peer_modules(ProcessContext *context, struct list_head *output_modules);
+int __ec_get_kptr_restrict(void);
+void __ec_set_kptr_restrict(int new_kptr_restrict);
 
 
-int set_symbol_address_if_matches(void *data, const char *namebuf, struct module *module, unsigned long address)
+int ec_set_symbol_address_if_matches(void *data, const char *namebuf, struct module *module, unsigned long address)
 {
     struct symbols_s *p_symbols = (struct symbols_s *) data;
     struct symbols_s *curr_symbol;
@@ -53,15 +53,15 @@ int set_symbol_address_if_matches(void *data, const char *namebuf, struct module
  */
 
 /*
- * lookup_symbols
+ * ec_lookup_symbols
  * @struct symbols_s* p_symbols - a list of the functions to search for
  * Provides access to global symbols listed by the kernel via /proc/kallsyms by name.
  */
-void lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
+void ec_lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
 {
     struct symbols_s *curr_symbol;
     unsigned int n_unk = 0;  // number of unknown symbols
-    int current_kptr_restrict = get_kptr_restrict();
+    int current_kptr_restrict = __ec_get_kptr_restrict();
 
     TRY(p_symbols && p_symbols->name[0]);
 
@@ -76,7 +76,7 @@ void lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
      */
     if (current_kptr_restrict > 0)
     {
-        set_kptr_restrict(0);
+        __ec_set_kptr_restrict(0);
     }
 
     // Initialize all the addresses to 0 in case it is not found
@@ -86,7 +86,7 @@ void lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
     }
     TRACE(DL_INFO, "Searching for %d symbols...", n_unk);
 
-    kallsyms_on_each_symbol(set_symbol_address_if_matches, (void *)p_symbols);
+    kallsyms_on_each_symbol(ec_set_symbol_address_if_matches, (void *)p_symbols);
 
     for (curr_symbol = p_symbols; curr_symbol->name[0]; ++curr_symbol) {
         if (curr_symbol->addr)
@@ -98,7 +98,7 @@ void lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols)
 CATCH_DEFAULT:
     if (current_kptr_restrict > 0)
     {
-        set_kptr_restrict(current_kptr_restrict);
+        __ec_set_kptr_restrict(current_kptr_restrict);
     }
 }
 
@@ -116,7 +116,7 @@ CATCH_DEFAULT:
  * @param peer_modules
  * @return
  */
-bool lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_modules)
+bool ec_lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_modules)
 {
     bool result = true;
     PEER_MODULE *elem = NULL;
@@ -124,7 +124,7 @@ bool lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_
     int i = 0;
     struct symbols_s *symbols = NULL;
 
-    if (!_lookup_peer_modules(context, peer_modules))
+    if (!__ec_lookup_peer_modules(context, peer_modules))
     {
         TRACE(DL_ERROR, "Failed to lookup peer modules");
         result = false;
@@ -155,7 +155,7 @@ bool lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_
     }
 
     PUSH_GFP_MODE(context, GFP_MODE(context) | __GFP_ZERO);
-    symbols = cb_mem_cache_alloc_generic(sizeof(struct symbols_s) * (peer_module_count + 1), context);
+    symbols = ec_mem_cache_alloc_generic(sizeof(struct symbols_s) * (peer_module_count + 1), context);
     POP_GFP_MODE(context);
 
     i = 0;
@@ -167,9 +167,9 @@ bool lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_
         i++;
     }
 
-    lookup_symbols(context, symbols);
+    ec_lookup_symbols(context, symbols);
 
-    if (verify_symbols(context, symbols) < 0)
+    if (ec_verify_symbols(context, symbols) < 0)
     {
         TRACE(DL_ERROR, "%s Failed to lookup symbols for some peer modules", __func__);
     }
@@ -177,13 +177,13 @@ bool lookup_peer_module_symbols(ProcessContext *context, struct list_head *peer_
 Exit:
     if (symbols != NULL)
     {
-        cb_mem_cache_free_generic(symbols);
+        ec_mem_cache_free_generic(symbols);
     }
 
     return result;
 }
 
-static bool _lookup_peer_modules(ProcessContext *context, struct list_head *output_modules)
+bool __ec_lookup_peer_modules(ProcessContext *context, struct list_head *output_modules)
 {
     struct file *pFile  = NULL;
     bool           result = true;
@@ -204,7 +204,7 @@ static bool _lookup_peer_modules(ProcessContext *context, struct list_head *outp
     }
 
     PUSH_GFP_MODE(context, GFP_MODE(context) | __GFP_ZERO);
-    buffer = (char *)cb_mem_cache_alloc_generic(CB_KALLSYMS_BUFFER*sizeof(unsigned char), context);
+    buffer = (char *)ec_mem_cache_alloc_generic(CB_KALLSYMS_BUFFER*sizeof(unsigned char), context);
     POP_GFP_MODE(context);
     if (buffer == NULL)
     {
@@ -248,7 +248,7 @@ static bool _lookup_peer_modules(ProcessContext *context, struct list_head *outp
                  * Found a line ending.
                  * Now process the line.
                  */
-                parse_module_name(line, &module_name);
+                __ec_parse_module_name(line, &module_name);
 
                 if (strstr(module_name, CB_APP_NAME) && strcmp(module_name, CB_APP_MODULE_NAME) != 0)
                 {
@@ -257,7 +257,7 @@ static bool _lookup_peer_modules(ProcessContext *context, struct list_head *outp
                      *  The strcmp in the if condition will make sure
                      *  that this module does not add an entry for itself.
                      */
-                    PEER_MODULE *temp = (PEER_MODULE *) cb_mem_cache_alloc_generic(sizeof(PEER_MODULE), context);
+                    PEER_MODULE *temp = (PEER_MODULE *) ec_mem_cache_alloc_generic(sizeof(PEER_MODULE), context);
 
                     temp->module_name[0] = 0;
                     strncat(temp->module_name, module_name, sizeof(temp->module_name) - 1);
@@ -271,7 +271,7 @@ static bool _lookup_peer_modules(ProcessContext *context, struct list_head *outp
 Exit:
     if (buffer != NULL)
     {
-        cb_mem_cache_free_generic(buffer);
+        ec_mem_cache_free_generic(buffer);
         buffer = NULL;
     }
     if (pFile != NULL)
@@ -281,7 +281,7 @@ Exit:
     }
     if (result != true)
     {
-        free_peer_module_symbols(output_modules);
+        ec_free_peer_module_symbols(output_modules);
 
         INIT_LIST_HEAD(output_modules);
     }
@@ -289,14 +289,14 @@ Exit:
     return result;
 }
 
-void free_peer_module_symbols(struct list_head *peer_modules)
+void ec_free_peer_module_symbols(struct list_head *peer_modules)
 {
     struct PEER_MODULE *elem, *next;
 
     list_for_each_entry_safe(elem, next, peer_modules, list)
     {
         list_del_init(&elem->list);
-        cb_mem_cache_free_generic(elem);
+        ec_mem_cache_free_generic(elem);
         elem = NULL;
     }
 }
@@ -311,13 +311,13 @@ void free_peer_module_symbols(struct list_head *peer_modules)
  * @param module_name
  * @return
  */
-static bool parse_module_name(char *line, char **module_name)
+bool __ec_parse_module_name(char *line, char **module_name)
 {
     *module_name = strsep(&line, " ");
     return true;
 }
 
-int verify_symbols(ProcessContext *context, struct symbols_s *p_symbols)
+int ec_verify_symbols(ProcessContext *context, struct symbols_s *p_symbols)
 {
     struct symbols_s *curr_symbol;
     int ret = 0;
@@ -326,7 +326,7 @@ int verify_symbols(ProcessContext *context, struct symbols_s *p_symbols)
     {
             if (!(*curr_symbol->addr))
             {
-                TRACE(DL_INIT, "cb_findsyms_init: no address for %s", curr_symbol->name);
+                TRACE(DL_INIT, "ec_findsyms_init: no address for %s", curr_symbol->name);
 
                 ret = -1;
             }
@@ -340,7 +340,7 @@ int verify_symbols(ProcessContext *context, struct symbols_s *p_symbols)
  *
  * @return kptr_restrict setting or -1 if unable to retrieve
  */
-static int get_kptr_restrict(void)
+int __ec_get_kptr_restrict(void)
 {
     struct file *pFile = NULL;
     ssize_t      ret;
@@ -381,7 +381,7 @@ CATCH_DEFAULT:
  *
  * @param new_kptr_restrict
  */
-static void set_kptr_restrict(int new_kptr_restrict)
+void __ec_set_kptr_restrict(int new_kptr_restrict)
 {
     struct file *pFile = NULL;
     char         buffer[KPTR_RESTRICT_LEN + 1];
@@ -414,10 +414,10 @@ CATCH_DEFAULT:
     set_fs(oldfs);
 }
 
-int cb_findsyms_init(ProcessContext *context, struct symbols_s *p_symbols)
+int ec_findsyms_init(ProcessContext *context, struct symbols_s *p_symbols)
 {
-        lookup_symbols(context, p_symbols);
-        if (verify_symbols(context, p_symbols) < 0) {
+        ec_lookup_symbols(context, p_symbols);
+        if (ec_verify_symbols(context, p_symbols) < 0) {
                 TRACE(DL_INIT, "%s failed", __func__);
                 return -ENOTSUPP;
         }

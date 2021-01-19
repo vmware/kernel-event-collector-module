@@ -66,16 +66,14 @@ typedef struct table_node {
     struct list_head  ageList;
 } NET_TBL_NODE;
 
-static void net_tracking_print_message(const char *message, NET_TBL_KEY *key);
+void __ec_net_tracking_print_message(const char *message, NET_TBL_KEY *key);
+void __ec_network_tracking_task(struct work_struct *work);
 
-HashTbl *g_net_hash_table;
-
-static struct delayed_work net_track_work;
-static void network_tracking_task(struct work_struct *work);
-static uint32_t g_ntt_delay;
-
-uint64_t g_net_age_lock;
-LIST_HEAD(g_net_age_list);
+static HashTbl            *s_net_hash_table;
+static struct delayed_work s_net_track_work;
+static uint32_t            s_ntt_delay;
+static uint64_t            s_net_age_lock;
+static LIST_HEAD(s_net_age_list);
 
 #define NET_TBL_SIZE     262000
 #define NET_TBL_PURGE    200000
@@ -153,7 +151,7 @@ LIST_HEAD(g_net_age_list);
     TRY(sock && sock->sk);                                                                                     \
                                                                                                                \
     /* Call our local code to process the packet for event generation and isolation */                         \
-    TRY_SET(-EPERM != _socket_recvmsg(CONTEXT, sock, &msg_peek, 0, flags), -EPERM);                            \
+    TRY_SET(-EPERM != __ec_socket_recvmsg(CONTEXT, sock, &msg_peek, 0, flags), -EPERM);                            \
                                                                                                                \
     /* If we peeked at UDP message sk_rcvtimeo_dlta is what's left from original timeout value.                \
      * Unless a caller set original timeout value to 0 sk_rcvtimeo_dlta should be greater than 0 here          \
@@ -188,14 +186,14 @@ if (CHECK_SOCKET(sock) && IPPROTO_UDP == sock->sk->sk_protocol)   \
 }
 // checkpatch-no-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON,LINE_CONTINUATIONS,MACRO_WITH_FLOW_CONTROL
 
-static void udp_init_sockets(void);
+void __ec_udp_init_sockets(void);
 
-bool network_tracking_initialize(ProcessContext *context)
+bool ec_network_tracking_initialize(ProcessContext *context)
 {
     // Initialize the delayed work timeout value.  This will check for timed out network
     //  connections every 15 minutes.
-    g_ntt_delay = msecs_to_jiffies(15 * 60 * 1000);
-    g_net_hash_table = hashtbl_init_generic(context,
+    s_ntt_delay = msecs_to_jiffies(15 * 60 * 1000);
+    s_net_hash_table = ec_hashtbl_init_generic(context,
                                              NET_TBL_SIZE,
                                              sizeof(NET_TBL_NODE),
                                              0,
@@ -205,22 +203,22 @@ bool network_tracking_initialize(ProcessContext *context)
                                              offsetof(NET_TBL_NODE, link),
                                              HASHTBL_DISABLE_REF_COUNT,
                                              NULL);
-    TRY(g_net_hash_table);
+    TRY(s_net_hash_table);
 
-    cb_spinlock_init(&g_net_age_lock, context);
+    ec_spinlock_init(&s_net_age_lock, context);
 
     // Configure any already running UDP sockets
-    udp_init_sockets();
+    __ec_udp_init_sockets();
 
     // Initialize a workque struct to police the hashtable
-    INIT_DELAYED_WORK(&net_track_work, network_tracking_task);
-    schedule_delayed_work(&net_track_work, g_ntt_delay);
+    INIT_DELAYED_WORK(&s_net_track_work, __ec_network_tracking_task);
+    schedule_delayed_work(&s_net_track_work, s_ntt_delay);
 
 CATCH_DEFAULT:
-    return g_net_hash_table != NULL;
+    return s_net_hash_table != NULL;
 }
 
-void network_tracking_shutdown(ProcessContext *context)
+void ec_network_tracking_shutdown(ProcessContext *context)
 {
    /*
     * Calling the sync flavor gives the guarantee that on the return of the
@@ -229,10 +227,10 @@ void network_tracking_shutdown(ProcessContext *context)
     * Its supposed to work even if the work schedules itself.
     */
 
-    cancel_delayed_work_sync(&net_track_work);
-    hashtbl_shutdown_generic(g_net_hash_table, context);
-    cb_spinlock_destroy(&g_net_age_lock, context);
-    INIT_LIST_HEAD(&g_net_age_list);
+    cancel_delayed_work_sync(&s_net_track_work);
+    ec_hashtbl_shutdown_generic(s_net_hash_table, context);
+    ec_spinlock_destroy(&s_net_age_lock, context);
+    INIT_LIST_HEAD(&s_net_age_list);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -240,7 +238,7 @@ void network_tracking_shutdown(ProcessContext *context)
 #endif
 
 
-static void cb_sk_nulls_for_each_rcu(struct hlist_nulls_head *head, bool (*callback)(struct sock *))
+void ec_sk_nulls_for_each_rcu(struct hlist_nulls_head *head, bool (*callback)(struct sock *))
 {
     struct sock *sk;
     struct hlist_nulls_node *node;
@@ -254,7 +252,7 @@ static void cb_sk_nulls_for_each_rcu(struct hlist_nulls_head *head, bool (*callb
     }
 }
 
-static void cb_sk_for_each_rcu(struct hlist_head *head, bool (*callback)(struct sock *))
+void ec_sk_for_each_rcu(struct hlist_head *head, bool (*callback)(struct sock *))
 {
 #ifdef sk_for_each_rcu
     // Some older kernels do not have sk_for_each_rcu. (This function will never be called
@@ -273,14 +271,14 @@ static void cb_sk_for_each_rcu(struct hlist_head *head, bool (*callback)(struct 
 
 // In newer kernels the `udp_hslot` structure now uses `hlist_head` instead of `hlist_nulls_head`.
 //  This figures out which type the variable is, and calls the correct function.  Note, we
-//  have to use a static helper function here because `sk_for_each_rcu` and `cb_sk_nulls_for_each_rcu`
+//  have to use a static helper function here because `sk_for_each_rcu` and `ec_sk_nulls_for_each_rcu`
 //  are MACRO expansions of a for loop.  (This does not play nicely with the __builtin.)
-#define cb_for_each(head, callback)                                           \
+#define ec_for_each(head, callback)                                           \
     __builtin_choose_expr(__builtin_types_compatible_p(typeof(head), struct hlist_nulls_head*),         \
-        cb_sk_nulls_for_each_rcu((struct hlist_nulls_head *)head, callback),  \
-        cb_sk_for_each_rcu((struct hlist_head *)head, callback))
+        ec_sk_nulls_for_each_rcu((struct hlist_nulls_head *)head, callback),  \
+        ec_sk_for_each_rcu((struct hlist_head *)head, callback))
 
-static void udp_for_each(bool (*callback)(struct sock *))
+void __ec_udp_for_each(bool (*callback)(struct sock *))
 {
     int slot;
     int size = UDP_HTABLE_SIZE;
@@ -291,12 +289,12 @@ static void udp_for_each(bool (*callback)(struct sock *))
     {
         struct udp_hslot *hslot = &udp_table.hash[slot];
 
-        cb_for_each(&hslot->head, callback);
+        ec_for_each(&hslot->head, callback);
     }
     rcu_read_unlock();
 }
 
-static bool udp_configure_raddr(struct sock *sk)
+bool __ec_udp_configure_raddr(struct sock *sk)
 {
     // TODO: Maybe remove this logic
     //       I found that this logic was no longer getting a valid address.  This
@@ -312,9 +310,9 @@ static bool udp_configure_raddr(struct sock *sk)
     return true;
 }
 
-static void udp_init_sockets(void)
+void __ec_udp_init_sockets(void)
 {
-    udp_for_each(udp_configure_raddr);
+    __ec_udp_for_each(__ec_udp_configure_raddr);
 }
 
 struct priv_data {
@@ -322,7 +320,7 @@ struct priv_data {
     uint32_t        count;
 };
 
-static void net_hash_table_cleanup(ProcessContext *context, struct priv_data *data)
+void __ec_net_hash_table_cleanup(ProcessContext *context, struct priv_data *data)
 {
     NET_TBL_NODE *datap = NULL;
     NET_TBL_NODE *tmp = NULL;
@@ -338,8 +336,8 @@ static void net_hash_table_cleanup(ProcessContext *context, struct priv_data *da
 
     data->count = 0;
 
-    cb_write_lock(&g_net_age_lock, context);
-    list_for_each_entry_safe_reverse(datap, tmp, &g_net_age_list, ageList)
+    ec_write_lock(&s_net_age_lock, context);
+    list_for_each_entry_safe_reverse(datap, tmp, &s_net_age_list, ageList)
     {
         if (!purgeCount)
         {
@@ -352,21 +350,21 @@ static void net_hash_table_cleanup(ProcessContext *context, struct priv_data *da
             --purgeCount;
         }
 
-        net_tracking_print_message("AGE OUT", &datap->key);
+        __ec_net_tracking_print_message("AGE OUT", &datap->key);
 
         ++data->count;
 
         list_del(&(datap->ageList));
-        hashtbl_del_generic(g_net_hash_table, datap, context);
-        hashtbl_free_generic(g_net_hash_table, datap, context);
+        ec_hashtbl_del_generic(s_net_hash_table, datap, context);
+        ec_hashtbl_free_generic(s_net_hash_table, datap, context);
     }
-    cb_write_unlock(&g_net_age_lock, context);
+    ec_write_unlock(&s_net_age_lock, context);
 }
 
-static void network_tracking_clean(ProcessContext *context, int sec)
+void ec_network_tracking_clean(ProcessContext *context, int sec)
 {
     struct priv_data data;
-    uint64_t         total = atomic64_read(&(g_net_hash_table->tableInstance));
+    uint64_t         total = atomic64_read(&(s_net_hash_table->tableInstance));
 
     data.count = 0;
     getnstimeofday(&data.time);
@@ -374,46 +372,46 @@ static void network_tracking_clean(ProcessContext *context, int sec)
     data.time.tv_sec -= sec;
     data.count        = total;
 
-    net_hash_table_cleanup(context, &data);
+    __ec_net_hash_table_cleanup(context, &data);
 
     TRACE(DL_NET_TRACKING, "%s: Removed %d of %llu cached connections\n", __func__, data.count, total);
 }
 
-static void network_tracking_task(struct work_struct *work)
+void __ec_network_tracking_task(struct work_struct *work)
 {
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     // Set the last seen time that we want to age out
     //  This is set to 3600 to match the default tcp session timeout
-    network_tracking_clean(&context, 3600);
-    schedule_delayed_work(&net_track_work, g_ntt_delay);
+    ec_network_tracking_clean(&context, 3600);
+    schedule_delayed_work(&s_net_track_work, s_ntt_delay);
 }
 
 // Completely purge the network tracking table
-ssize_t cb_net_track_purge_all(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_net_track_purge_all(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    cb_write_lock(&g_net_age_lock, &context);
-    hashtbl_clear_generic(g_net_hash_table, &context);
-    INIT_LIST_HEAD(&g_net_age_list);
-    cb_write_unlock(&g_net_age_lock, &context);
+    ec_write_lock(&s_net_age_lock, &context);
+    ec_hashtbl_clear_generic(s_net_hash_table, &context);
+    INIT_LIST_HEAD(&s_net_age_list);
+    ec_write_unlock(&s_net_age_lock, &context);
 
     return size;
 }
 
 // Read in the age to purge from the user
-ssize_t cb_net_track_purge_age(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_net_track_purge_age(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     long seconds = 0;
     int  ret     = 0;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     ret = kstrtol(buf, 10, &seconds);
     if (!ret)
     {
-        network_tracking_clean(&context, seconds);
+        ec_network_tracking_clean(&context, seconds);
     } else
     {
         TRACE(DL_ERROR, "%s: Error reading data: %s (%d)", __func__, buf, -ret);
@@ -423,23 +421,23 @@ ssize_t cb_net_track_purge_age(struct file *file, const char *buf, size_t size, 
 }
 
 // Display the 50 oldest netconns
-int cb_net_track_show_old(struct seq_file *m, void *v)
+int ec_net_track_show_old(struct seq_file *m, void *v)
 {
     NET_TBL_NODE *datap = 0;
     int           i     = 0;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    cb_write_lock(&g_net_age_lock, &context);
-    list_for_each_entry_reverse(datap, &g_net_age_list, ageList)
+    ec_write_lock(&s_net_age_lock, &context);
+    list_for_each_entry_reverse(datap, &s_net_age_list, ageList)
     {
         uint16_t  rport                         = 0;
         uint16_t  lport                         = 0;
         char      raddr_str[INET6_ADDRSTRLEN*2] = {0};
         char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
-        cb_ntop(&datap->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
-        cb_ntop(&datap->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
+        ec_ntop(&datap->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
+        ec_ntop(&datap->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
         seq_printf(m, "NET-TRACK %d %s-%s %s:%u -> %s:%u (%d)\n",
                         datap->key.pid,
                         PROTOCOL_STR(datap->key.proto),
@@ -448,29 +446,29 @@ int cb_net_track_show_old(struct seq_file *m, void *v)
                         (int)datap->value.last_seen.tv_sec);
         if (++i == 50) break;
     }
-    cb_write_unlock(&g_net_age_lock, &context);
+    ec_write_unlock(&s_net_age_lock, &context);
 
     return 0;
 }
 
 // Display the 50 newest netconns
-int cb_net_track_show_new(struct seq_file *m, void *v)
+int ec_net_track_show_new(struct seq_file *m, void *v)
 {
     NET_TBL_NODE *datap = 0;
     int           i     = 0;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    cb_write_lock(&g_net_age_lock, &context);
-    list_for_each_entry(datap, &g_net_age_list, ageList)
+    ec_write_lock(&s_net_age_lock, &context);
+    list_for_each_entry(datap, &s_net_age_list, ageList)
     {
         uint16_t  rport                         = 0;
         uint16_t  lport                         = 0;
         char      raddr_str[INET6_ADDRSTRLEN*2] = {0};
         char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
-        cb_ntop(&datap->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
-        cb_ntop(&datap->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
+        ec_ntop(&datap->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
+        ec_ntop(&datap->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
         seq_printf(m, "NET-TRACK %d %s-%s %s:%u -> %s:%u (%d)\n",
                         datap->key.pid,
                         PROTOCOL_STR(datap->key.proto),
@@ -479,12 +477,12 @@ int cb_net_track_show_new(struct seq_file *m, void *v)
                         (int)datap->value.last_seen.tv_sec);
         if (++i == 50) break;
     }
-    cb_write_unlock(&g_net_age_lock, &context);
+    ec_write_unlock(&s_net_age_lock, &context);
 
     return 0;
 }
 
-static void set_net_key(NET_TBL_KEY    *key,
+void __ec_set_net_key(NET_TBL_KEY    *key,
                          pid_t           pid,
                          CB_SOCK_ADDR   *localAddr,
                          CB_SOCK_ADDR   *remoteAddr,
@@ -493,18 +491,18 @@ static void set_net_key(NET_TBL_KEY    *key,
 {
     memset(key, 0, sizeof(NET_TBL_KEY));
 
-    cb_copy_sockaddr(&key->laddr, localAddr);
-    cb_copy_sockaddr(&key->raddr, remoteAddr);
+    ec_copy_sockaddr(&key->laddr, localAddr);
+    ec_copy_sockaddr(&key->raddr, remoteAddr);
 
     // Network applications tend to randomize the source port, so in order to
     //  reduce the number of reported network connections we ignore the source port.
     //  (Which one that is depends on the direction.)
     if (conn_dir == CONN_IN)
     {
-        cb_set_sockaddr_port(&key->raddr, 0);
+        ec_set_sockaddr_port(&key->raddr, 0);
     } else if (conn_dir == CONN_OUT)
     {
-        cb_set_sockaddr_port(&key->laddr, 0);
+        ec_set_sockaddr_port(&key->laddr, 0);
     } else
     {
         TRACE(DL_WARNING, "Unexpected netconn direction: %d", conn_dir);
@@ -518,7 +516,7 @@ static void set_net_key(NET_TBL_KEY    *key,
 // Track this connection in the local table
 //  If it is a new connection, add an entry and send an event (return value of true)
 //  If it is a tracked connection, update the time and skip sending an event (return value of false)
-static bool track_connection(
+bool __ec_track_connection(
     ProcessContext *context,
     pid_t           pid,
     CB_SOCK_ADDR   *localAddr,
@@ -531,21 +529,21 @@ static bool track_connection(
     NET_TBL_NODE *node;
 
     // Build the key
-    set_net_key(&key, pid, localAddr, remoteAddr, proto, conn_dir);
+    __ec_set_net_key(&key, pid, localAddr, remoteAddr, proto, conn_dir);
 
     // CB-10650
     // We found a rare race condition where we find a node to be updated, and then wait on
     //  the spinlock.  The node is then deleted from the cleanup code.  We attempt to add it
     //  back to the list and crash with a double delete.
-    cb_write_lock(&g_net_age_lock, context);
+    ec_write_lock(&s_net_age_lock, context);
 
     // Check to see if this item is already tracked
-    node = hashtbl_get_generic(g_net_hash_table, &key, context);
+    node = ec_hashtbl_get_generic(s_net_hash_table, &key, context);
 
     if (!node)
     {
         xcode = true;
-        node = (NET_TBL_NODE *)hashtbl_alloc_generic(g_net_hash_table, context);
+        node = (NET_TBL_NODE *)ec_hashtbl_alloc_generic(s_net_hash_table, context);
         TRY_MSG(node, DL_ERROR, "Failed to allocate a network tracking node, event will be sent!");
 
         memcpy(&node->key, &key, sizeof(NET_TBL_KEY));
@@ -553,10 +551,10 @@ static bool track_connection(
         // Initialize ageList so it is safe to call delete on it.
         INIT_LIST_HEAD(&(node->ageList));
 
-        net_tracking_print_message("ADD", &key);
+        __ec_net_tracking_print_message("ADD", &key);
 
-        TRY_DO_MSG(!hashtbl_add_generic(g_net_hash_table, node, context),
-                    { hashtbl_free_generic(g_net_hash_table, node, context); },
+        TRY_DO_MSG(!ec_hashtbl_add_generic(s_net_hash_table, node, context),
+                    { ec_hashtbl_free_generic(s_net_hash_table, node, context); },
                     DL_ERROR, "Failed to add a network tracking node, event will be sent!");
     }
 
@@ -568,32 +566,32 @@ static bool track_connection(
     //  the list so we can add it to the end.  This is a safe operation for a new entry
     //  because we initialize ageList above.
     list_del(&(node->ageList));
-    list_add(&(node->ageList), &g_net_age_list);
+    list_add(&(node->ageList), &s_net_age_list);
 
 CATCH_DEFAULT:
 
-    cb_write_unlock(&g_net_age_lock, context);
+    ec_write_unlock(&s_net_age_lock, context);
 
     // If we have an excessive amount of netconns force it to clean up now.
-    if (atomic64_read(&(g_net_hash_table->tableInstance)) >= NET_TBL_SIZE)
+    if (atomic64_read(&(s_net_hash_table->tableInstance)) >= NET_TBL_SIZE)
     {
         // Cancel the currently scheduled work, and and schedule it for immediate execution
-        cancel_delayed_work(&net_track_work);
-        schedule_work(&net_track_work.work);
+        cancel_delayed_work(&s_net_track_work);
+        schedule_work(&s_net_track_work.work);
     }
 
     return xcode;
 }
 
-static void net_tracking_print_message(const char *message, NET_TBL_KEY *key)
+void __ec_net_tracking_print_message(const char *message, NET_TBL_KEY *key)
 {
     uint16_t  rport                         = 0;
     uint16_t  lport                         = 0;
     char      raddr_str[INET6_ADDRSTRLEN*2] = {0};
     char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
-    cb_ntop(&key->raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
-    cb_ntop(&key->laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
+    ec_ntop(&key->raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
+    ec_ntop(&key->laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
     TRACE(DL_NET_TRACKING, "NET-TRACK <%s> %u %s-%s laddr=%s:%u raddr=%s:%u",
                             message,
                             key->pid,
@@ -610,7 +608,7 @@ static void net_tracking_print_message(const char *message, NET_TBL_KEY *key)
 #  define IPV6_SOCKNAME(sk, a)   (inet6_sk(sk)->a)
 #endif
 
-static bool cb_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
+bool ec_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
 {
     int namelen;
     bool rval = false;
@@ -634,14 +632,14 @@ static bool cb_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct 
 
 // I would prefer to use kernel_getpeername here, but it does not work if the socket state is closed.
 //  (Which seems to happen under load.)
-static void cb_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
+void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
 {
     CANCEL_VOID(sk);
     CANCEL_VOID(remoteAddr);
     CANCEL_VOID(msg);
 
     // Use msg->msg_name if we are doing UDP else ...
-    if (!cb_getudppeername(sk, remoteAddr, msg))
+    if (!ec_getudppeername(sk, remoteAddr, msg))
     {
         struct inet_sock *inet;
 
@@ -661,7 +659,7 @@ static void cb_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msg
 
 }
 
-static void cb_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msghdr *msg)
+void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msghdr *msg)
 {
     struct inet_sock *inet;
 
@@ -687,7 +685,7 @@ static void cb_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msgh
     }
 }
 
-static int checkIsolate(ProcessContext *context, u16 family, int protocol, struct sockaddr *p_sockaddr)
+int __ec_checkIsolate(ProcessContext *context, u16 family, int protocol, struct sockaddr *p_sockaddr)
 {
     CB_ISOLATION_INTERCEPT_RESULT isolationResult;
 
@@ -696,7 +694,7 @@ static int checkIsolate(ProcessContext *context, u16 family, int protocol, struc
         struct sockaddr_in *as_in4 = (struct sockaddr_in *)p_sockaddr;
 
         TRACE(DL_VERBOSE, "%s: check iso ip=%x port=%d", __func__, ntohl(as_in4->sin_addr.s_addr), ntohs(as_in4->sin_port));
-        CbIsolationInterceptByAddrProtoPort(context, ntohl(as_in4->sin_addr.s_addr), true, protocol, as_in4->sin_port, &isolationResult);
+        ec_IsolationInterceptByAddrProtoPort(context, ntohl(as_in4->sin_addr.s_addr), true, protocol, as_in4->sin_port, &isolationResult);
         if (isolationResult.isolationAction == IsolationActionBlock)
         {
             //classifyOut->actionType = FWP_ACTION_BLOCK;
@@ -712,7 +710,7 @@ static int checkIsolate(ProcessContext *context, u16 family, int protocol, struc
     {
         struct sockaddr_in6 *as_in6 = (struct sockaddr_in6 *)p_sockaddr;
 
-        CbIsolationInterceptByAddrProtoPort(context, as_in6->sin6_addr.s6_addr32[0], false, protocol, as_in6->sin6_port, &isolationResult);
+        ec_IsolationInterceptByAddrProtoPort(context, as_in6->sin6_addr.s6_addr32[0], false, protocol, as_in6->sin6_port, &isolationResult);
         if (isolationResult.isolationAction == IsolationActionBlock)
         {
             //classifyOut->actionType = FWP_ACTION_BLOCK;
@@ -727,11 +725,11 @@ static int checkIsolate(ProcessContext *context, u16 family, int protocol, struc
     return 0;
 }
 
-int socket_post_create(struct socket *sock, int family, int type, int protocol, int kern)
+int ec_socket_post_create(struct socket *sock, int family, int type, int protocol, int kern)
 {
     int xcode;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -740,7 +738,7 @@ int socket_post_create(struct socket *sock, int family, int type, int protocol, 
     TRY(xcode >= 0);
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    TRY(!cbIgnoreProcess(&context, getpid(current)));
+    TRY(!ec_banning_IgnoreProcess(&context, ec_getpid(current)));
 
     //
     // We're only interested in TCP over IPv4 or IPv6
@@ -748,14 +746,14 @@ int socket_post_create(struct socket *sock, int family, int type, int protocol, 
     TRY(CHECK_SOCKET(sock));
 
     //	pr_err("%s: proc=%16s  pid=%d stype=%d proto=%d\n", __FUNCTION__, current->comm, current->pid, sock->type, sock->sk->sk_protocol);
-    //	inode = get_inode_from_file(sock->file);
+    //	inode = ec_get_inode_from_file(sock->file);
     //	if (inode)
     //	{
     //		pr_err("%s:  socket inode=%lu\n", __FUNCTION__, inode->i_ino);
     //	}
     if (sock->sk->sk_protocol == IPPROTO_UDP)
     {
-        udp_configure_raddr(sock->sk);
+        __ec_udp_configure_raddr(sock->sk);
     }
 
 CATCH_DEFAULT:
@@ -764,11 +762,11 @@ CATCH_DEFAULT:
 }
 
 // Not used for now
-int socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
+int ec_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 {
     int xcode;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -776,7 +774,7 @@ int socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
     xcode = g_original_ops_ptr->socket_bind(sock, address, addrlen);
     TRY(xcode >= 0);
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-    TRY(!cbIgnoreProcess(&context, getpid(current)));
+    TRY(!ec_banning_IgnoreProcess(&context, ec_getpid(current)));
 
     //
     // We're only interested in TCP over IPv4 or IPv6
@@ -784,7 +782,7 @@ int socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
     TRY(address->sa_family == AF_INET || address->sa_family == AF_INET6);
 
     //pr_err("%s: proc=%16s  pid=%d stype=%d proto=%d\n", __FUNCTION__, current->comm, current->pid, sock->type, sock->sk->sk_protocol);
-    //inode = get_inode_from_file(sock->file);
+    //inode = ec_get_inode_from_file(sock->file);
     //if (inode)
     //{
     //pr_err("%s:  socket inode=%lu\n", __FUNCTION__, inode->i_ino);
@@ -795,13 +793,13 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-int socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
+int ec_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
 {
     u16               family;
     CB_SOCK_ADDR      localAddr;
     CB_SOCK_ADDR      remoteAddr;
     ProcessTracking  *procp         = NULL;
-    pid_t             pid           = getpid(current);
+    pid_t             pid           = ec_getpid(current);
     int               xcode         = 0;
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
@@ -825,27 +823,27 @@ int socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
     //  I am attempting to combat this by making sure that msg->msg_namelen is a sane value.
     //  It is still possible that it could pass this test and still be bad.  I am copying it
     //  into a local variable to limit direct usage of msg->msg_name.
-    cb_getpeername(sock->sk, &remoteAddr, msg);
+    ec_getpeername(sock->sk, &remoteAddr, msg);
 
-    TRY_SET_DO(-EPERM != checkIsolate(&context, family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
-        cb_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
+    TRY_SET_DO(-EPERM != __ec_checkIsolate(&context, family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
+        ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = get_procinfo_and_create_process_start_if_needed(pid, "SEND", &context);
+    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "SEND", &context);
     TRY(procp);
 
-    pid = process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp);
 
-    TRY(!cbIgnoreProcess(&context, pid));
+    TRY(!ec_banning_IgnoreProcess(&context, pid));
 
-    cb_getsockname(sock->sk, &localAddr, msg);
+    ec_getsockname(sock->sk, &localAddr, msg);
 
     // Track this connection in the local table
     //  If it is a new connection, add an entry and send an event (return value of true)
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
-    TRY(track_connection(&context, pid, &localAddr, &remoteAddr, sock->sk->sk_protocol, CONN_OUT));
+    TRY(__ec_track_connection(&context, pid, &localAddr, &remoteAddr, sock->sk->sk_protocol, CONN_OUT));
 
-    event_send_net(procp,
+    ec_event_send_net(procp,
                    "SEND",
                    CB_EVENT_TYPE_NET_CONNECT_PRE,
                    &localAddr,
@@ -855,12 +853,12 @@ int socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
                    &context);
 
 CATCH_DEFAULT:
-    process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(procp, &context);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return xcode;
 }
 
-int _socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, struct msghdr *msg, int size, int flags)
+int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, struct msghdr *msg, int size, int flags)
 {
     u16               family;
     CB_SOCK_ADDR      localAddr;
@@ -868,7 +866,7 @@ int _socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, s
     int               addressLength;
     ProcessTracking  *procp         = NULL;
     uint16_t          proto = 0;
-    pid_t             pid   = getpid(current);
+    pid_t             pid   = ec_getpid(current);
     int               xcode = 0;
     struct cmsghdr   *cmsg_kernel = NULL;
 
@@ -884,22 +882,22 @@ int _socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, s
 
     // We can not trust msg->msg_name at all because it is possible that the caller has not
     //  initialized it properly.
-    cb_getpeername(sock->sk, &remoteAddr, msg);
+    ec_getpeername(sock->sk, &remoteAddr, msg);
 
     // This is the first place in the syscall hook call stack, where in the routine starts accessing
     // dynamically initialized memory resources. As a pre-condition this check can only occur
     // after ensuring that the module is not disabled.
 
-    TRY_SET_DO(-EPERM != checkIsolate(context, family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
-        cb_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
+    TRY_SET_DO(-EPERM != __ec_checkIsolate(context, family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
+        ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
+    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
     TRY(procp);
 
-    pid = process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp);
 
-    TRY(!cbIgnoreProcess(context, pid));
+    TRY(!ec_banning_IgnoreProcess(context, pid));
 
     // For UDP this will probably just get the port
     addressLength = sizeof(CB_SOCK_ADDR);
@@ -914,9 +912,9 @@ int _socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, s
     // Track this connection in the local table
     //  If it is a new connection, add an entry and send an event (return value of true)
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
-    TRY(track_connection(context, pid, &localAddr, &remoteAddr, proto, CONN_IN));
+    TRY(__ec_track_connection(context, pid, &localAddr, &remoteAddr, proto, CONN_IN));
 
-    event_send_net(procp,
+    ec_event_send_net(procp,
                    "RECV",
                    CB_EVENT_TYPE_NET_ACCEPT,
                    &localAddr,
@@ -926,30 +924,30 @@ int _socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, s
                    context);
 
 CATCH_DEFAULT:
-    process_tracking_put_process(procp, context);
-    cb_mem_cache_free_generic(cmsg_kernel);
+    ec_process_tracking_put_process(procp, context);
+    ec_mem_cache_free_generic(cmsg_kernel);
     cmsg_kernel = NULL;
     return xcode;
 }
 
-int _socket_recvmsg(ProcessContext *context, struct socket *sock, struct msghdr *msg, int size, int flags)
+int __ec_socket_recvmsg(ProcessContext *context, struct socket *sock, struct msghdr *msg, int size, int flags)
 {
     int ret = 0;
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DEFAULT);
 
-    ret = _socket_recvmsg_hook_counted(context, sock, msg, size, flags);
+    ret = __ec_socket_recvmsg_hook_counted(context, sock, msg, size, flags);
 
 CATCH_DEFAULT:
     FINISH_MODULE_DISABLE_CHECK(context);
     return ret;
 }
 
-int socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
+int ec_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
 {
     int xcode = 0;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -967,7 +965,7 @@ int socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
     //  in the receive hook that allows LSM to be skipped in those cases.
     TRY(CHECK_SOCKET(sock));
 
-    TRY_SET(-EPERM != _socket_recvmsg_hook_counted(&context, sock, msg, 0, flags), -EPERM);
+    TRY_SET(-EPERM != __ec_socket_recvmsg_hook_counted(&context, sock, msg, 0, flags), -EPERM);
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
@@ -977,14 +975,14 @@ CATCH_DEFAULT:
 //
 // Active, outgoing connect (pre)
 //
-int cb_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrlen)
+int ec_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrlen)
 {
     int                  xcode;
     CB_SOCK_ADDR         localAddr;
     CB_SOCK_ADDR         remoteAddr;
     ProcessTracking      *procp        = NULL;
     int                  addressLength = sizeof(CB_SOCK_ADDR);
-    pid_t                pid           = getpid(current);
+    pid_t                pid           = ec_getpid(current);
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
 
@@ -1001,16 +999,16 @@ int cb_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrl
 
     memcpy(&remoteAddr.ss_addr, addr, addrlen);
 
-    TRY_SET_DO(-EPERM != checkIsolate(&context, remoteAddr.sa_addr.sa_family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
-        cb_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
+    TRY_SET_DO(-EPERM != __ec_checkIsolate(&context, remoteAddr.sa_addr.sa_family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
+        ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = get_procinfo_and_create_process_start_if_needed(pid, "CONNECT", &context);
+    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "CONNECT", &context);
     TRY(procp);
 
-    pid = process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp);
 
-    TRY(!cbIgnoreProcess(&context, pid));
+    TRY(!ec_banning_IgnoreProcess(&context, pid));
 
     //
     // We're only interested in TCP over IPv4 or IPv6 so we need to make sure that protocol is TCP
@@ -1023,9 +1021,9 @@ int cb_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrl
     // Track this connection in the local table
     //  If it is a new connection, add an entry and send an event (return value of true)
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
-    TRY(track_connection(&context, pid, &localAddr, &remoteAddr, sock->sk->sk_protocol, CONN_OUT));
+    TRY(__ec_track_connection(&context, pid, &localAddr, &remoteAddr, sock->sk->sk_protocol, CONN_OUT));
 
-    event_send_net(procp,
+    ec_event_send_net(procp,
                    "CONNECT",
                    CB_EVENT_TYPE_NET_CONNECT_PRE,
                    &localAddr,
@@ -1035,7 +1033,7 @@ int cb_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrl
                    &context);
 
 CATCH_DEFAULT:
-    process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(procp, &context);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return xcode;
 }
@@ -1046,7 +1044,7 @@ CATCH_DEFAULT:
 // !!!!!! IF DECIDE TO USE THIS HOOK, WILL NEED TO UPDATE IT TO SUPPORT MODULE_DISABLE CHECKS
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 //
-void cb_inet_conn_established(struct sock *sk, struct sk_buff *skb)
+void ec_inet_conn_established(struct sock *sk, struct sk_buff *skb)
 {
     u16 family = sk->sk_family;
 
@@ -1067,7 +1065,7 @@ void cb_inet_conn_established(struct sock *sk, struct sk_buff *skb)
 //
 // Passive, incomming connect (Accept)
 //
-int cb_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_sock *req)
+int ec_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_sock *req)
 {
     int                           xcode           = 0;
     u16                           family          = 0;
@@ -1077,7 +1075,7 @@ int cb_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_so
     CB_SOCK_ADDR                  localAddr;
     CB_SOCK_ADDR                  remoteAddr;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -1095,7 +1093,7 @@ int cb_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_so
 
 
     family = sk->sk_family;
-    pid    = getpid(current);
+    pid    = ec_getpid(current);
 
     // Handle IPv4 over IPv6
     if (family == PF_INET6 && skb->protocol == htons(ETH_P_IP))
@@ -1129,10 +1127,10 @@ int cb_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_so
     }
     memset(&remoteAddr, 0, sizeof(CB_SOCK_ADDR));
 
-    TRY_SET_DO(-EPERM != checkIsolate(&context, family, sk->sk_protocol, &localAddr.sa_addr), -EPERM, {
-        cb_print_address("Isolate Connection", sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
+    TRY_SET_DO(-EPERM != __ec_checkIsolate(&context, family, sk->sk_protocol, &localAddr.sa_addr), -EPERM, {
+        ec_print_address("Isolate Connection", sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
-    cb_print_address("ACCEPT <SILENT>", sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
+    ec_print_address("ACCEPT <SILENT>", sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
@@ -1143,14 +1141,14 @@ CATCH_DEFAULT:
 //  user space for processing.  NOTE: Process ID and such will be added to the event but
 //  it is not used by the daemon.  This is only used for internal caching.
 //  We have to do this here because the UDP header is not easily available in later hooks.
-int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
+int ec_on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
     int            xcode;
     struct udphdr  udphdr;
     struct udphdr *udp;
     char *data = NULL;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
@@ -1172,12 +1170,12 @@ int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
 
         TRY_MSG(len > 0, DL_WARNING, "invalid length:%d for UDP response", len);
 
-        data = cb_mem_cache_alloc_generic(len, &context);
+        data = ec_mem_cache_alloc_generic(len, &context);
         if (data)
         {
             TRY_MSG(!skb_copy_bits(skb, sizeof(udphdr), data, len),
                 DL_WARNING, "Error copying UDP DNS response data");
-            event_send_dns(
+            ec_event_send_dns(
                 CB_EVENT_TYPE_DNS_RESPONSE,
                 data,
                 len,
@@ -1188,7 +1186,7 @@ int on_sock_rcv_skb(struct sock *sk, struct sk_buff *skb)
     }
 
 CATCH_DEFAULT:
-    cb_mem_cache_free_generic(data);
+    ec_mem_cache_free_generic(data);
     xcode = g_original_ops_ptr->socket_sock_rcv_skb(sk, skb);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return xcode;
@@ -1196,23 +1194,23 @@ CATCH_DEFAULT:
 
 // These will hold a copy of the old syscall so that it can be called from below and restored
 //  when the module is unloaded.
-long (*cb_orig_sys_recvfrom)(int fd, void __user *ubuf, size_t size, unsigned int flags,
+long (*ec_orig_sys_recvfrom)(int fd, void __user *ubuf, size_t size, unsigned int flags,
                              struct sockaddr __user *addr, int __user *addr_len);
-long (*cb_orig_sys_recvmsg)(int fd, struct msghdr __user *msg, unsigned int flags);
-long (*cb_orig_sys_recvmmsg)(int fd, struct mmsghdr __user *msg, unsigned int vlen, unsigned int flags, struct timespec __user *timeout);
+long (*ec_orig_sys_recvmsg)(int fd, struct msghdr __user *msg, unsigned int flags);
+long (*ec_orig_sys_recvmmsg)(int fd, struct mmsghdr __user *msg, unsigned int vlen, unsigned int flags, struct timespec __user *timeout);
 
 // The functions below replace the linux syscalls.  In most cases we will also call the original
 //  syscall.
 //
 // !!!!! IMPORTANT NOTE AROUND SUPPORT FOR DISABLING MODULE !!!!!!!!!
-// The checks to test if module is disabled are done in the inner function _socket_recvmsg
+// The checks to test if module is disabled are done in the inner function __ec_socket_recvmsg
 // This works today because the outer routines don't access any of the memory resources, thus even
 // in a disabled module its OK to run the body of the outer routine. If this rule is violated (as
 // in the  outer calls do start accessing the memory resources) will have to refactor the checks
 // for the disabled checks to work correctly.
 //
 
-asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int flags)
+asmlinkage long ec_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int flags)
 {
     int            xcode;
     struct socket *sock;
@@ -1222,7 +1220,7 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
     long           sk_rcvtimeo_dlta = 0;
     bool           bUdpPeek = false;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -1307,7 +1305,7 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
         set_fs(get_ds());
 
         // Peek at the message to determine remote IP address and port
-        PEEK(&context, cb_orig_sys_recvmsg(fd, &msg_peek, _flags), sock, msg_peek, sk_rcvtimeo_dlta, weSetTimeout, flags, xcode);
+        PEEK(&context, ec_orig_sys_recvmsg(fd, &msg_peek, _flags), sock, msg_peek, sk_rcvtimeo_dlta, weSetTimeout, flags, xcode);
         set_fs(oldfs);
     }
 
@@ -1321,7 +1319,7 @@ asmlinkage long cb_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
 
 CATCH_DISABLED:
     // Get the actual data which will be copied to the buffer provided by caller
-    TIMED_RECV(cb_orig_sys_recvmsg(fd, msg, flags), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
+    TIMED_RECV(ec_orig_sys_recvmsg(fd, msg, flags), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
 
 CATCH_DEFAULT:
     if (sock)
@@ -1335,7 +1333,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-asmlinkage long cb_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
+asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
                                 unsigned int vlen, unsigned int flags,
                                 struct timespec __user *timeout)
 {
@@ -1349,7 +1347,7 @@ asmlinkage long cb_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
     long            sk_rcvtimeo_dlta = 0;
     bool            bUdpPeek = false;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -1450,7 +1448,7 @@ asmlinkage long cb_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
         // timeout value will be updated with remaining time if recvmmsg() receives a datagram
         // We only need one message at this time as we're checking/reporting only the first received packet for now
         // TODO: CB-11228 - we need to check/report every packet we received, not only the first one
-        PEEK(&context, cb_orig_sys_recvmmsg(fd, &mmsg_peek, 1, _flags, p_timeout), sock, mmsg_peek.msg_hdr, sk_rcvtimeo_dlta_peek, weSetTimeout, flags, xcode);
+        PEEK(&context, ec_orig_sys_recvmmsg(fd, &mmsg_peek, 1, _flags, p_timeout), sock, mmsg_peek.msg_hdr, sk_rcvtimeo_dlta_peek, weSetTimeout, flags, xcode);
 
         // If the caller provided timeout our kernel space timespec structure was updated by the recvmmsg() syscall
         // Now we need to copy it back to the caller's structure
@@ -1475,7 +1473,7 @@ CATCH_DISABLED:
     // 2. Socket timeout expires
     // 3. There are no more msghdr structures available to store incoming packets
     // We can't unload our kernel module until we exit from this call, so this behavior may cause delays when unloading the module.
-    TIMED_RECV(cb_orig_sys_recvmmsg(fd, msg, vlen, flags, timeout), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
+    TIMED_RECV(ec_orig_sys_recvmmsg(fd, msg, vlen, flags, timeout), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
 
 CATCH_DEFAULT:
     if (sock)
@@ -1488,7 +1486,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-asmlinkage long cb_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned int flags,
+asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned int flags,
                              struct sockaddr __user *addr, int __user *addr_len)
 {
     struct socket *sock;
@@ -1499,7 +1497,7 @@ asmlinkage long cb_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
     unsigned int _flags = 0;
     bool          bUdpPeek = false;
 
-    DECLARE_ATOMIC_CONTEXT(context, getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
@@ -1599,7 +1597,7 @@ asmlinkage long cb_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
 
 CATCH_DISABLED:
     // Call original syscall which should populate all the buffers and variables that a caller passed in
-    TIMED_RECV(cb_orig_sys_recvfrom(fd, ubuf, size, flags, addr, addr_len),
+    TIMED_RECV(ec_orig_sys_recvfrom(fd, ubuf, size, flags, addr, addr_len),
                sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
 
 CATCH_DEFAULT:
