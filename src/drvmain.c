@@ -29,9 +29,7 @@ pid_t    g_cb_ignored_pids[CB_SENSOR_MAX_PIDS];
 int64_t  g_cb_ignored_uid_count;
 uid_t    g_cb_ignored_uids[CB_SENSOR_MAX_UIDS];
 bool     g_exiting;
-uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
+uint32_t g_max_queue_size = MSG_QUEUE_SIZE;
 bool     g_run_self_tests;
 
 CB_DRIVER_CONFIG g_driver_config = {
@@ -43,9 +41,7 @@ CB_DRIVER_CONFIG g_driver_config = {
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_max_queue_size, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
 #ifdef HOOK_SELECTOR
