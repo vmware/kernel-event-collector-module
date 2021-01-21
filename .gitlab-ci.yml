@@ -17,8 +17,9 @@ variables:
 
 stages:
   - build_project
+  - deploy_release
   - build_downstream
-  - deploy
+  - deploy_branch
   - publish
 
 # Build project
@@ -34,6 +35,11 @@ build_release:
   extends: .build_release_template
   stage: build_project
 
+deploy_release:
+  extends: .deploy_release_template
+  stage: deploy_release
+  when: on_success
+
 # Build downstream
 build_endpoint_common:
   extends: .build_downstream_template
@@ -42,15 +48,9 @@ build_endpoint_common:
     GIT_STRATEGY: none
     DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
 
-# Deploy
-deploy_release:
-  extends: .deploy_release_template
-  stage: deploy
-  when: on_success
-
 deploy_branch:
   extends: .deploy_branch_template
-  stage: deploy
+  stage: deploy_branch
   when: manual
 
 publish_to_github:
