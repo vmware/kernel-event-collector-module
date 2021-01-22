@@ -82,7 +82,6 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
         value->key.inode     = inode;
         value->pid           = pid;
         value->isSpecialFile = isSpecialFile;
-        value->fileType      = filetypeUnknown;
         value->didReadType   = false;
         value->status        = OPENED;
         value->path          = NULL;
@@ -245,7 +244,6 @@ void _ec_file_process_tree_put_ref(void *data, ProcessContext *context)
 
 void __ec_for_each_file_tree(void *tree, void *priv, ProcessContext *context);
 void __ec_show_file_tracking_table(void *data, void *priv, ProcessContext *context);
-char *__ec_getTypeStr(CB_FILE_TYPE type);
 
 struct _tree_priv {
     struct seq_file *m;
@@ -257,8 +255,8 @@ int ec_file_track_show_table(struct seq_file *m, void *v)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    seq_printf(m, "%40s | %10s | %10s | %6s | %10s | %15s | %10s |\n",
-                   "Path", "Device", "Inode", "PID", "Is Special", "Type", "Count");
+    seq_printf(m, "%40s | %10s | %10s | %6s | %10s | %10s |\n",
+                   "Path", "Device", "Inode", "PID", "Is Special", "Count");
 
     ec_process_tracking_for_each_file_tree(__ec_for_each_file_tree, m, &context);
 
@@ -282,38 +280,12 @@ void __ec_show_file_tracking_table(void *data, void *priv, ProcessContext *conte
         FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
         struct _tree_priv *local_priv = (struct _tree_priv *)priv;
 
-        seq_printf(local_priv->m, "%40s | %10llu | %10llu | %6d | %10s | %15s | %10llu |\n",
+        seq_printf(local_priv->m, "%40s | %10llu | %10llu | %6d | %10s| %10llu |\n",
                       value->path,
                       value->key.device,
                       value->key.inode,
                       value->pid,
                       (value->isSpecialFile ? "YES" : "NO"),
-                      __ec_getTypeStr(value->fileType),
                       local_priv->count);
     }
-}
-
-char *__ec_getTypeStr(CB_FILE_TYPE type)
-{
-    char *str = "unknown";
-
-    switch (type)
-    {
-    case filetypePe: str = "PE";              break;
-    case filetypeElf: str = "ELF";             break;
-    case filetypeUniversalBin: str = "Univ. Bin";       break;
-    case filetypeEicar: str = "EICAR";           break;
-    case filetypeOfficeLegacy: str = "Office Legacy";   break;
-    case filetypeOfficeOpenXml: str = "Office Open XML"; break;
-    case filetypePdf: str = "PDF";             break;
-    case filetypeArchivePkzip: str = "PKZIP";           break;
-    case filetypeArchiveLzh: str = "LZH";             break;
-    case filetypeArchiveLzw: str = "LZW";             break;
-    case filetypeArchiveRar: str = "RAR";             break;
-    case filetypeArchiveTar: str = "TAR";             break;
-    case filetypeArchive7zip: str = "7 ZIP";           break;
-    case filetypeUnknown:
-    default:                                                break;
-    }
-    return str;
 }

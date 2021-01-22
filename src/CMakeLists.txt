@@ -110,7 +110,6 @@ set(SOURCE_FILES drvmain.c
         hash-table-generic.c
         file-process-tracking.c
         syscall_init.c
-        file-types.c
         cb-stats.c
         module-hooks.c
         event-factory.c
