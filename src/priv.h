@@ -260,6 +260,7 @@ extern int ec_send_event(struct CB_EVENT *msg, ProcessContext *context);
 extern int ec_may_send_event(ProcessContext *context);
 extern void ec_fops_comm_wake_up_reader(ProcessContext *context);
 extern bool ec_user_comm_initialize(ProcessContext *context);
+extern void ec_user_comm_early_shutdown(ProcessContext *context);
 extern void ec_user_comm_shutdown(ProcessContext *context);
 
 // ------------------------------------------------

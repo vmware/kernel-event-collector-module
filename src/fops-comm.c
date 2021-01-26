@@ -257,6 +257,13 @@ void ec_user_devnode_close(ProcessContext *context)
     unregister_chrdev_region(s_fops_data.major, MINOR_COUNT);
 }
 
+void ec_user_comm_early_shutdown(ProcessContext *context)
+{
+    // We need to disable the user comms and signal the polling process to wakeup
+    s_fops_data.enabled  = false;
+    ec_fops_comm_wake_up_reader(context);
+}
+
 void ec_user_comm_shutdown(ProcessContext *context)
 {
     s_fops_data.enabled  = false;
@@ -572,14 +579,16 @@ int ec_device_release(struct inode *inode, struct file *filp)
 
 unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
 {
-    // Check if data is available and lets go
-    uint64_t qlen = atomic64_read(&tx_ready);
+    int      xcode = 0;
+    uint64_t qlen  = 0;
 
-    if (qlen != 0)
-    {
-        TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
-        goto data_avail;
-    }
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+    // Check if data is available.  If data is ready we can exit now.  Otherwise wait.
+    qlen = atomic64_read(&tx_ready);
+    TRY_MSG(qlen == 0, DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
     // We should call poll_wait here if we want the kernel to actually
     // sleep when waiting for us.
@@ -587,19 +596,21 @@ unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
     poll_wait(filp, &s_fops_data.wq, pts);
 
     qlen = atomic64_read(&tx_ready);
+    TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
-    if (qlen != 0)
+CATCH_DEFAULT:
+    // If comms have been disabled while we were waiting send POLLHUP
+    if (!s_fops_data.enabled)
     {
-        TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
-        goto data_avail;
+        xcode = POLLHUP;
+    } else
+    {
+        // Report if we have events to read
+        xcode = qlen != 0 ? (POLLIN | POLLRDNORM) : 0;
     }
 
-    TRACE(DL_COMMS, "%s: msg queued qlen=%llu", __func__, qlen);
-
-data_avail:
-
-    // We should also return POLLHUP if we ever desire to shutdown
-    return (qlen != 0 ? (POLLIN | POLLRDNORM) : 0);
+    FINISH_MODULE_DISABLE_CHECK(&context);
+    return xcode;
 }
 
 

@@ -175,12 +175,12 @@ int __init ec_init(void)
     ec_hashtbl_generic_init(&context);
     ec_reader_init();
 
+    TRY_STEP(DEFAULT,    ec_hook_tracking_initialize(&context));
     TRY_STEP(DEFAULT,    ec_module_state_info_initialize(&context));
     TRY_STEP(STATE_INFO, ec_netfilter_initialize(&context, g_enableHooks));
     TRY_STEP(NET_FIL,    ec_lsm_initialize(&context, g_enableHooks));
     TRY_STEP(LSM,        ec_syscall_initialize(&context, g_enableHooks));
     TRY_STEP(SYSCALL,    ec_user_devnode_init(&context));
-    TRY_STEP(USER_DEV_NODE,  ec_hook_tracking_initialize(&context));
 
     if (g_run_self_tests)
     {
@@ -232,6 +232,7 @@ CATCH_NET_FIL:
 CATCH_STATE_INFO:
     ec_module_state_info_shutdown(&context);
 CATCH_DEFAULT:
+    ec_hook_tracking_shutdown(&context);
     return -1;
 }
 
@@ -348,6 +349,9 @@ int ec_disable_module(ProcessContext *context)
     }
 
     ec_write_unlock(&g_module_state_info.module_state_lock, context);
+
+    // Make sure we disable the user comms early
+    ec_user_comm_early_shutdown(context);
 
     while (true)
     {
