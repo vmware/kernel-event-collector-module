@@ -454,7 +454,7 @@ void __ec_add_tracking_for_task(
     //     be 100, but each fork uses its own pid as the exec pid.  This is not
     //     ideal since it causes two reported processes when there should
     //     only be one.
-    if (task->did_exec || ec_getppid(task) == 1)
+    if (!(task->flags & PF_FORKNOEXEC) || ec_getppid(task) == 1)
     {
         uint64_t device;
         uint64_t inode;
