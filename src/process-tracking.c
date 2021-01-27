@@ -243,14 +243,14 @@ ProcessTracking *ec_process_tracking_create_process(
         // We have recorded this in the tracking table, so mark it as active
         atomic64_inc(&shared_data->active_process_count);
 
-        TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %ld)",
+        TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: " PRFs64 ")",
               msg,
               ec_process_tracking_get_path(shared_data),
               pid,
               parent,
               shared_data->exec_details.pid,
               shared_data->exec_parent_details.pid,
-              atomic64_read(&shared_data->active_process_count));
+              (long long)atomic64_read(&shared_data->active_process_count));
     }
 
 CATCH_DEFAULT:
@@ -402,14 +402,14 @@ ProcessTracking *ec_process_tracking_update_process(
 
     ec_process_tracking_update_op_cnts(procp, event_type, action);
 
-    TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d by %d) (active: %ld)",
+    TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d by %d) (active: " PRFs64 ")",
           msg,
           (path ? path : "<unknown>"),
           pid,
           parent,
           shared_data->exec_details.pid,
           shared_data->exec_parent_details.pid,
-          atomic64_read(&shared_data->active_process_count));
+          (long long)atomic64_read(&shared_data->active_process_count));
 
 CATCH_DEFAULT:
     // Release the local ref held by this function
@@ -609,12 +609,12 @@ void ec_process_tracking_release_shared_data_ref(SharedTrackingData *shared_data
 
     CANCEL_VOID(shared_data);
 
-    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
+    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: " PRFs64 "/" PRFs64 " (%p)",
         __func__,
         ec_process_tracking_get_proc_name(shared_data->path),
         shared_data->exec_details.pid,
-        atomic64_read(&shared_data->reference_count),
-        atomic64_read(&shared_data->active_process_count),
+        (long long)atomic64_read(&shared_data->reference_count),
+        (long long)atomic64_read(&shared_data->active_process_count),
         shared_data);
 
     // If the reference count reaches 0, then delete it
@@ -652,12 +652,12 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
 
         if (g_print_proc_on_delete && procp)
         {
-            TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
+            TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: " PRFs64 "/" PRFs64 " (%p)",
                                    __func__,
                                    ec_process_tracking_get_proc_name(procp->shared_data->path),
                                    procp->shared_data->exec_details.pid,
-                                   atomic64_read(&(procp->shared_data->reference_count)),
-                                   atomic64_read(&(procp->shared_data->active_process_count)),
+                                   (long long)atomic64_read(&(procp->shared_data->reference_count)),
+                                   (long long)atomic64_read(&(procp->shared_data->active_process_count)),
                                    procp->shared_data);
         }
 
@@ -674,12 +674,12 @@ void __ec_shared_data_print_callback(void *data, ProcessContext *context)
     {
         SharedTrackingData *sdata = (SharedTrackingData *)data;
 
-        TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
+        TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: " PRFs64 "/" PRFs64 " (%p)",
               __func__,
               ec_process_tracking_get_proc_name(sdata->path),
               sdata->exec_details.pid,
-              atomic64_read(&(sdata->reference_count)),
-              atomic64_read(&(sdata->active_process_count)),
+              (long long)atomic64_read(&(sdata->reference_count)),
+              (long long)atomic64_read(&(sdata->active_process_count)),
               sdata);
     }
 }

@@ -503,5 +503,9 @@ extern struct proc_dir_entry *g_cb_proc_dir;
 extern ModuleStateInfo g_module_state_info;
 extern uint64_t g_enableHooks;
 
+/* See <linux>/Documentation/core-api/printk-formats.rst */
+#define PRFs64 "%lld"  /*   signed 64-bit decimal */
+#define PRFu64 "%llu"  /* unsigned 64-bit decimal */
+#define PRFx64 "%llx"  /* unsigned 64-bit hex     */
 
 #undef _C
