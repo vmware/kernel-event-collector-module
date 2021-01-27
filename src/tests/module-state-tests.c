@@ -43,3 +43,30 @@ CATCH_DEFAULT:
 
     return passed;
 }
+
+bool __init test__hook_tracking_add_del(ProcessContext *context)
+{
+    bool passed = false;
+    pid_t current_pid = ec_getpid(current);
+    // ignore the passed in context for this test
+    DECLARE_NON_ATOMIC_CONTEXT(test_context, current_pid);
+
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->count) == 0);
+
+    ec_hook_tracking_add_entry(&test_context);
+
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->count) == 1);
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->last_pid) == current_pid);
+
+    // This is here to exercise this code since there's no easy way to force it to run.
+    ec_hook_tracking_print_active(&test_context);
+
+    ec_hook_tracking_del_entry(&test_context);
+
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->count) == 0);
+
+    passed = true;
+
+CATCH_DEFAULT:
+    return passed;
+}

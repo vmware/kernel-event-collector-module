@@ -30,6 +30,7 @@ bool test__hashtbl_add_duplicate(ProcessContext *context) __init;
 bool test__proc_track_report_double_exit(ProcessContext *context) __init;
 
 bool test__begin_finish_macros(ProcessContext *context) __init;
+bool test__hook_tracking_add_del(ProcessContext *context) __init;
 
 
 #define ASSERT_TRY(stmt) TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED %s:%d -- %s", __FILE__, __LINE__, #stmt)
