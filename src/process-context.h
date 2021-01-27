@@ -14,26 +14,32 @@
 
 extern struct timespec get_current_timespec(void);
 
+#define __HOOK_TRACKING_INITIALIZER() {           \
+    .hook_name = __func__,                        \
+    .count     = ATOMIC64_INIT(0),        \
+    .list      = LIST_HEAD_INIT(hook_tracking.list),   \
+}
+
 #define __CONTEXT_INITIALIZER(NAME, MODE, PID) {                               \
     .gfp_mode              = { (MODE), },                                      \
     .stack_index           = 0,                                                \
     .pid                   = (PID),                                            \
     .allow_wake_up         = true,                                             \
     .allow_send_events     = true,                                             \
-    .hook_name             = __func__,                                         \
-    .enter_time            = get_current_timespec(),                           \
-    .list                  = LIST_HEAD_INIT((NAME).list),                      \
-    .decr_active_call_count_on_exit = false                                    \
+    .decr_active_call_count_on_exit = false,                                   \
+    .hook_tracking         = &hook_tracking                                    \
 }
 
 #define MAX_GFP_STACK    10
 
 #define CB_ATOMIC        (GFP_ATOMIC | GFP_NOWAIT)
 
-#define DECLARE_ATOMIC_CONTEXT(name, pid)                                      \
+#define DECLARE_ATOMIC_CONTEXT(name, pid)           \
+    static HookTracking hook_tracking = __HOOK_TRACKING_INITIALIZER(); \
     ProcessContext name = __CONTEXT_INITIALIZER(name, CB_ATOMIC, pid)
 
 #define DECLARE_NON_ATOMIC_CONTEXT(name, pid)                                  \
+    static HookTracking hook_tracking = __HOOK_TRACKING_INITIALIZER(); \
     ProcessContext name = __CONTEXT_INITIALIZER(name, GFP_KERNEL, pid)
 
 #define DISABLE_WAKE_UP(context)                                               \
@@ -75,14 +81,22 @@ extern struct timespec get_current_timespec(void);
     } while (0)
 // checkpatch-ignore: SUSPECT_CODE_INDENT
 
+typedef struct hook_tracking {
+    const char      *hook_name;
+    atomic64_t       count;
+    atomic64_t       last_enter_time;
+    atomic64_t       last_pid;
+    struct list_head list;
+} HookTracking;
+
 typedef struct process_context {
     gfp_t            gfp_mode[MAX_GFP_STACK];
     int              stack_index;
     pid_t            pid;
     bool             allow_wake_up;
     bool             allow_send_events;
-    const char      *hook_name;
-    struct timespec  enter_time;
     struct list_head list;
     bool             decr_active_call_count_on_exit;
+    HookTracking     *hook_tracking;
 } ProcessContext;
+
