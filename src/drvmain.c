@@ -29,9 +29,7 @@ pid_t    g_cb_ignored_pids[CB_SENSOR_MAX_PIDS];
 int64_t  g_cb_ignored_uid_count;
 uid_t    g_cb_ignored_uids[CB_SENSOR_MAX_UIDS];
 bool     g_exiting;
-uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
+uint32_t g_max_queue_size = MSG_QUEUE_SIZE;
 bool     g_run_self_tests;
 
 CB_DRIVER_CONFIG g_driver_config = {
@@ -43,9 +41,7 @@ CB_DRIVER_CONFIG g_driver_config = {
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_max_queue_size, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
 #ifdef HOOK_SELECTOR
@@ -179,12 +175,12 @@ int __init ec_init(void)
     ec_hashtbl_generic_init(&context);
     ec_reader_init();
 
+    TRY_STEP(DEFAULT,    ec_hook_tracking_initialize(&context));
     TRY_STEP(DEFAULT,    ec_module_state_info_initialize(&context));
     TRY_STEP(STATE_INFO, ec_netfilter_initialize(&context, g_enableHooks));
     TRY_STEP(NET_FIL,    ec_lsm_initialize(&context, g_enableHooks));
     TRY_STEP(LSM,        ec_syscall_initialize(&context, g_enableHooks));
     TRY_STEP(SYSCALL,    ec_user_devnode_init(&context));
-    TRY_STEP(USER_DEV_NODE,  ec_hook_tracking_initialize(&context));
 
     if (g_run_self_tests)
     {
@@ -236,6 +232,7 @@ CATCH_NET_FIL:
 CATCH_STATE_INFO:
     ec_module_state_info_shutdown(&context);
 CATCH_DEFAULT:
+    ec_hook_tracking_shutdown(&context);
     return -1;
 }
 
@@ -352,6 +349,9 @@ int ec_disable_module(ProcessContext *context)
     }
 
     ec_write_unlock(&g_module_state_info.module_state_lock, context);
+
+    // Make sure we disable the user comms early
+    ec_user_comm_early_shutdown(context);
 
     while (true)
     {
