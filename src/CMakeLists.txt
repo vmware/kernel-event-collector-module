@@ -114,6 +114,7 @@ set(SOURCE_FILES drvmain.c
         module-hooks.c
         event-factory.c
         cb-module-state-export.c
+        dns-parser.c
         tests/run-tests.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c

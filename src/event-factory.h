@@ -61,7 +61,6 @@ void ec_event_send_net_proxy(ProcessTracking *procp,
                              void             *sk,
                              ProcessContext   *context);
 
-void ec_event_send_dns(CB_EVENT_TYPE   net_event_type,
-                       char           *data,
-                       uint32_t        len,
-                       ProcessContext *context);
+void ec_event_send_dns(CB_EVENT_TYPE          net_event_type,
+                       CB_EVENT_DNS_RESPONSE *response,
+                       ProcessContext        *context);

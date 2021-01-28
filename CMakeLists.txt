@@ -40,5 +40,6 @@ cb_check_kernel_files(
         #  If you get the error `need consistent spacing around "*"` then add the type here.
         NEW_TYPES           CB_FILE_TYPE
                             ProcessContext
+                            CB_EVENT_DNS_RESPONSE
         SOURCE_FILES        ${SRC_FILES}
 )
