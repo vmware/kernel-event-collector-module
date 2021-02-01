@@ -177,9 +177,6 @@ PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     uid_t uid = GET_UID();
     CB_EVENT_TYPE resolvedEventType = eventType;
 
-    // If the event comms does not want us sending events we will not bother with creating the event
-    TRY(ec_may_send_event(context));
-
     // We use some semi-private event types to provide some extra granularity.
     //  Depending on the config structure, the ec_logger_should_log function may reject the
     //  event. The collector does not care about this extra granularitiy, so once
