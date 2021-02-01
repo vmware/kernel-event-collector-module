@@ -53,9 +53,14 @@ extern int64_t  g_cb_ignored_uid_count;
 extern pid_t    g_cb_ignored_pids[CB_SENSOR_MAX_PIDS];
 extern uid_t    g_cb_ignored_uids[CB_SENSOR_MAX_UIDS];
 extern bool     g_exiting;
-extern uint32_t g_max_queue_size;
+extern uint32_t g_max_queue_size_pri0;
+extern uint32_t g_max_queue_size_pri1;
+extern uint32_t g_max_queue_size_pri2;
 
-#define MSG_QUEUE_SIZE  (8192 * 5)
+#define MSG_QUEUE_SIZE  8192
+#define DEFAULT_P0_QUEUE_SIZE  (MSG_QUEUE_SIZE * 3)
+#define DEFAULT_P1_QUEUE_SIZE  MSG_QUEUE_SIZE
+#define DEFAULT_P2_QUEUE_SIZE  MSG_QUEUE_SIZE
 
 //-------------------------------------------------
 // Module usage protection
@@ -257,10 +262,8 @@ extern void ec_event_set_process_data(PCB_EVENT event, void *process_data, Proce
 extern bool ec_logger_should_log(CB_EVENT_TYPE eventType);
 
 extern int ec_send_event(struct CB_EVENT *msg, ProcessContext *context);
-extern int ec_may_send_event(ProcessContext *context);
 extern void ec_fops_comm_wake_up_reader(ProcessContext *context);
 extern bool ec_user_comm_initialize(ProcessContext *context);
-extern void ec_user_comm_early_shutdown(ProcessContext *context);
 extern void ec_user_comm_shutdown(ProcessContext *context);
 
 // ------------------------------------------------
