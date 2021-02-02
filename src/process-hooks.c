@@ -21,17 +21,22 @@
 void ec_exit_hook(struct task_struct *task, ProcessContext *context);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    void ec_sched_process_fork_probe(void *data, struct task_struct *parent, struct task_struct *child);
+void ec_sched_process_fork_probe(void *data, struct task_struct *parent, struct task_struct *child);
+void ec_sched_process_exit_probe(void *data, struct task_struct *task);
 #else
-    void ec_sched_process_fork_probe(struct task_struct *parent, struct task_struct *child);
+void ec_sched_process_fork_probe(struct task_struct *parent, struct task_struct *child);
+void ec_sched_process_exit_probe(struct task_struct *task);
 #endif
+
 
 bool ec_task_initialize(ProcessContext *context)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     register_trace_sched_process_fork(ec_sched_process_fork_probe, NULL);
+    register_trace_sched_process_exit(ec_sched_process_exit_probe, NULL);
 #else
     register_trace_sched_process_fork(ec_sched_process_fork_probe);
+    register_trace_sched_process_exit(ec_sched_process_exit_probe);
 #endif
 
     return true;
@@ -41,55 +46,30 @@ void ec_task_shutdown(ProcessContext *context)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     unregister_trace_sched_process_fork(ec_sched_process_fork_probe, NULL);
+    unregister_trace_sched_process_exit(ec_sched_process_exit_probe, NULL);
 #else
     unregister_trace_sched_process_fork(ec_sched_process_fork_probe);
+    unregister_trace_sched_process_exit(ec_sched_process_exit_probe);
 #endif
 }
 
-// RHEL 7 has an optomized code path for exits when a process can not be reaped.
-//  In this case the `task_wait` hook is not called.  This causes us to miss exit
-//  events, and leak process tracking entires.
-//
-// For RHEL 7 we can switch to using the `task_free` hook, but this is not available
-//  on RHEL 6.  However RHEL 6 does not appear to have this issue, so we will
-//  continue to use the `task_wait` hook.
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-    int ec_task_wait(struct task_struct *task)
-    {
-        int              ret;
-
-        // This is in the kernel exit code, I don't know if it is safe to be NON_ATOMIC
-        DECLARE_ATOMIC_CONTEXT(context, task ? ec_getpid(task) : 0);
-
-        MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-        TRY(task);
-
-        if (task->state == TASK_DEAD || task->exit_state == EXIT_DEAD)
-        {
-            ec_exit_hook(task, &context);
-        }
-
-CATCH_DEFAULT:
-        ret = g_original_ops_ptr->task_wait(task);
-        MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-        return ret;
-    }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+void ec_sched_process_exit_probe(void *data, struct task_struct *task)
 #else
-    void ec_task_free(struct task_struct *task)
-    {
-        // This is in the kernel exit code, I don't know if it is safe to be NON_ATOMIC
-        DECLARE_ATOMIC_CONTEXT(context, task ? ec_getpid(task) : 0);
+void ec_sched_process_exit_probe(struct task_struct *task)
+#endif
+{
+    // This is in the kernel exit code, I don't know if it is safe to be NON_ATOMIC
+    DECLARE_ATOMIC_CONTEXT(context, task ? ec_getpid(task) : 0);
 
-        MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-        TRY(task);
+    MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+    TRY(task);
 
-        ec_exit_hook(task, &context);
+    ec_exit_hook(task, &context);
 
 CATCH_DEFAULT:
-        g_original_ops_ptr->task_free(task);
-        MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    }
-#endif /* KERNEL_VERSION CHECK */
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+}
 
 void ec_exit_hook(struct task_struct *task, ProcessContext *context)
 {
