@@ -13,8 +13,6 @@ static struct security_operations   g_combined_ops;       // Original LSM plus o
 extern int cb_bprm_check_security(struct linux_binprm *bprm);
 extern void cb_bprm_committed_creds(struct linux_binprm *bprm);
 extern int task_create(unsigned long clone_flags);
-extern int cb_task_wait(struct task_struct *p);
-extern void cb_task_free(struct task_struct *task);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 extern int on_file_mmap(struct file *file,
@@ -60,10 +58,8 @@ bool lsm_initialize(ProcessContext *context, uint64_t enableHooks)
     if (enableHooks & CB__LSM_bprm_committed_creds) g_combined_ops.bprm_committed_creds = cb_bprm_committed_creds;    // process launched (exec)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     if (enableHooks & CB__LSM_mmap_file) g_combined_ops.mmap_file = on_file_mmap;                          // shared library load
-    if (enableHooks & CB__LSM_task_free) g_combined_ops.task_free = cb_task_free;                          // process exit
 #else
     if (enableHooks & CB__LSM_file_mmap) g_combined_ops.file_mmap = on_file_mmap;                          // shared library load
-    if (enableHooks & CB__LSM_task_wait) g_combined_ops.task_wait = cb_task_wait;                          // process exit
 #endif
     if (enableHooks & CB__LSM_socket_connect) g_combined_ops.socket_connect = cb_socket_connect_hook;            // outgoing connects (pre)
     if (enableHooks & CB__LSM_inet_conn_request) g_combined_ops.inet_conn_request = cb_inet_conn_request;           // incoming accept (pre)
@@ -91,10 +87,8 @@ bool lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
     if (enableHooks & CB__LSM_bprm_committed_creds) changed |= secops->bprm_committed_creds != cb_bprm_committed_creds;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     if (enableHooks & CB__LSM_mmap_file) changed |= secops->mmap_file != on_file_mmap;
-    if (enableHooks & CB__LSM_task_free) changed |= secops->task_free != cb_task_free;
 #else
     if (enableHooks & CB__LSM_file_mmap) changed |= secops->file_mmap != on_file_mmap;
-    if (enableHooks & CB__LSM_task_wait) changed |= secops->task_wait != cb_task_wait;
 #endif
     if (enableHooks & CB__LSM_socket_connect) changed |= secops->socket_connect != cb_socket_connect_hook;
     if (enableHooks & CB__LSM_inet_conn_request) changed |= secops->inet_conn_request != cb_inet_conn_request;
@@ -172,8 +166,6 @@ CATCH_DEFAULT: \
 
 LSM_HOOK(bprm_check_security, "bprm_check_security",  cb_bprm_check_security)
 LSM_HOOK(bprm_committed_creds, "bprm_committed_creds", cb_bprm_committed_creds)
-LSM_HOOK(task_wait, "task_wait",            cb_task_wait)
-LSM_HOOK(task_free, "task_free",            cb_task_free)
 LSM_HOOK(socket_connect, "socket_connect",       cb_socket_connect_hook)
 LSM_HOOK(inet_conn_request, "inet_conn_request",    cb_inet_conn_request)
 LSM_HOOK(socket_post_create, "socket_post_create",   socket_post_create)
