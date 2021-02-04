@@ -173,7 +173,7 @@ void restore_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 }
 #endif
 
-bool ec_syscall_initialize(ProcessContext *context, uint64_t enableHooks)
+bool ec_do_sys_initialize(ProcessContext *context, uint64_t enableHooks)
 {
     bool rval = false;
     p_sys_call_table syscall_table;
@@ -205,7 +205,7 @@ CATCH_DEFAULT:
 }
 
 
-bool ec_syscall_hooks_changed(ProcessContext *context, uint64_t enableHooks)
+bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks)
 {
     bool changed = false;
     p_sys_call_table syscall_table;
@@ -224,7 +224,7 @@ CATCH_DEFAULT:
 }
 
 
-void ec_syscall_shutdown(ProcessContext *context, uint64_t enableHooks)
+void ec_do_sys_shutdown(ProcessContext *context, uint64_t enableHooks)
 {
     p_sys_call_table syscall_table;
 
@@ -290,51 +290,51 @@ int getSyscall(uint64_t syscall, struct seq_file *m)
     return 0;
 }
 
-int ec_syscall_recvfrom_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvfrom, m); }
-int ec_syscall_recvmsg_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmsg,  m); }
-int ec_syscall_recvmmsg_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmmsg, m); }
-int ec_syscall_write_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_write,    m); }
-int ec_syscall_close_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_close,    m); }
-int ec_syscall_delete_module_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_delete_module,    m); }
-int ec_syscall_creat_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_creat,       m); }
-int ec_syscall_open_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_open,         m); }
-int ec_syscall_openat_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_openat,     m); }
-int ec_syscall_unlink_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlink,     m); }
-int ec_syscall_unlinkat_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlinkat, m); }
-int ec_syscall_rename_get(struct seq_file *m, void *v) { return getSyscall(CB__NR_rename,     m); }
+int ec_get_sys_recvfrom(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvfrom, m); }
+int ec_get_sys_recvmsg(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmsg,  m); }
+int ec_get_sys_recvmmsg(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmmsg, m); }
+int ec_get_sys_write(struct seq_file *m, void *v) { return getSyscall(CB__NR_write,    m); }
+int ec_get_sys_close(struct seq_file *m, void *v) { return getSyscall(CB__NR_close,    m); }
+int ec_get_sys_delete_module(struct seq_file *m, void *v) { return getSyscall(CB__NR_delete_module,    m); }
+int ec_get_sys_creat(struct seq_file *m, void *v) { return getSyscall(CB__NR_creat,       m); }
+int ec_get_sys_open(struct seq_file *m, void *v) { return getSyscall(CB__NR_open,         m); }
+int ec_get_sys_openat(struct seq_file *m, void *v) { return getSyscall(CB__NR_openat,     m); }
+int ec_get_sys_unlink(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlink,     m); }
+int ec_get_sys_unlinkat(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlinkat, m); }
+int ec_get_sys_rename(struct seq_file *m, void *v) { return getSyscall(CB__NR_rename,     m); }
 
-ssize_t ec_syscall_recvfrom_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_set_sys_recvfrom(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "recvfrom", CB__NR_recvfrom, __NR_recvfrom, ec_sys_recvfrom,       ec_orig_sys_recvfrom, CB_RESOLVED(sys_call_table));
     return size;
 }
 
-ssize_t ec_syscall_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_set_sys_recvmsg(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "recvmsg", CB__NR_recvmsg, __NR_recvmsg,  ec_sys_recvmsg,          ec_orig_sys_recvmsg, CB_RESOLVED(sys_call_table));
     return size;
 }
 
-ssize_t ec_syscall_recvmmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_set_sys_recvmmsg(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "recvmmsg", CB__NR_recvmmsg, __NR_recvmmsg, ec_sys_recvmmsg,       ec_orig_sys_recvmmsg, CB_RESOLVED(sys_call_table));
     return size;
 }
 
-ssize_t ec_syscall_write_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_set_sys_write(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "write", CB__NR_write,   __NR_write,      ec_sys_write,            ec_orig_sys_write, CB_RESOLVED(sys_call_table));
     //setSyscall( buf, "write", CB__NR_write,   __NR_ia32_write, ec_sys_write,            ec_orig_sys_write, CB_RESOLVED(ia32_sys_call_table) );
     return size;
 }
 
-ssize_t ec_syscall_close_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_set_sys_close(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "close", CB__NR_close,   __NR_close,      ec_sys_close,            ec_orig_sys_close, CB_RESOLVED(sys_call_table));
     return size;
 }
 
-ssize_t ec_syscall_delete_module(struct file *file, const char *buf, size_t size, loff_t *ppos)
+ssize_t ec_set_sys_delete_module(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "delete_module", CB__NR_delete_module,   __NR_delete_module, ec_sys_delete_module, ec_orig_sys_delete_module, CB_RESOLVED(sys_call_table));
     return size;

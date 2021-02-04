@@ -181,8 +181,8 @@ int __init ec_init(void)
 
     TRY_STEP(DEFAULT,    ec_module_state_info_initialize(&context));
     TRY_STEP(STATE_INFO, ec_netfilter_initialize(&context, g_enableHooks));
-    TRY_STEP(NET_FIL,    ec_lsm_initialize(&context, g_enableHooks));
-    TRY_STEP(LSM,        ec_syscall_initialize(&context, g_enableHooks));
+    TRY_STEP(NET_FIL,    ec_do_lsm_initialize(&context, g_enableHooks));
+    TRY_STEP(LSM,        ec_do_sys_initialize(&context, g_enableHooks));
     TRY_STEP(SYSCALL,    ec_user_devnode_init(&context));
     TRY_STEP(USER_DEV_NODE,  ec_hook_tracking_initialize(&context));
 
@@ -228,9 +228,9 @@ int __init ec_init(void)
 CATCH_USER_DEV_NODE:
     ec_user_devnode_close(&context);
 CATCH_SYSCALL:
-    ec_syscall_shutdown(&context, g_enableHooks);
+    ec_do_sys_shutdown(&context, g_enableHooks);
 CATCH_LSM:
-    ec_lsm_shutdown(&context);
+    ec_do_lsm_shutdown(&context);
 CATCH_NET_FIL:
     ec_netfilter_cleanup(&context, g_enableHooks);
 CATCH_STATE_INFO:
@@ -243,7 +243,7 @@ CATCH_DEFAULT:
 void ec_shutdown(ProcessContext *context)
 {
     // If the hooks have been modified abort the shutdown.
-    CANCEL_VOID_MSG(!(ec_syscall_hooks_changed(context, g_enableHooks) || ec_lsm_hooks_changed(context, g_enableHooks)),
+    CANCEL_VOID_MSG(!(ec_do_sys_hooks_changed(context, g_enableHooks) || ec_do_lsm_hooks_changed(context, g_enableHooks)),
                     DL_WARNING, "Hooks have changed, unable to shutdown");
 
     /**
@@ -254,8 +254,8 @@ void ec_shutdown(ProcessContext *context)
     CANCEL_VOID((ec_disable_module(context) == 0));
 
     // Remove hooks
-    ec_syscall_shutdown(context, g_enableHooks);
-    ec_lsm_shutdown(context);
+    ec_do_sys_shutdown(context, g_enableHooks);
+    ec_do_lsm_shutdown(context);
     ec_netfilter_cleanup(context, g_enableHooks);
 }
 

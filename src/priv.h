@@ -15,7 +15,6 @@
 #include <linux/module.h>    // included for all kernel modules
 #include <linux/kernel.h>    // included for KERN_INFO
 #include <linux/init.h>        // included for __init and __exit macros
-#include <linux/sched.h>       // included for struct sched_class, needed to hook task_woken
 
 #include <linux/kprobes.h>
 #include <linux/kallsyms.h>
@@ -187,8 +186,7 @@ while (false)
 
 #define CB__LSM_bprm_check_security       0x0000100000000000
 #define CB__LSM_bprm_committed_creds      0x0000200000000000
-#define CB__LSM_task_wait                 0x0000400000000000
-#define CB__LSM_task_free                 0x0000400000000000
+
 #define CB__LSM_mmap_file                 0x0000800000000000
 #define CB__LSM_file_mmap                 0x0000800000000000
 #define CB__LSM_file_permission           0x0001000000000000
@@ -213,9 +211,9 @@ void ec_reader_init(void);
 // ------------------------------------------------
 // Linux Security Module Helpers
 //
-extern bool ec_lsm_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void ec_lsm_shutdown(ProcessContext *context);
-extern bool ec_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks);
+extern void ec_do_lsm_shutdown(ProcessContext *context);
+extern bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
 
 // ------------------------------------------------
 // Linux Syscall Hook Helpers
@@ -223,10 +221,10 @@ extern bool ec_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
 #define GPF_DISABLE write_cr0(read_cr0() & (~0x10000))
 #define GPF_ENABLE  write_cr0(read_cr0() | 0x10000)
 
-extern bool ec_syscall_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void ec_syscall_shutdown(ProcessContext *context, uint64_t enableHooks);
-extern bool ec_syscall_hooks_changed(ProcessContext *context, uint64_t enableHooks);
-extern void ec_clone_hook(ProcessContext *context, struct task_struct *task);
+extern bool ec_do_sys_initialize(ProcessContext *context, uint64_t enableHooks);
+extern void ec_do_sys_shutdown(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks);
+extern void ec_sys_clone(ProcessContext *context, struct task_struct *task);
 
 extern struct security_operations *g_original_ops_ptr;
 
@@ -299,58 +297,56 @@ extern ssize_t ec_net_track_purge_all(struct file *file, const char *buf, size_t
 extern int     ec_net_track_show_new(struct seq_file *m, void *v);
 extern int     ec_net_track_show_old(struct seq_file *m, void *v);
 
-extern int ec_syscall_clone_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_clone_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int ec_syscall_fork_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_fork_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int ec_syscall_vfork_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_vfork_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int ec_syscall_recvfrom_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_recvfrom_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int ec_syscall_recvmsg_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int ec_syscall_recvmmsg_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_recvmmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int ec_syscall_write_get(struct seq_file *m, void *v);
-extern ssize_t ec_syscall_write_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_clone(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_clone(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_fork(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_fork(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_vfork(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_vfork(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_recvfrom(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_recvfrom(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_recvmsg(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_recvmsg(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_recvmmsg(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_recvmmsg(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_syscall_write(struct seq_file *m, void *v);
+extern ssize_t ec_set_syscall_write(struct file *file, const char *buf, size_t size, loff_t *ppos);
 
-extern int ec_netfilter_local_out_get(struct seq_file *m, void *v);
-extern ssize_t ec_netfilter_local_out_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int ec_get_netfilter_local_out(struct seq_file *m, void *v);
+extern ssize_t ec_set_netfilter_local_out(struct file *file, const char *buf, size_t size, loff_t *ppos);
 
-int ec_lsm_bprm_check_security_get(struct seq_file *m, void *v);
-int ec_lsm_task_wait_get(struct seq_file *m, void *v);
-int ec_lsm_inode_create_get(struct seq_file *m, void *v);
-int ec_lsm_inode_rename_get(struct seq_file *m, void *v);
-int ec_lsm_inode_unlink_get(struct seq_file *m, void *v);
-int ec_lsm_file_permission_get(struct seq_file *m, void *v);
-int ec_lsm_file_free_security_get(struct seq_file *m, void *v);
-int ec_lsm_socket_connect_get(struct seq_file *m, void *v);
-int ec_lsm_inet_conn_request_get(struct seq_file *m, void *v);
-int ec_lsm_socket_sock_rcv_skb_get(struct seq_file *m, void *v);
-int ec_lsm_socket_post_create_get(struct seq_file *m, void *v);
-int ec_lsm_socket_sendmsg_get(struct seq_file *m, void *v);
-int ec_lsm_socket_recvmsg_get(struct seq_file *m, void *v);
+int ec_get_lsm_bprm_check_security(struct seq_file *m, void *v);
+int ec_get_lsm_inode_create(struct seq_file *m, void *v);
+int ec_get_lsm_inode_rename(struct seq_file *m, void *v);
+int ec_get_lsm_inode_unlink(struct seq_file *m, void *v);
+int ec_get_lsm_file_permission(struct seq_file *m, void *v);
+int ec_get_lsm_file_free_security(struct seq_file *m, void *v);
+int ec_get_lsm_socket_connect(struct seq_file *m, void *v);
+int ec_get_lsm_inet_conn_request(struct seq_file *m, void *v);
+int ec_get_lsm_socket_sock_rcv_skb(struct seq_file *m, void *v);
+int ec_get_lsm_socket_post_create(struct seq_file *m, void *v);
+int ec_get_lsm_socket_sendmsg(struct seq_file *m, void *v);
+int ec_get_lsm_socket_recvmsg(struct seq_file *m, void *v);
 
-ssize_t ec_lsm_bprm_check_security_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_task_wait_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_inode_create_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_inode_rename_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_inode_unlink_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_file_permission_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_file_free_security_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_socket_connect_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_inet_conn_request_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_socket_sock_rcv_skb_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_socket_post_create_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_socket_sendmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
-ssize_t ec_lsm_socket_recvmsg_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_bprm_check_security(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_inode_create(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_inode_rename(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_inode_unlink(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_file_permission(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_file_free_security(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_socket_connect(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_inet_conn_request(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_socket_sock_rcv_skb(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_socket_post_create(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_socket_sendmsg(struct file *file, const char *buf, size_t size, loff_t *ppos);
+ssize_t ec_set_lsm_socket_recvmsg(struct file *file, const char *buf, size_t size, loff_t *ppos);
 
 #if KERNEL_VERSION(3, 10, 0) < LINUX_VERSION_CODE
-int ec_lsm_mmap_file_get(struct seq_file *m, void *v);
-ssize_t ec_lsm_mmap_file_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+int     ec_get_lsm_mmap_file(struct seq_file *m, void *v);
+ssize_t ec_set_lsm_mmap_file(struct file *file, const char *buf, size_t size, loff_t *ppos);
 #else
-int ec_lsm_file_mmap_get(struct seq_file *m, void *v);
-ssize_t ec_lsm_file_mmap_set(struct file *file, const char *buf, size_t size, loff_t *ppos);
+int     ec_get_lsm_file_mmap(struct seq_file *m, void *v);
+ssize_t ec_set_lsm_file_mmap(struct file *file, const char *buf, size_t size, loff_t *ppos);
 #endif
 
 bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason);
