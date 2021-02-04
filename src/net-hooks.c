@@ -725,7 +725,7 @@ int __ec_checkIsolate(ProcessContext *context, u16 family, int protocol, struct 
     return 0;
 }
 
-int ec_socket_post_create(struct socket *sock, int family, int type, int protocol, int kern)
+int ec_lsm_socket_post_create(struct socket *sock, int family, int type, int protocol, int kern)
 {
     int xcode;
 
@@ -762,7 +762,7 @@ CATCH_DEFAULT:
 }
 
 // Not used for now
-int ec_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
+int ec_lsm_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 {
     int xcode;
 
@@ -793,7 +793,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-int ec_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
+int ec_lsm_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
 {
     u16               family;
     CB_SOCK_ADDR      localAddr;
@@ -943,7 +943,7 @@ CATCH_DEFAULT:
     return ret;
 }
 
-int ec_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
+int ec_lsm_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
 {
     int xcode = 0;
 
@@ -975,7 +975,7 @@ CATCH_DEFAULT:
 //
 // Active, outgoing connect (pre)
 //
-int ec_socket_connect_hook(struct socket *sock, struct sockaddr *addr, int addrlen)
+int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrlen)
 {
     int                  xcode;
     CB_SOCK_ADDR         localAddr;
@@ -1065,7 +1065,7 @@ void ec_inet_conn_established(struct sock *sk, struct sk_buff *skb)
 //
 // Passive, incomming connect (Accept)
 //
-int ec_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_sock *req)
+int ec_lsm_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_sock *req)
 {
     int                           xcode           = 0;
     u16                           family          = 0;

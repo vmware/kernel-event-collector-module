@@ -115,13 +115,13 @@ void ec_sched_process_fork_probe(struct task_struct *parent, struct task_struct 
     // Do not allow any calls to schedule tasks
     DISABLE_WAKE_UP(&context);
 
-    ec_clone_hook(&context, child);
+    ec_sys_clone(&context, child);
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
 }
 
-void ec_clone_hook(ProcessContext *context, struct task_struct *task)
+void ec_sys_clone(ProcessContext *context, struct task_struct *task)
 {
     // this function is called after the task is created but before it has been
     // allowed to run.
@@ -187,7 +187,7 @@ void ec_clone_hook(ProcessContext *context, struct task_struct *task)
 //  Note: We used to handle the start in a post hook.  We are using the pre hook for two reasons.
 //        1. We had problems with page faults in the post hook
 //        2. We need the process tracking entry to be updated for the baned event anyway
-int ec_bprm_check_security(struct linux_binprm *bprm)
+int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
 {
     struct task_struct *task = current;
     pid_t pid = ec_getpid(task);
@@ -334,7 +334,7 @@ CATCH_DEFAULT:
 //
 // Process start hook.  Callout called late in the exec process
 //
-void ec_bprm_committed_creds(struct linux_binprm *bprm)
+void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
 {
     pid_t            pid     = ec_getpid(current);
     uid_t            uid     = GET_UID();

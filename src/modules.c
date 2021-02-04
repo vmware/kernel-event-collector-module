@@ -11,12 +11,12 @@
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #define MMAP_ADDRESS() 0
-int ec_on_file_mmap(struct file *file,
+int ec_lsm_file_mmap(struct file *file,
                   unsigned long reqprot, unsigned long prot,
                   unsigned long flags)
 #else
 #define MMAP_ADDRESS() addr
-int ec_on_file_mmap(struct file *file,
+int ec_lsm_file_mmap(struct file *file,
                   unsigned long reqprot, unsigned long prot,
                   unsigned long flags, unsigned long addr,
                   unsigned long addr_only)
