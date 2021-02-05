@@ -98,11 +98,11 @@ extern ModuleStateInfo g_module_state_info;
 // checkpatch-ignore: SUSPECT_CODE_INDENT,MACRO_WITH_FLOW_CONTROL
 #define BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)    \
 do {                                                                                \
-    ec_write_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
+    ec_read_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
                                                                                     \
     if (g_module_state_info.module_state != ModuleStateEnabled)                     \
     {                                                                               \
-        ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
+        ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
         (CONTEXT)->decr_active_call_count_on_exit = false;                          \
         goto pass_through_label;                                                    \
     }                                                                               \
@@ -112,21 +112,21 @@ do {                                                                            
         atomic64_inc_return(&g_module_state_info.module_active_call_count);         \
     }                                                                               \
                                                                                     \
-    ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
+    ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
     ec_hook_tracking_add_entry((CONTEXT));                                          \
 } while (false)
 
 #define IF_MODULE_DISABLED_GOTO(CONTEXT, pass_through_label)                        \
 do {                                                                                \
-    ec_write_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
+    ec_read_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
                                                                                     \
     if (g_module_state_info.module_state != ModuleStateEnabled)                     \
     {                                                                               \
-        ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
+        ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
         goto pass_through_label;                                                    \
     }                                                                               \
                                                                                     \
-    ec_write_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
+    ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
 } while (false)
 
 #define MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)  \

@@ -10,15 +10,13 @@
 static struct ec_hook_tracking_node
 {
     uint64_t          lock;
-    struct list_head  context_list;
-    uint64_t          count;
+    struct list_head  hook_list;
 } s_hook_tracking;
 
 bool ec_hook_tracking_initialize(ProcessContext *context)
 {
-    INIT_LIST_HEAD(&(s_hook_tracking.context_list));
+    INIT_LIST_HEAD(&(s_hook_tracking.hook_list));
     ec_spinlock_init(&s_hook_tracking.lock, context);
-    s_hook_tracking.count = 0;
     return true;
 }
 
@@ -30,53 +28,53 @@ void ec_hook_tracking_shutdown(ProcessContext *context)
 void ec_hook_tracking_add_entry(ProcessContext *context)
 {
     CANCEL_VOID(context);
+    CANCEL_VOID(context->hook_tracking);
 
-    // Ensure we are not adding a context twice
-    // We don't expect this to ever happen, but we did see this case in the past
-    //  We can aviod this by controlling how we call our own functions
-    if (!list_empty(&(context->list)))
+    if (list_empty(&context->hook_tracking->list))
     {
-        TRACE(DL_WARNING, "Detected recursion %s %d\n",
-                      context->hook_name,
-                      context->pid);
-        return;
+        ec_write_lock(&s_hook_tracking.lock, context);
+        TRACE(DL_WARNING, "Adding %s hook to list", context->hook_tracking->hook_name);
+        // Now that we're inside the lock check this hook still has not been added
+        if (list_empty(&context->hook_tracking->list))
+        {
+            list_add(&context->hook_tracking->list, &s_hook_tracking.hook_list);
+        }
+        ec_write_unlock(&s_hook_tracking.lock, context);
     }
 
-    ec_write_lock(&s_hook_tracking.lock, context);
-    list_add(&(context->list), &s_hook_tracking.context_list);
-    ++s_hook_tracking.count;
-    ec_write_unlock(&s_hook_tracking.lock, context);
+    atomic64_inc(&context->hook_tracking->count);
+    atomic64_set(&context->hook_tracking->last_enter_time, CURRENT_TIME_SEC.tv_sec);
+    atomic64_set(&context->hook_tracking->last_pid, context->pid);
 }
 
 void ec_hook_tracking_del_entry(ProcessContext *context)
 {
     CANCEL_VOID(context);
+    CANCEL_VOID(context->hook_tracking);
 
-    // Ensure we are not removing a context which is not already in the list
-    // We don't expect this to ever happen, but we did see this case in the past
-    //  We can aviod this by controlling how we call our own functions
-    CANCEL_VOID(!list_empty(&(context->list)));
-
-    ec_write_lock(&s_hook_tracking.lock, context);
-    list_del_init(&(context->list));
-    --s_hook_tracking.count;
-    ec_write_unlock(&s_hook_tracking.lock, context);
+    ATOMIC64_DEC__CHECK_NEG(&context->hook_tracking->count);
+    atomic64_set(&context->hook_tracking->last_enter_time, 0);
+    atomic64_set(&context->hook_tracking->last_pid, 0);
 }
 
 // This will be called in the module disable logic when we need to wait for hooks
 //  to exit befor the module is disabled
 int ec_hook_tracking_print_active(ProcessContext *context)
 {
-    struct timespec current_time = ec_get_current_timespec();
-    ProcessContext *list_entry;
+    HookTracking *list_entry;
 
     ec_read_lock(&s_hook_tracking.lock, context);
-    list_for_each_entry(list_entry, &s_hook_tracking.context_list, list)
+    list_for_each_entry(list_entry, &s_hook_tracking.hook_list, list)
     {
-        pr_info("Active hook %s by %d for %ld seconds\n",
-            list_entry->hook_name,
-            list_entry->pid,
-            current_time.tv_sec - list_entry->enter_time.tv_sec);
+        if (atomic64_read(&list_entry->count) > 0)
+        {
+            pr_info("Hook %s has %ld active users, last pid %ld, last entry %lds ago\n",
+                    list_entry->hook_name,
+                    atomic64_read(&list_entry->count),
+                    atomic64_read(&list_entry->last_pid),
+                    CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time)
+            );
+        }
     }
     ec_read_unlock(&s_hook_tracking.lock, context);
 
@@ -86,27 +84,26 @@ int ec_hook_tracking_print_active(ProcessContext *context)
 // This is called when reading the proc file
 int ec_show_active_hooks(struct seq_file *seq_file, void *v)
 {
-    struct timespec  current_time = ec_get_current_timespec();
-
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
+    HookTracking *list_entry;
 
-    ProcessContext *list_entry;
-
-    seq_printf(seq_file, "%20s | %6s | %6s\n",
-                "Hook", "PID", "TIME");
+    seq_printf(seq_file, "%25s | %6s | %6s | %6s\n",
+                "HOOK", "USERS", "LAST PID", "TIME");
 
     ec_read_lock(&s_hook_tracking.lock, &context);
-    list_for_each_entry(list_entry, &s_hook_tracking.context_list, list)
+    list_for_each_entry(list_entry, &s_hook_tracking.hook_list, list)
     {
-        seq_printf(seq_file, "%20s | %6d | %6ld |\n",
+        seq_printf(seq_file, "%25s | %6ld | %6ld | %6ld |\n",
                       list_entry->hook_name,
-                      list_entry->pid,
-                      current_time.tv_sec - list_entry->enter_time.tv_sec);
+                      atomic64_read(&list_entry->count),
+                      atomic64_read(&list_entry->last_pid),
+                      CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time)
+                      );
     }
 
-    seq_printf(seq_file, "Total Active %llu\n",
-                    s_hook_tracking.count);
+    //seq_printf(seq_file, "Total Active %llu\n",
+    //                s_hook_tracking.count);
     ec_read_unlock(&s_hook_tracking.lock, &context);
 
     return 0;
