@@ -9,15 +9,16 @@
 
 #include "process-context.h"
 
-#define CB_MEM_CACHE_NAME_LEN    40
+#define CB_MEM_CACHE_NAME_LEN    43
 
 typedef struct CB_MEM_CACHE {
     struct list_head   node;
     struct list_head   allocation_list;
     uint64_t           lock;
-    uint8_t            name[CB_MEM_CACHE_NAME_LEN + 1];
-    struct kmem_cache *kmem_cache;
     atomic64_t         allocated_count;
+    struct kmem_cache *kmem_cache;
+    uint32_t           object_size;
+    uint8_t            name[CB_MEM_CACHE_NAME_LEN + 1];
 } CB_MEM_CACHE;
 
 typedef void (*memcache_printval_cb)(void *value, ProcessContext *context);
