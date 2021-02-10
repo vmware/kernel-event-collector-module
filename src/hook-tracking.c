@@ -33,7 +33,6 @@ void ec_hook_tracking_add_entry(ProcessContext *context)
     if (list_empty(&context->hook_tracking->list))
     {
         ec_write_lock(&s_hook_tracking.lock, context);
-        TRACE(DL_WARNING, "Adding %s hook to list", context->hook_tracking->hook_name);
         // Now that we're inside the lock check this hook still has not been added
         if (list_empty(&context->hook_tracking->list))
         {
@@ -87,6 +86,7 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     HookTracking *list_entry;
+    uint64_t total_active = 0;
 
     seq_printf(seq_file, "%25s | %6s | %6s | %6s\n",
                 "HOOK", "USERS", "LAST PID", "TIME");
@@ -94,6 +94,8 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
     ec_read_lock(&s_hook_tracking.lock, &context);
     list_for_each_entry(list_entry, &s_hook_tracking.hook_list, list)
     {
+        total_active += atomic64_read(&list_entry->count);
+
         seq_printf(seq_file, "%25s | %6ld | %6ld | %6ld |\n",
                       list_entry->hook_name,
                       atomic64_read(&list_entry->count),
@@ -102,8 +104,7 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
                       );
     }
 
-    //seq_printf(seq_file, "Total Active %llu\n",
-    //                s_hook_tracking.count);
+    seq_printf(seq_file, "Total Active %llu\n", total_active);
     ec_read_unlock(&s_hook_tracking.lock, &context);
 
     return 0;
