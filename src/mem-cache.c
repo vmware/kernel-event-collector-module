@@ -2,10 +2,11 @@
 // Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
+#include "priv.h"
+
 #include "mem-cache.h"
 
 #include "cb-spinlock.h"
-#include "priv.h"
 
 
 static struct
@@ -69,6 +70,7 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
 {
     if (cache)
     {
+        cache->object_size = size;
         // prefix the cache name with a unique prefix to avoid conflicts with cbr
         cache->name[0] = 0;
         strncat(cache->name, MEM_CACHE_PREFIX, CB_MEM_CACHE_NAME_LEN);
@@ -201,12 +203,6 @@ void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context
     }
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-#define CACHE_SIZE(a)      a->object_size
-#else
-#define CACHE_SIZE(a)      a->buffer_size
-#endif
-
 size_t ec_mem_cache_get_memory_usage(ProcessContext *context)
 {
     CB_MEM_CACHE *cache;
@@ -214,13 +210,7 @@ size_t ec_mem_cache_get_memory_usage(ProcessContext *context)
 
     ec_write_lock(&s_mem_cache.lock, context);
     list_for_each_entry(cache, &s_mem_cache.list, node) {
-            int         cache_size = 0;
-
-            if (cache->kmem_cache)
-            {
-                cache_size = CACHE_SIZE(cache->kmem_cache);
-            }
-            size += cache_size * atomic64_read(&(cache->allocated_count));
+            size += cache->object_size * atomic64_read(&(cache->allocated_count));
     }
     ec_write_unlock(&s_mem_cache.lock, context);
 
@@ -257,15 +247,10 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
 
     ec_write_lock(&s_mem_cache.lock, &context);
     list_for_each_entry(cache, &s_mem_cache.list, node) {
-            const char *cache_name = "";
-            int         cache_size = 0;
+            const char *cache_name = cache->name;
+            int         cache_size = cache->object_size;
             long        count      = atomic64_read(&(cache->allocated_count));
 
-            if (cache->kmem_cache)
-            {
-                cache_name = cache->kmem_cache->name;
-                cache_size = CACHE_SIZE(cache->kmem_cache);
-            }
             seq_printf(m, "%40s | %6ld | %40s | %9d |\n",
                        cache->name,
                        count,
