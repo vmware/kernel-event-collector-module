@@ -3,19 +3,35 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "priv.h"
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
+#include <linux/lsm_hooks.h>  // security_hook_heads
+#endif  //}
+
+#include <linux/rculist.h>  // hlist_add_tail_rcu
 // checkpatch-ignore: AVOID_EXTERNS
+#define DEBUGGING_SANITY 0
+#if DEBUGGING_SANITY  //{ WARNING from checkpatch
+#define PR_p "%px"
+#else  //}{ checkpatch no WARNING
+#define PR_p "%p"
+#endif  //}
 
 static bool g_lsmRegistered;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{ not RHEL8
 struct        security_operations  *g_original_ops_ptr;   // Any LSM which we are layered on top of
 static struct security_operations   g_combined_ops;       // Original LSM plus our hooks combined
+#else  //}{
+static struct security_hook_heads *p_security_hook_heads;
+#endif //}
 
 extern int  ec_lsm_bprm_check_security(struct linux_binprm *bprm);
 extern void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm);
 extern int  ec_lsm_task_create(unsigned long clone_flags);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-extern int ec_lsm_file_mmap(struct file *file,
+extern int ec_lsm_mmap_file(struct file *file,
                          unsigned long reqprot, unsigned long prot,
                          unsigned long flags);
 #else
@@ -34,8 +50,14 @@ extern int ec_lsm_socket_recvmsg(struct socket *sock, struct msghdr *msg, int si
 extern int ec_lsm_socket_post_create(struct socket *sock, int family, int type, int protocol, int kern);
 extern int ec_lsm_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
+static unsigned int cblsm_hooks_count;
+static struct security_hook_list cblsm_hooks[64];  // [0..39] not needed?
+#endif  //}
+
 bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     TRY_CB_RESOLVED(security_ops);
 
     //
@@ -48,33 +70,72 @@ bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
     }
     TRACE(DL_INFO, "Other LSM named %s", g_original_ops_ptr->name);
 
+    #define CB_LSM_SETUP_HOOK(NAME) do { \
+        if (enableHooks & CB__LSM_##NAME) \
+            g_combined_ops.NAME = ec_lsm_##NAME; \
+    } while (0)
+
+#else  // }{ LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+    TRY_CB_RESOLVED(p_security_hook_heads);
+    cblsm_hooks_count = 0;
+    memset(cblsm_hooks, 0, sizeof(cblsm_hooks));
+
+    #define CB_LSM_SETUP_HOOK(NAME) do { \
+        if (enableHooks & CB__LSM_##NAME) { \
+            pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &p_security_hook_heads->NAME, #NAME); \
+            cblsm_hooks[cblsm_hooks_count].head = &p_security_hook_heads->NAME; \
+            cblsm_hooks[cblsm_hooks_count].hook.NAME = ec_lsm_##NAME; \
+            cblsm_hooks[cblsm_hooks_count].lsm = "eclsm"; \
+            cblsm_hooks_count++; \
+        } \
+    } while (0)
+#endif  // }
+
     //
     // Now add our hooks
     //
-    if (enableHooks & CB__LSM_bprm_check_security)  g_combined_ops.bprm_check_security  = ec_lsm_bprm_check_security;     // process banning  (exec)
-    if (enableHooks & CB__LSM_bprm_committed_creds) g_combined_ops.bprm_committed_creds = ec_lsm_bprm_committed_creds;    // process launched (exec)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    if (enableHooks & CB__LSM_mmap_file) g_combined_ops.mmap_file = ec_lsm_file_mmap;                          // shared library load
-#else
-    if (enableHooks & CB__LSM_file_mmap) g_combined_ops.file_mmap = ec_lsm_file_mmap;                          // shared library load
-#endif
-    if (enableHooks & CB__LSM_socket_connect)     g_combined_ops.socket_connect = ec_lsm_socket_connect;            // outgoing connects (pre)
-    if (enableHooks & CB__LSM_inet_conn_request)  g_combined_ops.inet_conn_request = ec_lsm_inet_conn_request;           // incoming accept (pre)
-    if (enableHooks & CB__LSM_socket_post_create) g_combined_ops.socket_post_create = ec_lsm_socket_post_create;
-    if (enableHooks & CB__LSM_socket_sendmsg)     g_combined_ops.socket_sendmsg = ec_lsm_socket_sendmsg;
-    if (enableHooks & CB__LSM_socket_recvmsg)     g_combined_ops.socket_recvmsg = ec_lsm_socket_recvmsg;                    // incoming UDP/DNS - where we get the
-    // process context
+    // 2020-12-15 FIXME: Why is the list a proper subset?
+    CB_LSM_SETUP_HOOK(bprm_check_security);   // process banning  (exec)
+    CB_LSM_SETUP_HOOK(bprm_committed_creds);  // process launched (exec)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
+    CB_LSM_SETUP_HOOK(mmap_file);  // shared library load
+#else  //}{
+    CB_LSM_SETUP_HOOK(file_mmap);  // shared library load
+#endif  //}
+    CB_LSM_SETUP_HOOK(socket_connect);  // outgoing connects (pre)
+    CB_LSM_SETUP_HOOK(inet_conn_request);  // incoming accept (pre)
+    CB_LSM_SETUP_HOOK(socket_post_create);
+    CB_LSM_SETUP_HOOK(socket_sendmsg);
+    CB_LSM_SETUP_HOOK(socket_recvmsg);  // incoming UDP/DNS - where we get the process context
+#undef CB_LSM_SETUP_HOOK
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     *CB_RESOLVED(security_ops) = &g_combined_ops;
+#else  //}{
+    {
+        unsigned int j;
+
+        for (j = 0; j < cblsm_hooks_count; ++j) {
+            cblsm_hooks[j].lsm = "eclsm";
+            hlist_add_tail_rcu(&cblsm_hooks[j].list, cblsm_hooks[j].head);
+        }
+    }
+#endif  //}
 
     g_lsmRegistered = true;
     return true;
 
 CATCH_DEFAULT:
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     TRACE(DL_ERROR, "LSM: Failed to find security_ops\n");
+#else  //}{
+    TRACE(DL_ERROR, "LSM: Failed to find security_hook_heads\n");
+#endif  //}
     return false;
 }
 
+// KERNEL_VERSION(4,0,0) and above say this is none of our business
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
 bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
 {
     bool changed = false;
@@ -83,7 +144,7 @@ bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
     if (enableHooks & CB__LSM_bprm_check_security) changed |= secops->bprm_check_security  != ec_lsm_bprm_check_security;
     if (enableHooks & CB__LSM_bprm_committed_creds) changed |= secops->bprm_committed_creds != ec_lsm_bprm_committed_creds;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    if (enableHooks & CB__LSM_mmap_file) changed |= secops->mmap_file != ec_lsm_file_mmap;
+    if (enableHooks & CB__LSM_mmap_file) changed |= secops->mmap_file != ec_lsm_mmap_file;
 #else
     if (enableHooks & CB__LSM_file_mmap) changed |= secops->file_mmap != ec_lsm_file_mmap;
 #endif
@@ -95,28 +156,37 @@ bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
 
     return changed;
 }
+#endif  //}
 
 void ec_do_lsm_shutdown(ProcessContext *context)
 {
-    if (g_lsmRegistered && CB_CHECK_RESOLVED(security_ops))
+    if (g_lsmRegistered
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    &&      CB_CHECK_RESOLVED(security_ops)
+#endif  //}
+    )
     {
-        TRACE(DL_SHUTDOWN, "Unregistering LSM...");
+        TRACE(DL_SHUTDOWN, "Unregistering ec_LSM...");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
         *CB_RESOLVED(security_ops) = g_original_ops_ptr;
+#else  // }{ >= KERNEL_VERSION(4,0,0)
+        security_delete_hooks(cblsm_hooks, cblsm_hooks_count);
+#endif  //}
     } else
     {
-        TRACE(DL_WARNING, "LSM not registered so not unregistering");
+        TRACE(DL_WARNING, "ec_LSM not registered so not unregistering");
     }
 }
 
 #ifdef HOOK_SELECTOR
 void __ec_setHook(const char *buf, const char *name, uint32_t call, void **addr, void *ec_hook, void *kern_hook)
 {
-    if (0 == strncmp("1", buf, sizeof(char)))
+    if ('1' == buf[0])
     {
-        pr_info("Adding %s: 0x%p\n", name, addr);
+        pr_info("Adding %s: 0x" PR_p "\n", name, addr);
         g_enableHooks |= call;
         *addr = ec_hook;
-    } else if (0 == strncmp("0", buf, sizeof(char)))
+    } else if ('0' == buf[0])
     {
         pr_info("Removing %s\n", name);
         g_enableHooks &= ~call;
@@ -168,7 +238,7 @@ LSM_HOOK(socket_sendmsg, "socket_sendmsg",       ec_lsm_socket_sendmsg)
 LSM_HOOK(socket_recvmsg, "socket_recvmsg",       ec_lsm_socket_recvmsg)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-LSM_HOOK(mmap_file, "mmap_file",            ec_lsm_file_mmap)
+LSM_HOOK(mmap_file, "mmap_file",            ec_lsm_mmap_file)
 #else
 LSM_HOOK(file_mmap, "file_mmap",            ec_lsm_file_mmap)
 #endif

@@ -212,16 +212,20 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     // get time as early in the function as possible
     getnstimeofday(&start_time);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // Call any other hooks in the chain, and bail if they want to bail
     ret = g_original_ops_ptr->bprm_check_security(bprm);
     TRY(ret == 0);
+#endif  //}
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(!ec_banning_IgnoreProcess(&context, pid));
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // Check the current creds, this may tell us we are supposed to bail
     stat = g_original_ops_ptr->bprm_set_creds(bprm);
+#endif  //}
 
     ec_get_devinfo_from_file(bprm->file, &device, &inode);
 
@@ -367,6 +371,8 @@ void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
 CATCH_DEFAULT:
     ec_process_tracking_put_process(procp, &context);
     ec_put_path_buffer(cmdline);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     g_original_ops_ptr->bprm_committed_creds(bprm);
+#endif  //}
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
 }

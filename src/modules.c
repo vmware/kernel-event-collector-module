@@ -11,7 +11,7 @@
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #define MMAP_ADDRESS() 0
-int ec_lsm_file_mmap(struct file *file,
+int ec_lsm_mmap_file(struct file *file,
                   unsigned long reqprot, unsigned long prot,
                   unsigned long flags)
 #else
@@ -86,7 +86,9 @@ CATCH_DEFAULT:
     ec_process_tracking_put_process(procp, &context);
     ec_put_path_buffer(string_buffer);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+    xcode = 0;  // original_ops are none of our business
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     xcode = g_original_ops_ptr->mmap_file(file, reqprot, prot, flags);
 #else
     xcode = g_original_ops_ptr->file_mmap(file, reqprot, prot, flags, addr, addr_only);
