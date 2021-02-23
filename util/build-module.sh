@@ -128,8 +128,8 @@ function sync_source_files
 {
     sync_directory ${PLATFORM_BUILD}/include ${TOP_DIR}/include
     sync_directory ${PLATFORM_BUILD}/src ${TOP_DIR}/src
-    rsync -ru --inplace --include="conanfile.py" ${opts} --include="*/" --exclude="*" ${TOP_DIR}/ ${PLATFORM_BUILD}
-    rsync -ru --inplace --include="CMakeLists.txt" ${opts} --include="*/" --exclude="*" ${TOP_DIR}/ ${PLATFORM_BUILD}
+    rsync -ru --inplace ${opts} ${TOP_DIR}/conanfile.py ${PLATFORM_BUILD}
+    rsync -ru --inplace ${opts} ${TOP_DIR}/CMakeLists.txt ${PLATFORM_BUILD}
 
     # Replace the version string
     find ${PLATFORM_BUILD} -type f -iname conanfile.py -print0 | while IFS= read -r -d $'\0' file; do
