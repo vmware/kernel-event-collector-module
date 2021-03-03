@@ -19,6 +19,23 @@
 #include <linux/workqueue.h>
 #include <linux/jiffies.h>
 #include <linux/file.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)  //{ RHEL6
+#include <linux/kernel.h>
+#else  //}{ RHEL7, RHEL8
+#include <linux/kern_levels.h>
+#endif  //}
+
+// Would be 'static' except symbol stripping by 'ld' makes it hard for 'perf'
+// and analyzing crash dumps.  So use 'LOCAL' as a hint to ease maintenance.
+#define LOCAL /*static*/
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{ RHEL8
+#define my_user_msghdr    user_msghdr
+#define my_kernel_msghdr  msghdr
+#else  //}{ RHEL 6,7
+#define my_user_msghdr    msghdr
+#define my_kernel_msghdr  msghdr
+#endif  //}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #include <linux/inet.h>
@@ -29,13 +46,13 @@
 
 #define UDP_PACKET_TIMEOUT   (30 * HZ)
 
-int64_t recvmsg_cnt;
+uint64_t recvmsg_cnt;
 uint64_t rcv_skb_cnt;
 uint64_t relnode_cnt;
 #define NETHOOK_RECVMSG_STAT_THROTTLE 100
 
 // The MSG_UDP_HOOK flag is used skip the receive LSM hook so we can call our logic manually.
-// This may clash with kernel added flags later!
+// This may clash with kernel added flags later!  FIXME: check every new kernel
 #define MSG_UDP_HOOK 0x01000000
 
 // Size of IOV buffer that we use to peek at the incoming UDP message
@@ -78,113 +95,501 @@ static LIST_HEAD(s_net_age_list);
 #define NET_TBL_SIZE     262000
 #define NET_TBL_PURGE    200000
 
-// checkpatch-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON,LINE_CONTINUATIONS,MACRO_WITH_FLOW_CONTROL
-#define TIMED_RECV(recv_func, sock, dlta, our_timeout, return_code) {                                    \
-    if (sock && sock->sk)                                                                                \
-    {                                                                                                    \
-        do {                                                                                             \
-            /* Figure out when we expect our timer to exit so we can check for that later */             \
-            unsigned long expire = sock->sk->sk_rcvtimeo + jiffies;                                      \
-            mm_segment_t oldfs = get_fs();                                                               \
-            set_fs(get_ds());                                                                            \
-            /* Call the system call to get the packet data */                                            \
-            return_code = recv_func;                                                                     \
-            set_fs(oldfs);                                                                               \
-            /* If there was time left on the timer, it means that we either received some data or        \
-             * something is wrong with the socket (some applications cause it to close early).           \
-             * In either case we want to exit the loop now.                                              \
-             */                                                                                          \
-            if (time_before(jiffies, expire))                                                            \
-            {                                                                                            \
-                break;                                                                                   \
-            }                                                                                            \
-            /* If the module is exiting we need to return from the function. */                          \
-            if (g_exiting)                                                                               \
-            {                                                                                            \
-                /* CB-26764                                                                              \
-                 * If we set the timeout then don't return 0 because it may cause the consumer           \
-                 * to think the socket was closed. Instead, return -EINTR to indicate that we            \
-                 * returned sooner than requested.                                                       \
-                 */                                                                                      \
-                if (our_timeout && return_code == -EAGAIN)                                               \
-                {                                                                                        \
-                    TRACE(DL_VERBOSE,                                                                    \
-                          "g_exiting=TRUE, pid=%d, sock=0x%p, dlta=%ld sec, returning -EINTR\n",         \
-                          current->pid, sock, dlta/HZ);                                                  \
-                    return_code = -EINTR;                                                                \
-                }                                                                                        \
-                break;                                                                                   \
-            }                                                                                            \
-            /* The caller has set a timeout value larger than what we use, we want to subtract           \
-             * from it after each of our timeouts.  When the last timeout will cause their timeout       \
-             * to expire we configure the system to return the EAGAIN.                                   \
-             */                                                                                          \
-            if (dlta)                                                                                    \
-            {                                                                                            \
-                dlta -= UDP_PACKET_TIMEOUT;                                                              \
-                /* We don't want to set sock->sk->sk_rcvtimeo to 0, it would mean infinite timeout */    \
-                if (dlta <= 0)                                                                           \
-                {                                                                                        \
-                    /* If we're here it means we didn't receive data and xcode has error code now */     \
-                    break;                                                                               \
-                }                                                                                        \
-                else if (dlta < UDP_PACKET_TIMEOUT)                                                      \
-                {                                                                                        \
-                    sock->sk->sk_rcvtimeo = dlta;                                                        \
-                }                                                                                        \
-            }                                                                                            \
-        } while (our_timeout && return_code == -EAGAIN);                                                 \
-    }                                                                                                    \
+static int imax(int a, int b)
+{
+    return (a >= b) ? a : b;
 }
 
-#define PEEK(CONTEXT, recv_func, sock, msg_peek, sk_rcvtimeo_dlta, our_timeout, flags, return_code) {          \
-    /* Execute a recv function to peek at the message */                                                       \
-    TIMED_RECV(recv_func, sock, sk_rcvtimeo_dlta, our_timeout, return_code);                                   \
-                                                                                                               \
-    /* TIMED_RECV may return if the module is exiting, in this case just return from this function */          \
-    if (g_exiting)                                                                                             \
-    {                                                                                                          \
-        goto CATCH_DEFAULT;                                                                                    \
-    }                                                                                                          \
-                                                                                                               \
-    TRY(return_code >= 0);                                                                                     \
-    TRY(sock && sock->sk);                                                                                     \
-                                                                                                               \
-    /* Call our local code to process the packet for event generation and isolation */                         \
-    TRY_SET(-EPERM != __ec_socket_recvmsg(CONTEXT, sock, &msg_peek, 0, flags), -EPERM);                            \
-                                                                                                               \
-    /* If we peeked at UDP message sk_rcvtimeo_dlta is what's left from original timeout value.                \
-     * Unless a caller set original timeout value to 0 sk_rcvtimeo_dlta should be greater than 0 here          \
-     * since we check return code of the recv call above and if it's less than 0 we exit from the function     \
-     * as this means that either no data is received and timeout expired or                                    \
-     * remote peer terminated connection.                                                                      \
-     */                                                                                                        \
-    if (our_timeout)                                                                                           \
-    {                                                                                                          \
-        if (0 == sk_rcvtimeo_dlta || sk_rcvtimeo_dlta > UDP_PACKET_TIMEOUT)                                    \
-        {                                                                                                      \
-            sock->sk->sk_rcvtimeo = UDP_PACKET_TIMEOUT;                                                        \
-        }                                                                                                      \
-        else                                                                                                   \
-        {                                                                                                      \
-            sock->sk->sk_rcvtimeo = sk_rcvtimeo_dlta;                                                          \
-            our_timeout = false;                                                                               \
-        }                                                                                                      \
-    }                                                                                                          \
+#define N_BUGBUF 1200
+struct Bugbuf {
+    unsigned short used;
+    short avail;
+    char buffer[N_BUGBUF];
+};
+
+static int my_timed_recv(
+    long (*call_recv_func)(void *p_recv_arg_block),
+    void *p_recv_arg_block,
+    struct socket *sock,
+    long dlta,
+    bool our_timeout
+)
+{
+    int return_code = 0;
+    struct Bugbuf *const bugbuf = *(struct Bugbuf **)p_recv_arg_block;
+
+    if (bugbuf) {
+        int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "%s\n", __func__);
+
+        bugbuf->used  += len;
+        bugbuf->avail -= len;
+    }
+    if (sock && sock->sk)
+    {
+        do {
+            /* Figure out when we expect our timer to exit so we can check for that later */
+            unsigned long expire = sock->sk->sk_rcvtimeo + jiffies;
+            mm_segment_t oldfs = get_fs();
+
+            set_fs(get_ds());
+            /* Call the system call to get the packet data */
+            return_code = call_recv_func(p_recv_arg_block);
+            set_fs(oldfs);
+            /* If there was time left on the timer, it means that we either received some data or
+             * something is wrong with the socket (some applications cause it to close early).
+             * In either case we want to exit the loop now.
+             */
+            if (time_before(jiffies, expire))
+            {
+                break;
+            }
+            /* If the module is exiting we need to return from the function. */
+            if (g_exiting)
+            {
+                /* If this is a timeout value that we asked for than simulate receiving a zero
+                 * byte packet.  Otherwise we will return with a possibly collected packet.
+                 */
+                if (our_timeout && return_code == -EAGAIN)
+                {
+                    // Let caller consider the effect of blocking/non-blocking mode
+                    return_code = -EINTR;
+                }
+                break;
+            }
+            /* The caller has set a timeout value larger than what we use, we want to subtract
+             * from it after each of our timeouts.  When the last timeout will cause their timeout
+             * to expire we configure the system to return the EAGAIN.
+             */
+            if (dlta)
+            {
+                dlta -= UDP_PACKET_TIMEOUT;
+                /* We don't want to set sock->sk->sk_rcvtimeo to 0, it would mean infinite timeout */
+                if (dlta <= 0)
+                {
+                    /* If we're here it means we didn't receive data and xcode has error code now */
+                    break;
+                } else if (dlta < UDP_PACKET_TIMEOUT)
+                {
+                    sock->sk->sk_rcvtimeo = dlta;
+                }
+            }
+        } while (our_timeout && return_code == -EAGAIN);
+    }
+    if (bugbuf) {
+        int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptF %x\n", return_code);
+
+        bugbuf->used  += len;
+        bugbuf->avail -= len;
+    }
+    return return_code;
 }
 
-#define CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek)             \
-if (CHECK_SOCKET(sock) && IPPROTO_UDP == sock->sk->sk_protocol)   \
-{                                                                 \
-    _flags = flags;                                               \
-    _flags |= MSG_UDP_HOOK;                                       \
-    if (!(_flags & MSG_ERRQUEUE))                                 \
-    {                                                             \
-        _flags |= MSG_PEEK;                                       \
-        bUdpPeek = true;                                          \
-    }                                                             \
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+#  define IPV4_SOCKNAME(inet, a) ((inet)->inet_##a)
+#  define IPV6_SOCKNAME(sk, a)   ((sk)->sk_v6_##a)
+#else
+#  define IPV4_SOCKNAME(inet, a) ((inet)->a)
+#  define IPV6_SOCKNAME(sk, a)   (inet6_sk(sk)->a)
+#endif
+
+void __ec_set_net_key(NET_TBL_KEY    *key,
+                         pid_t           pid,
+                         CB_SOCK_ADDR   *localAddr,
+                         CB_SOCK_ADDR   *remoteAddr,
+                         uint16_t        proto,
+                         CONN_DIRECTION  conn_dir)
+{
+    memset(key, 0, sizeof(NET_TBL_KEY));
+
+    ec_copy_sockaddr(&key->laddr, localAddr);
+    ec_copy_sockaddr(&key->raddr, remoteAddr);
+
+    // Network applications tend to randomize the source port, so in order to
+    //  reduce the number of reported network connections we ignore the source port.
+    //  (Which one that is depends on the direction.)
+    if (conn_dir == CONN_IN)
+    {
+        ec_set_sockaddr_port(&key->raddr, 0);
+    } else if (conn_dir == CONN_OUT)
+    {
+        ec_set_sockaddr_port(&key->laddr, 0);
+    } else
+    {
+        TRACE(DL_WARNING, "Unexpected netconn direction: %d", conn_dir);
+    }
+
+    key->pid      = pid;
+    key->proto    = proto;
+    key->conn_dir = conn_dir;
 }
-// checkpatch-no-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON,LINE_CONTINUATIONS,MACRO_WITH_FLOW_CONTROL
+
+// Track this connection in the local table
+//  If it is a new connection, add an entry and send an event (return value of true)
+//  If it is a tracked connection, update the time and skip sending an event (return value of false)
+static bool track_connection(
+    ProcessContext *context,
+    pid_t           pid,
+    CB_SOCK_ADDR   *localAddr,
+    CB_SOCK_ADDR   *remoteAddr,
+    uint16_t        proto,
+    CONN_DIRECTION  conn_dir)
+{
+    bool          xcode = false;
+    NET_TBL_KEY   key;
+    NET_TBL_NODE *node;
+
+    // Build the key
+    __ec_set_net_key(&key, pid, localAddr, remoteAddr, proto, conn_dir);
+
+    // CB-10650
+    // We found a rare race condition where we find a node to be updated, and then wait on
+    //  the spinlock.  The node is then deleted from the cleanup code.  We attempt to add it
+    //  back to the list and crash with a double delete.
+    ec_write_lock(&s_net_age_lock, context);
+
+    // Check to see if this item is already tracked
+    node = ec_hashtbl_get_generic(s_net_hash_table, &key, context);
+
+    if (!node)
+    {
+        xcode = true;
+        node = (NET_TBL_NODE *)ec_hashtbl_alloc_generic(s_net_hash_table, context);
+        TRY_MSG(node, DL_ERROR, "Failed to allocate a network tracking node, event will be sent!");
+
+        memcpy(&node->key, &key, sizeof(NET_TBL_KEY));
+        node->value.count = 0;
+        // Initialize ageList so it is safe to call delete on it.
+        INIT_LIST_HEAD(&(node->ageList));
+
+        __ec_net_tracking_print_message("ADD", &key);
+
+        TRY_DO_MSG(!ec_hashtbl_add_generic(s_net_hash_table, node, context),
+                    { ec_hashtbl_free_generic(s_net_hash_table, node, context); },
+                    DL_ERROR, "Failed to add a network tracking node, event will be sent!");
+    }
+
+    // Update the last seen time and count
+    getnstimeofday(&node->value.last_seen);
+    ++node->value.count;
+
+    // In case this connection is already tracked remove it from it's current location in
+    //  the list so we can add it to the end.  This is a safe operation for a new entry
+    //  because we initialize ageList above.
+    list_del(&(node->ageList));
+    list_add(&(node->ageList), &s_net_age_list);
+
+CATCH_DEFAULT:
+
+    ec_write_unlock(&s_net_age_lock, context);
+
+    // If we have an excessive amount of netconns force it to clean up now.
+    if (atomic64_read(&(s_net_hash_table->tableInstance)) >= NET_TBL_SIZE)
+    {
+        // Cancel the currently scheduled work, and and schedule it for immediate execution
+        cancel_delayed_work(&s_net_track_work);
+        schedule_work(&s_net_track_work.work);
+    }
+
+    return xcode;
+}
+
+bool ec_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct my_user_msghdr *msg)
+{
+    int namelen;
+    bool rval = false;
+
+    mm_segment_t oldfs = get_fs();
+
+    set_fs(get_ds());
+
+    namelen = msg->msg_namelen;
+    if (sk->sk_protocol == IPPROTO_UDP && msg->msg_name && namelen)
+    {
+        unsigned int nbytes = (sizeof(remoteAddr->ss_addr) >= namelen) ? namelen : sizeof(remoteAddr->ss_addr);
+
+        memcpy(&remoteAddr->ss_addr, msg->msg_name, nbytes);
+        rval = true;
+    }
+
+    set_fs(oldfs);
+    return rval;
+}
+
+// I would prefer to use kernel_getpeername here, but it does not work if the socket state is closed.
+//  (Which seems to happen under load.)
+void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct my_user_msghdr *msg)
+{
+    CANCEL_VOID(sk);
+    CANCEL_VOID(remoteAddr);
+    CANCEL_VOID(msg);
+
+    // Use msg->msg_name if we are doing UDP else ...
+    if (!ec_getudppeername(sk, remoteAddr, msg))
+    {
+        struct inet_sock *inet;
+
+        inet = inet_sk(sk);
+
+        remoteAddr->sa_addr.sa_family = sk->sk_family;
+
+        if (sk->sk_family == PF_INET)
+        {
+            remoteAddr->as_in4.sin_port        = IPV4_SOCKNAME(inet, dport);
+            remoteAddr->as_in4.sin_addr.s_addr = IPV4_SOCKNAME(inet, daddr);
+        } else {
+            remoteAddr->as_in6.sin6_port = IPV4_SOCKNAME(inet, dport);
+            memcpy(&remoteAddr->as_in6.sin6_addr, &IPV6_SOCKNAME(sk, daddr), sizeof(struct in6_addr));
+        }
+    }
+
+}
+
+int __ec_checkIsolate(ProcessContext *context, u16 family, int protocol, struct sockaddr *p_sockaddr)
+{
+    CB_ISOLATION_INTERCEPT_RESULT isolationResult;
+
+    if (family == PF_INET)
+    {
+        struct sockaddr_in *as_in4 = (struct sockaddr_in *)p_sockaddr;
+
+        TRACE(DL_VERBOSE, "%s: check iso ip=%x port=%d", __func__, ntohl(as_in4->sin_addr.s_addr), ntohs(as_in4->sin_port));
+        ec_IsolationInterceptByAddrProtoPort(context, ntohl(as_in4->sin_addr.s_addr), true, protocol, as_in4->sin_port, &isolationResult);
+        if (isolationResult.isolationAction == IsolationActionBlock)
+        {
+            //classifyOut->actionType = FWP_ACTION_BLOCK;
+            //classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
+            TRACE(DL_NET, "%s: block ip=%x port=%d", __func__, as_in4->sin_addr.s_addr, as_in4->sin_port);
+            g_cbIsolationStats.isolationBlockedInboundIp4Packets++;
+            return -EPERM;
+        } else if (isolationResult.isolationAction == IsolationActionAllow)
+        {
+            g_cbIsolationStats.isolationAllowedInboundIp4Packets++;
+        }
+    } else if (family == PF_INET6)
+    {
+        struct sockaddr_in6 *as_in6 = (struct sockaddr_in6 *)p_sockaddr;
+
+        ec_IsolationInterceptByAddrProtoPort(context, as_in6->sin6_addr.s6_addr32[0], false, protocol, as_in6->sin6_port, &isolationResult);
+        if (isolationResult.isolationAction == IsolationActionBlock)
+        {
+            //classifyOut->actionType = FWP_ACTION_BLOCK;
+            //classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
+            g_cbIsolationStats.isolationBlockedInboundIp6Packets++;
+            return -EPERM;
+        } else if (isolationResult.isolationAction == IsolationActionAllow)
+        {
+            g_cbIsolationStats.isolationAllowedInboundIp6Packets++;
+        }
+    }
+    return 0;
+}
+
+LOCAL int my_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, struct my_user_msghdr *msg, int size, int flags)
+{
+    u16               family;
+    CB_SOCK_ADDR      localAddr;
+    CB_SOCK_ADDR      remoteAddr;
+    ProcessTracking  *procp = NULL;
+    uint16_t          proto = 0;
+    pid_t             pid   = ec_getpid(current);
+    int               xcode = 0;
+    struct cmsghdr   *cmsg_kernel = NULL;
+
+    // The MSG_UDP_HOOK flag is used skip the LSM hook so we can call our logic manually.
+    TRY(!(flags & MSG_UDP_HOOK));
+
+    TRY(CHECK_SOCKET(sock));
+    TRY(pid != 0);
+    TRY(msg != NULL);
+
+    family = sock->sk->sk_family;
+    proto = sock->sk->sk_protocol;
+
+    // We can not trust msg->msg_name at all because it is possible that the caller has not
+    //  initialized it properly.
+    ec_getpeername(sock->sk, &remoteAddr, msg);
+
+    // This is the first place in the syscall hook call stack, where in the routine starts accessing
+    // dynamically initialized memory resources. As a pre-condition this check can only occur
+    // after ensuring that the module is not disabled.
+
+    TRY_SET_DO(-EPERM != __ec_checkIsolate(context, family, sock->sk->sk_protocol, &remoteAddr.sa_addr), -EPERM, {
+        ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
+    });
+
+    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
+    TRY(procp);
+
+    pid = ec_process_tracking_exec_pid(procp);
+
+    TRY(!ec_banning_IgnoreProcess(context, pid));
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    {
+        int addressLength = sizeof(CB_SOCK_ADDR);
+
+        kernel_getsockname(sock, &localAddr.sa_addr, &addressLength);
+    }
+#else  //}{
+    kernel_getsockname(sock, &localAddr.sa_addr);
+#endif  //}
+
+    recvmsg_cnt += 1;
+    if ((recvmsg_cnt % NETHOOK_RECVMSG_STAT_THROTTLE) == 0)
+    {
+        //pr_err("%s: recvmsg_cnt=%llu rcv_skb_cnt=%llu nethash_instance=%llu relnode_cnt=%llu\n", __FUNCTION__, recvmsg_cnt, rcv_skb_cnt, nethash_instance, relnode_cnt);
+    }
+
+    // Track this connection in the local table
+    //  If it is a new connection, add an entry and send an event (return value of true)
+    //  If it is a tracked connection, update the time and skip sending an event (return value of false)
+    TRY(track_connection(context, pid, &localAddr, &remoteAddr, proto, CONN_IN));
+
+    ec_event_send_net(procp,
+                   "RECV",
+                   CB_EVENT_TYPE_NET_ACCEPT,
+                   &localAddr,
+                   &remoteAddr,
+                   sock->sk->sk_protocol,
+                   sock->sk,
+                   context);
+
+CATCH_DEFAULT:
+    ec_process_tracking_put_process(procp, context);
+    ec_mem_cache_free_generic(cmsg_kernel);
+    cmsg_kernel = NULL;
+    return xcode;
+}
+
+LOCAL int my_socket_recvmsg(ProcessContext *context, struct socket *sock, struct my_user_msghdr *msg, int size, int flags)
+{
+    int ret = 0;
+
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DEFAULT);
+
+    ret = my_socket_recvmsg_hook_counted(context, sock, msg, size, flags);
+
+CATCH_DEFAULT:
+    FINISH_MODULE_DISABLE_CHECK(context);
+    return ret;
+}
+
+int ec_lsm_socket_recvmsg(struct socket *sock, struct my_user_msghdr *msg, int size, int flags)
+{
+    int xcode = 0;
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    MODULE_GET();
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    xcode = g_original_ops_ptr->socket_recvmsg(sock, msg, size, flags);
+    TRY(xcode >= 0);
+#endif  //}
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+    // CB-10087, CB-9235
+    // Some versions of netcat used a tricky way of reading UDP data.  (They were able to
+    //  use the read function like a TCP connection which I did not know was possible.)
+    //  This was able to get around my logic to hook UDP.
+    // I fixed it by allowing the LSM hook to be called for UDP as well.  I was never happy
+    //  handling all UDP from the LSM hook because I observed cases where the address
+    //  information was not always filled in when I needed it. I now set a special flag
+    //  in the receive hook that allows LSM to be skipped in those cases.
+    TRY(CHECK_SOCKET(sock));
+
+    TRY_SET(-EPERM != my_socket_recvmsg_hook_counted(&context, sock, msg, 0, flags), -EPERM);
+
+CATCH_DEFAULT:
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return xcode;
+}
+
+//#define PEEK(CONTEXT, call_recv_func, p_recv_arg_block, sock, msg_peek, sk_rcvtimeo_dlta, our_timeout, flags, return_code)
+
+static int64_t my_peek(
+    ProcessContext *context,
+    long (*call_recv_func)(void *p_recv_arg_block),
+    void *p_recv_arg_block,
+    struct socket *sock,
+    void *msg_peek,  // my_user_msghdr or my_kernel_msghdr
+    long sk_rcvtimeo_dlta,
+    bool our_timeout,
+    unsigned int flags
+)
+{
+    int32_t xcode;
+    struct Bugbuf *const bugbuf = *(struct Bugbuf **)p_recv_arg_block;
+
+    if (bugbuf) {
+        int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "%s\n", __func__);
+
+        bugbuf->used  += len;
+        bugbuf->avail -= len;
+    }
+    /* Execute a recv function to peek at the message */
+    xcode = my_timed_recv(call_recv_func, p_recv_arg_block, sock, sk_rcvtimeo_dlta, our_timeout);
+
+    /* TIMED_RECV may return if the module is exiting, in this case just return from this function */
+    if (g_exiting)
+    {
+        goto CATCH_DEFAULT;
+    }
+
+    TRY(xcode >= 0);
+    if (bugbuf) {
+        int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptB %x\n", xcode);
+
+        bugbuf->used  += len;
+        bugbuf->avail -= len;
+    }
+    TRY(sock && sock->sk);
+
+    /* Call our local code to process the packet for event generation and isolation */
+    TRY_SET(-EPERM != my_socket_recvmsg(context, sock, msg_peek, 0, flags), -EPERM);
+
+    /* If we peeked at UDP message sk_rcvtimeo_dlta is what's left from original timeout value.
+     * Unless a caller set original timeout value to 0 sk_rcvtimeo_dlta should be greater than 0 here
+     * since we check return code of the recv call above and if it's less than 0 we exit from the function
+     * as this means that either no data is received and timeout expired or
+     * remote peer terminated connection.
+     */
+    if (our_timeout)
+    {
+        if (0 == sk_rcvtimeo_dlta || sk_rcvtimeo_dlta > UDP_PACKET_TIMEOUT)
+        {
+            sock->sk->sk_rcvtimeo = UDP_PACKET_TIMEOUT;
+        } else
+        {
+            sock->sk->sk_rcvtimeo = sk_rcvtimeo_dlta;
+            our_timeout = false;
+        }
+    }
+    if (bugbuf) {
+        int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptC %x\n", xcode);
+
+        bugbuf->used  += len;
+        bugbuf->avail -= len;
+    }
+    return  (0ul<<32) | (uint32_t)xcode;
+
+CATCH_DEFAULT:
+    if (bugbuf) {
+        int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptD %x\n", xcode);
+
+        bugbuf->used  += len;
+        bugbuf->avail -= len;
+    }
+    return (-1ul<<32) | (uint32_t)xcode;
+}
+
+// calculate new flags for UDP inspection
+static unsigned int check_udp_peek(struct socket const *sock, unsigned const flags)
+{
+    if (CHECK_SOCKET(sock) && IPPROTO_UDP == sock->sk->sk_protocol)
+        return (((MSG_ERRQUEUE & flags) ? 0 : MSG_PEEK) | MSG_UDP_HOOK | flags);  // MSG_PEEK is 2
+    return ~MSG_UDP_HOOK & flags;
+}
 
 void __ec_udp_init_sockets(void);
 
@@ -482,37 +887,6 @@ int ec_net_track_show_new(struct seq_file *m, void *v)
     return 0;
 }
 
-void __ec_set_net_key(NET_TBL_KEY    *key,
-                         pid_t           pid,
-                         CB_SOCK_ADDR   *localAddr,
-                         CB_SOCK_ADDR   *remoteAddr,
-                         uint16_t        proto,
-                         CONN_DIRECTION  conn_dir)
-{
-    memset(key, 0, sizeof(NET_TBL_KEY));
-
-    ec_copy_sockaddr(&key->laddr, localAddr);
-    ec_copy_sockaddr(&key->raddr, remoteAddr);
-
-    // Network applications tend to randomize the source port, so in order to
-    //  reduce the number of reported network connections we ignore the source port.
-    //  (Which one that is depends on the direction.)
-    if (conn_dir == CONN_IN)
-    {
-        ec_set_sockaddr_port(&key->raddr, 0);
-    } else if (conn_dir == CONN_OUT)
-    {
-        ec_set_sockaddr_port(&key->laddr, 0);
-    } else
-    {
-        TRACE(DL_WARNING, "Unexpected netconn direction: %d", conn_dir);
-    }
-
-    key->pid      = pid;
-    key->proto    = proto;
-    key->conn_dir = conn_dir;
-}
-
 // Track this connection in the local table
 //  If it is a new connection, add an entry and send an event (return value of true)
 //  If it is a tracked connection, update the time and skip sending an event (return value of false)
@@ -600,66 +974,15 @@ void __ec_net_tracking_print_message(const char *message, NET_TBL_KEY *key)
                             laddr_str, ntohs(lport), raddr_str, ntohs(rport));
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
 #  define IPV4_SOCKNAME(inet, a) ((inet)->inet_##a)
 #  define IPV6_SOCKNAME(sk, a)   ((sk)->sk_v6_##a)
-#else
+#else  //}{
 #  define IPV4_SOCKNAME(inet, a) ((inet)->a)
 #  define IPV6_SOCKNAME(sk, a)   (inet6_sk(sk)->a)
-#endif
+#endif  //}
 
-bool ec_getudppeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
-{
-    int namelen;
-    bool rval = false;
-
-    mm_segment_t oldfs = get_fs();
-
-    set_fs(get_ds());
-
-    namelen = msg->msg_namelen;
-    if (sk->sk_protocol == IPPROTO_UDP && msg->msg_name && namelen)
-    {
-        unsigned int nbytes = (sizeof(remoteAddr->ss_addr) >= namelen) ? namelen : sizeof(remoteAddr->ss_addr);
-
-        memcpy(&remoteAddr->ss_addr, msg->msg_name, nbytes);
-        rval = true;
-    }
-
-    set_fs(oldfs);
-    return rval;
-}
-
-// I would prefer to use kernel_getpeername here, but it does not work if the socket state is closed.
-//  (Which seems to happen under load.)
-void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr, struct msghdr *msg)
-{
-    CANCEL_VOID(sk);
-    CANCEL_VOID(remoteAddr);
-    CANCEL_VOID(msg);
-
-    // Use msg->msg_name if we are doing UDP else ...
-    if (!ec_getudppeername(sk, remoteAddr, msg))
-    {
-        struct inet_sock *inet;
-
-        inet = inet_sk(sk);
-
-        remoteAddr->sa_addr.sa_family = sk->sk_family;
-
-        if (sk->sk_family == PF_INET)
-        {
-            remoteAddr->as_in4.sin_port        = IPV4_SOCKNAME(inet, dport);
-            remoteAddr->as_in4.sin_addr.s_addr = IPV4_SOCKNAME(inet, daddr);
-        } else {
-            remoteAddr->as_in6.sin6_port = IPV4_SOCKNAME(inet, dport);
-            memcpy(&remoteAddr->as_in6.sin6_addr, &IPV6_SOCKNAME(sk, daddr), sizeof(struct in6_addr));
-        }
-    }
-
-}
-
-void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msghdr *msg)
+void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct my_user_msghdr *msg)
 {
     struct inet_sock *inet;
 
@@ -685,57 +1008,19 @@ void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr, struct msghdr *msg
     }
 }
 
-int __ec_checkIsolate(ProcessContext *context, u16 family, int protocol, struct sockaddr *p_sockaddr)
-{
-    CB_ISOLATION_INTERCEPT_RESULT isolationResult;
-
-    if (family == PF_INET)
-    {
-        struct sockaddr_in *as_in4 = (struct sockaddr_in *)p_sockaddr;
-
-        TRACE(DL_VERBOSE, "%s: check iso ip=%x port=%d", __func__, ntohl(as_in4->sin_addr.s_addr), ntohs(as_in4->sin_port));
-        ec_IsolationInterceptByAddrProtoPort(context, ntohl(as_in4->sin_addr.s_addr), true, protocol, as_in4->sin_port, &isolationResult);
-        if (isolationResult.isolationAction == IsolationActionBlock)
-        {
-            //classifyOut->actionType = FWP_ACTION_BLOCK;
-            //classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
-            TRACE(DL_NET, "%s: block ip=%x port=%d", __func__, as_in4->sin_addr.s_addr, as_in4->sin_port);
-            g_cbIsolationStats.isolationBlockedInboundIp4Packets++;
-            return -EPERM;
-        } else if (isolationResult.isolationAction == IsolationActionAllow)
-        {
-            g_cbIsolationStats.isolationAllowedInboundIp4Packets++;
-        }
-    } else if (family == PF_INET6)
-    {
-        struct sockaddr_in6 *as_in6 = (struct sockaddr_in6 *)p_sockaddr;
-
-        ec_IsolationInterceptByAddrProtoPort(context, as_in6->sin6_addr.s6_addr32[0], false, protocol, as_in6->sin6_port, &isolationResult);
-        if (isolationResult.isolationAction == IsolationActionBlock)
-        {
-            //classifyOut->actionType = FWP_ACTION_BLOCK;
-            //classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
-            g_cbIsolationStats.isolationBlockedInboundIp6Packets++;
-            return -EPERM;
-        } else if (isolationResult.isolationAction == IsolationActionAllow)
-        {
-            g_cbIsolationStats.isolationAllowedInboundIp6Packets++;
-        }
-    }
-    return 0;
-}
-
 int ec_lsm_socket_post_create(struct socket *sock, int family, int type, int protocol, int kern)
 {
-    int xcode;
+    int xcode = 0;
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
     xcode = g_original_ops_ptr->socket_post_create(sock, family, type, protocol, kern);
     TRY(xcode >= 0);
+#endif  //}
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(!ec_banning_IgnoreProcess(&context, ec_getpid(current)));
@@ -762,17 +1047,19 @@ CATCH_DEFAULT:
 }
 
 // Not used for now
-int ec_lsm_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
+int ec_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 {
-    int xcode;
+    int xcode = 0;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET();
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
     xcode = g_original_ops_ptr->socket_bind(sock, address, addrlen);
     TRY(xcode >= 0);
+#endif  //}
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
     TRY(!ec_banning_IgnoreProcess(&context, ec_getpid(current)));
 
@@ -793,7 +1080,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-int ec_lsm_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
+int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int size)
 {
     u16               family;
     CB_SOCK_ADDR      localAddr;
@@ -806,9 +1093,11 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
 
     MODULE_GET();
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
     xcode = g_original_ops_ptr->socket_sendmsg(sock, msg, size);
     TRY(xcode >= 0);
+#endif  //}
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
@@ -858,12 +1147,11 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, struct msghdr *msg, int size, int flags)
+int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *sock, struct my_user_msghdr *msg, int size, int flags)
 {
     u16               family;
     CB_SOCK_ADDR      localAddr;
     CB_SOCK_ADDR      remoteAddr;
-    int               addressLength;
     ProcessTracking  *procp         = NULL;
     uint16_t          proto = 0;
     pid_t             pid   = ec_getpid(current);
@@ -900,8 +1188,15 @@ int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *soc
     TRY(!ec_banning_IgnoreProcess(context, pid));
 
     // For UDP this will probably just get the port
-    addressLength = sizeof(CB_SOCK_ADDR);
-    kernel_getsockname(sock, &localAddr.sa_addr, &addressLength);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    {
+        int addressLength = sizeof(CB_SOCK_ADDR);
+
+        kernel_getsockname(sock, &localAddr.sa_addr, &addressLength);
+    }
+#else  //}{
+    kernel_getsockname(sock, &localAddr.sa_addr);
+#endif  //}
 
     recvmsg_cnt += 1;
     if ((recvmsg_cnt % NETHOOK_RECVMSG_STAT_THROTTLE) == 0)
@@ -930,7 +1225,7 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-int __ec_socket_recvmsg(ProcessContext *context, struct socket *sock, struct msghdr *msg, int size, int flags)
+int __ec_socket_recvmsg(ProcessContext *context, struct socket *sock, struct my_user_msghdr *msg, int size, int flags)
 {
     int ret = 0;
 
@@ -943,7 +1238,7 @@ CATCH_DEFAULT:
     return ret;
 }
 
-int ec_lsm_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags)
+int ec_socket_recvmsg(struct socket *sock, struct my_user_msghdr *msg, int size, int flags)
 {
     int xcode = 0;
 
@@ -951,8 +1246,10 @@ int ec_lsm_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int
 
     MODULE_GET();
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     xcode = g_original_ops_ptr->socket_recvmsg(sock, msg, size, flags);
     TRY(xcode >= 0);
+#endif  //}
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // CB-10087, CB-9235
@@ -981,16 +1278,17 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
     CB_SOCK_ADDR         localAddr;
     CB_SOCK_ADDR         remoteAddr;
     ProcessTracking      *procp        = NULL;
-    int                  addressLength = sizeof(CB_SOCK_ADDR);
     pid_t                pid           = ec_getpid(current);
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
 
     MODULE_GET();
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
     xcode = g_original_ops_ptr->socket_connect(sock, addr, addrlen);
     TRY(xcode >= 0);
+#endif  //}
     TRY(sock);
 
     TRY(CHECK_SOCKET(sock));
@@ -1016,7 +1314,15 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
     //
     TRY(sock->sk->sk_protocol == IPPROTO_TCP);
 
-    kernel_getsockname(sock, &localAddr.sa_addr, &addressLength);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    {
+        int addressLength = sizeof(CB_SOCK_ADDR);
+
+        kernel_getsockname(sock, &localAddr.sa_addr, &addressLength);
+    }
+#else  //}{
+    kernel_getsockname(sock, &localAddr.sa_addr);
+#endif  //}
 
     // Track this connection in the local table
     //  If it is a new connection, add an entry and send an event (return value of true)
@@ -1058,7 +1364,9 @@ void ec_inet_conn_established(struct sock *sk, struct sk_buff *skb)
         ;
     }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     g_original_ops_ptr->inet_conn_established(sk, skb);
+#endif  //}
     MODULE_PUT();
 }
 
@@ -1079,9 +1387,11 @@ int ec_lsm_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct reques
 
     MODULE_GET();
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
     xcode = g_original_ops_ptr->inet_conn_request(sk, skb, req);
     TRY(xcode >= 0);
+#endif  //}
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
@@ -1141,29 +1451,43 @@ CATCH_DEFAULT:
 //  when the module is unloaded.
 long (*ec_orig_sys_recvfrom)(int fd, void __user *ubuf, size_t size, unsigned int flags,
                              struct sockaddr __user *addr, int __user *addr_len);
-long (*ec_orig_sys_recvmsg)(int fd, struct msghdr __user *msg, unsigned int flags);
+long (*ec_orig_sys_recvmsg)(int fd, struct my_user_msghdr __user *msg, unsigned int flags);
 long (*ec_orig_sys_recvmmsg)(int fd, struct mmsghdr __user *msg, unsigned int vlen, unsigned int flags, struct timespec __user *timeout);
 
 // The functions below replace the linux syscalls.  In most cases we will also call the original
 //  syscall.
 //
 // !!!!! IMPORTANT NOTE AROUND SUPPORT FOR DISABLING MODULE !!!!!!!!!
-// The checks to test if module is disabled are done in the inner function __ec_socket_recvmsg
+// The checks to test if module is disabled are done in the inner function my_socket_recvmsg
 // This works today because the outer routines don't access any of the memory resources, thus even
 // in a disabled module its OK to run the body of the outer routine. If this rule is violated (as
 // in the  outer calls do start accessing the memory resources) will have to refactor the checks
 // for the disabled checks to work correctly.
 //
 
-asmlinkage long ec_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int flags)
+struct recvmsg_argblock {
+    struct Bugbuf *bugbuf;
+    int fd;
+    struct my_user_msghdr __user *msg;
+    unsigned int flags;
+};
+
+static long call_ec_orig_sys_recvmsg(void *ab_arg)
 {
-    int            xcode;
+    struct recvmsg_argblock *ab = ab_arg;
+
+    return ec_orig_sys_recvmsg(ab->fd, ab->msg, ab->flags);
+}
+
+asmlinkage long ec_sys_recvmsg(int fd, struct my_user_msghdr __user *msg, unsigned int flags)
+{
+    int64_t        ycode;
+    int            xcode = 0;
     struct socket *sock;
-    unsigned int _flags           = flags;
+    unsigned int _flags;
     bool           weSetTimeout     = false;
     long           sk_rcvtimeo      = MAX_SCHEDULE_TIMEOUT;
     long           sk_rcvtimeo_dlta = 0;
-    bool           bUdpPeek = false;
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
@@ -1224,14 +1548,14 @@ asmlinkage long ec_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
     // another active kernel module. This also saves some CPU cycles for disabled modules, as they
     // can jump right to handling the original syscall
     IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-    CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek);
 
-    if (bUdpPeek)
+    _flags = check_udp_peek(sock, flags);
+    if ((MSG_UDP_HOOK & _flags) && !(MSG_ERRQUEUE & _flags))
     {
         mm_segment_t oldfs;
         struct sockaddr_storage sock_addr_peek = {0};
-        struct msghdr msg_peek = {0};
         struct iovec iovec_peek = {0};
+        struct my_user_msghdr msg_peek = {0};
         char iovec_peek_buf[IOV_FOR_MSG_PEEK_SIZE] = {0};
         char cbuf[CMSG_SPACE(sizeof(struct in6_pktinfo))] = {0};
 
@@ -1250,21 +1574,29 @@ asmlinkage long ec_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int f
         set_fs(get_ds());
 
         // Peek at the message to determine remote IP address and port
-        PEEK(&context, ec_orig_sys_recvmsg(fd, &msg_peek, _flags), sock, msg_peek, sk_rcvtimeo_dlta, weSetTimeout, flags, xcode);
+        {
+            struct recvmsg_argblock ab = {NULL, fd, &msg_peek, _flags};
+
+            ycode = my_peek(&context, call_ec_orig_sys_recvmsg, (void *)&ab,
+                    sock, &msg_peek, sk_rcvtimeo_dlta, weSetTimeout, flags);
+            TRY(ycode >= 0);
+            xcode = (int32_t)ycode;  // dead: set by CATCH_DISABLED
+        }
         set_fs(oldfs);
     }
 
     // If we set MSG_UDP_HOOK earlier that means we're dealing with UDP
     // and we either already checked for isolation or we read from ERRQUEUE,
     // In both cases we don't need to use LSM hook
-    if (_flags & MSG_UDP_HOOK)
-    {
-        flags |= MSG_UDP_HOOK;
-    }
+    flags |= _flags & MSG_UDP_HOOK;
 
 CATCH_DISABLED:
     // Get the actual data which will be copied to the buffer provided by caller
-    TIMED_RECV(ec_orig_sys_recvmsg(fd, msg, flags), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
+    {
+        struct recvmsg_argblock ab = {NULL, fd, msg, flags};
+
+        xcode = my_timed_recv(call_ec_orig_sys_recvmsg,  (void *)&ab, sock, sk_rcvtimeo_dlta, weSetTimeout);
+    }
 
 CATCH_DEFAULT:
     if (sock)
@@ -1278,22 +1610,65 @@ CATCH_DEFAULT:
     return xcode;
 }
 
+struct recvmmsg_argblock {
+    struct Bugbuf *bugbuf;
+    int fd;
+    struct mmsghdr __user *mmsghdr;
+    int vlen;
+    unsigned int flags;
+    struct timespec __user *p_timeout;
+};
+
+static long call_ec_orig_sys_recvmmsg(void *ab_arg)
+{
+    struct recvmmsg_argblock *ab = ab_arg;
+    struct Bugbuf *const bb = ab->bugbuf;
+
+    if (bb) {
+        int rv;
+        struct mmsghdr mh = {{0}, 0};
+        struct timespec ts = {0};
+
+        rv = copy_from_user(&mh, ab->mmsghdr, sizeof(mh));
+        if (rv)
+            mh.msg_len = rv;
+        if (ab->p_timeout) {
+            rv = copy_from_user(&ts, ab->p_timeout, sizeof(ts));
+            if (rv)
+                ab->fd |= 1<<31;
+        }
+        rv = snprintf(&bb->buffer[bb->used], imax(0, bb->avail),
+            "%s: fd=%d mmsghdr={msg_len=%d msg_hdr={_name=%d,%p _iov=%d,%p _control=%d,%p _flags=0x%x}}  vlen=%d  flags=0x%x timeout={%u.%u}\n",
+            __func__, ab->fd, mh.msg_len,
+            (int)mh.msg_hdr.msg_namelen,    mh.msg_hdr.msg_name,
+            (int)mh.msg_hdr.msg_iovlen,     mh.msg_hdr.msg_iov,
+            (int)mh.msg_hdr.msg_controllen, mh.msg_hdr.msg_control,
+            mh.msg_hdr.msg_flags,
+            (int)ab->vlen, ab->flags, (unsigned int)ts.tv_sec, (unsigned int)ts.tv_nsec);
+        bb->used  += rv;
+        bb->avail -= rv;
+    }
+    return ec_orig_sys_recvmmsg(ab->fd, ab->mmsghdr, ab->vlen, ab->flags, ab->p_timeout);
+}
+
 asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
                                 unsigned int vlen, unsigned int flags,
                                 struct timespec __user *timeout)
 {
-    int             xcode;
+    int64_t         ycode;
+    int             xcode = 0;
     struct socket   *sock;
     struct timespec _timeout = {0, 0};
-    unsigned int _flags = flags;
+    unsigned int _flags;
     bool            weSetTimeout     = false;
     long            sk_rcvtimeo      = MAX_SCHEDULE_TIMEOUT;
     long            sk_rcvtimeo_arg  = MAX_SCHEDULE_TIMEOUT;
     long            sk_rcvtimeo_dlta = 0;
-    bool            bUdpPeek = false;
+    struct Bugbuf bugbuf;
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
+    bugbuf.used = 0; bugbuf.avail = N_BUGBUF;
     MODULE_GET();
 
     sock = sockfd_lookup(fd, &xcode);
@@ -1333,7 +1708,9 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
     //  then ours.  If the value is smaller than ours, just let the system work as usual.
     // We want to always have a timeout so that the recv call does not block forever.  Otherwise
     //  we can never unload the module.
-    if (!((flags & MSG_DONTWAIT) || (sock->file->f_flags & O_NONBLOCK)) && (sk_rcvtimeo == 0 || (sk_rcvtimeo > UDP_PACKET_TIMEOUT && sk_rcvtimeo_arg > UDP_PACKET_TIMEOUT)))
+    if (!((flags & MSG_DONTWAIT) || (sock->file->f_flags & O_NONBLOCK))
+    && (sk_rcvtimeo == 0
+       || (sk_rcvtimeo > UDP_PACKET_TIMEOUT && sk_rcvtimeo_arg > UDP_PACKET_TIMEOUT)))
     {
         weSetTimeout          = true;
         sock->sk->sk_rcvtimeo = UDP_PACKET_TIMEOUT;
@@ -1353,9 +1730,9 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
     // another active kernel module. This also saves some CPU cycles for disabled modules, as they
     // can jump right to handling the original syscall
     IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-    CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek);
 
-    if (bUdpPeek)
+    _flags = check_udp_peek(sock, flags);
+    if ((MSG_UDP_HOOK & _flags) && !(MSG_ERRQUEUE & _flags))
     {
         struct sockaddr_storage sock_addr_peek = {0};
         struct mmsghdr mmsg_peek = {{0}, 0};
@@ -1393,7 +1770,14 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
         // timeout value will be updated with remaining time if recvmmsg() receives a datagram
         // We only need one message at this time as we're checking/reporting only the first received packet for now
         // TODO: CB-11228 - we need to check/report every packet we received, not only the first one
-        PEEK(&context, ec_orig_sys_recvmmsg(fd, &mmsg_peek, 1, _flags, p_timeout), sock, mmsg_peek.msg_hdr, sk_rcvtimeo_dlta_peek, weSetTimeout, flags, xcode);
+        {
+            struct recvmmsg_argblock ab = {&bugbuf, fd, &mmsg_peek, 1, _flags, p_timeout};
+
+            ycode = my_peek(&context, call_ec_orig_sys_recvmmsg, (void *)&ab,
+                    sock, &mmsg_peek.msg_hdr, sk_rcvtimeo_dlta_peek, weSetTimeout, flags);
+            TRY(ycode >= 0);
+            xcode = (int32_t)ycode;  // dead: set by CATCH_DISABLED
+        }
 
         // If the caller provided timeout our kernel space timespec structure was updated by the recvmmsg() syscall
         // Now we need to copy it back to the caller's structure
@@ -1406,19 +1790,26 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
     // If we set MSG_UDP_HOOK earlier that means we're dealing with UDP
     // and we either already checked for isolation or we read from ERRQUEUE,
     // In both cases we don't need to use LSM hook
-    if (_flags & MSG_UDP_HOOK)
-    {
-        flags |= MSG_UDP_HOOK;
-    }
+    flags |= _flags & MSG_UDP_HOOK;
 
 CATCH_DISABLED:
     // This call can block here for a long time if the caller passes a big timeout value or doesn't specify the timeout at all.
     // In this case recvmmsg() will call recvmsg() in a loop until either of the following conditions are met:
     // 1. Caller's timeout expires (if it's set)
     // 2. Socket timeout expires
-    // 3. There are no more msghdr structures available to store incoming packets
+    // 3. There are no more my_user_msghdr structures available to store incoming packets
     // We can't unload our kernel module until we exit from this call, so this behavior may cause delays when unloading the module.
-    TIMED_RECV(ec_orig_sys_recvmmsg(fd, msg, vlen, flags, timeout), sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
+    {
+        struct recvmmsg_argblock ab = {&bugbuf, fd, msg, vlen, flags, timeout};
+
+        if (1) {
+            int len = snprintf(&bugbuf.buffer[bugbuf.used], imax(0, bugbuf.avail), "ptG flags=%x timeout=%p\n", flags, timeout);
+
+            bugbuf.used  += len;
+            bugbuf.avail -= len;
+        }
+        xcode = my_timed_recv(call_ec_orig_sys_recvmmsg, (void *)&ab, sock, sk_rcvtimeo_dlta, weSetTimeout);
+    }
 
 CATCH_DEFAULT:
     if (sock)
@@ -1428,19 +1819,55 @@ CATCH_DEFAULT:
         sockfd_put(sock);
     }
     MODULE_PUT();
+    pr_err("(used=%u avail=%d) xcode=0x%x: %s\n",
+        bugbuf.used, bugbuf.avail, xcode, &bugbuf.buffer[0]);
     return xcode;
+}
+
+struct kernel_recvmsg_argblock {
+    struct Bugbuf *bugbuf;
+    struct socket *sock;
+    struct msghdr *msg;
+    struct kvec *iov;
+    int n;
+    unsigned int flags;
+    unsigned int _flags;
+};
+
+static long call_kernel_recvmsg(void *ab_arg)
+{
+    struct kernel_recvmsg_argblock *ab = ab_arg;
+
+    return kernel_recvmsg(ab->sock, ab->msg, ab->iov, ab->n, ab->flags, ab->_flags);
+}
+
+struct recvfrom_argblock {
+    struct Bugbuf *bugbuf;
+    int fd;
+    void __user *ubuf;
+    size_t size;
+    unsigned int flags;
+    struct sockaddr __user *addr;
+    int __user *addr_len;
+};
+
+static long call_ec_orig_sys_recvfrom(void *ab_arg)
+{
+    struct recvfrom_argblock *ab = ab_arg;
+
+    return ec_orig_sys_recvfrom(ab->fd, ab->ubuf, ab->size, ab->flags, ab->addr, ab->addr_len);
 }
 
 asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned int flags,
                              struct sockaddr __user *addr, int __user *addr_len)
 {
     struct socket *sock;
-    int           xcode;
+    int64_t       ycode;
+    int           xcode = 0;
     bool          weSetTimeout = false;
     long          sk_rcvtimeo  = MAX_SCHEDULE_TIMEOUT;
     long          sk_rcvtimeo_dlta = 0;
-    unsigned int _flags = 0;
-    bool          bUdpPeek = false;
+    unsigned int _flags;
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
@@ -1506,15 +1933,15 @@ asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
     // another active kernel module. This also saves some CPU cycles for disabled modules, as they
     // can jump right to handling the original syscall
     IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-    CHECK_UDP_PEEK(sock, flags, _flags, bUdpPeek);
 
-    if (bUdpPeek)
+    _flags = check_udp_peek(sock, flags);
+    if ((MSG_UDP_HOOK & _flags) && !(MSG_ERRQUEUE & _flags))
     {
         // Unlike in the recvmsg and recvmmsg calls, we can not call the real syscall to get the packet
-        //  because we need a struct msghdr object for our logic.  The code below has been adapted from
+        //  because we need a struct my_user_msghdr object for our logic.  The code below has been adapted from
         //  the recvfrom call in the kernel source.
         struct iovec             iov;
-        struct msghdr            msg;
+        struct my_kernel_msghdr  msg;
         struct sockaddr_storage  address;
         char                     cbuf[CMSG_SPACE(sizeof(struct in6_pktinfo))] = {0};
         char                     peek_buf[IOV_FOR_MSG_PEEK_SIZE] = {0};
@@ -1528,22 +1955,28 @@ asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
         iov.iov_base       = peek_buf;
 
         // Get information needed for isolation check
-        PEEK(&context, kernel_recvmsg(sock, &msg, (struct kvec *)&iov, 1, IOV_FOR_MSG_PEEK_SIZE, _flags),
-             sock, msg, sk_rcvtimeo_dlta, weSetTimeout, flags, xcode);
+        {
+            struct kernel_recvmsg_argblock ab = {NULL, sock, &msg, (struct kvec *)&iov, 1, IOV_FOR_MSG_PEEK_SIZE, _flags};
+
+            ycode = my_peek(&context, call_kernel_recvmsg, (void *)&ab,
+                    sock, &msg, sk_rcvtimeo_dlta, weSetTimeout, flags);
+            TRY(ycode >= 0);
+            xcode = (int32_t)ycode;  // dead: set by CATCH_DISABLED
+        }
     }
 
     // If we set MSG_UDP_HOOK earlier that means we're dealing with UDP
     // and we either already checked for isolation or we read from ERRQUEUE,
     // In both cases we don't need to use LSM hook
-    if (_flags & MSG_UDP_HOOK)
-    {
-        flags |= MSG_UDP_HOOK;
-    }
+    flags |= _flags & MSG_UDP_HOOK;
 
 CATCH_DISABLED:
     // Call original syscall which should populate all the buffers and variables that a caller passed in
-    TIMED_RECV(ec_orig_sys_recvfrom(fd, ubuf, size, flags, addr, addr_len),
-               sock, sk_rcvtimeo_dlta, weSetTimeout, xcode);
+    {
+        struct recvfrom_argblock ab = {NULL, fd, ubuf, size, flags, addr, addr_len};
+
+        xcode = my_timed_recv(call_ec_orig_sys_recvfrom, (void *)&ab, sock, sk_rcvtimeo_dlta, weSetTimeout);
+    }
 
 CATCH_DEFAULT:
     if (sock)
@@ -1556,6 +1989,6 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-#ifdef __NR_recv
+#ifdef __NR_recv  //{
 #warning "The sys_recv call is used, and we have not provided a hook for it."
-#endif
+#endif  //}
