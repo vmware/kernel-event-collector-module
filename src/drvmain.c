@@ -2,6 +2,8 @@
 // Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
+#include <linux/proc_fs.h>
+#include <linux/tracepoint.h>
 #include "priv.h"
 #include "findsyms.h"
 #include "process-tracking.h"

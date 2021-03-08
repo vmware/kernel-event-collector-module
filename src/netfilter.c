@@ -11,6 +11,9 @@
 #undef __KERNEL__
 #include <linux/netfilter.h>
 #define __KERNEL__
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{ RHEL8
+#include <linux/net_namespace.h>
+#endif  //}
 #include <linux/netfilter_ipv4.h>
 #include <linux/ip.h>
 #include <linux/tcp.h>
@@ -42,20 +45,26 @@ void __ec_process_dns_packet(
     int             payload_offset,
     ProcessContext *context);
 
-unsigned int ec_hook_func_local_out(
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-    unsigned int hooknum,
-#else
-    const struct nf_hook_ops *ops,
-#endif
-    struct sk_buff *skb,
-    const struct net_device *in,
-    const struct net_device *out,
-#if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 2)
-    const struct nf_hook_state *state
-#else
-    int (*okfn)(struct sk_buff *)
-#endif
+static unsigned int ec_hook_func_local_out(
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{ RHEL8
+    void *priv
+    , struct sk_buff *skb
+    , const struct nf_hook_state *state
+#else  //}{ RHEL7, RHEL6:  start over!
+  #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)  //{ RHEL6
+      unsigned int hooknum
+  #else  //}{ RHEL7
+      const struct nf_hook_ops *ops
+  #endif  //}
+    , struct sk_buff *skb
+    , const struct net_device *in
+    , const struct net_device *out
+    #if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 2)  //{
+        , const struct nf_hook_state *state
+    #else  //}{ RHEL7.0, RHEL7.1: truly ancient
+          , int (*okfn)(struct sk_buff *)
+    #endif  //}
+#endif  //}
     )
 {
     unsigned int    xcode         = NF_ACCEPT;
@@ -138,20 +147,29 @@ int __ec_transport_offset(struct sk_buff *skb, struct iphdr *ip_header)
     return transport_offset;
 }
 
+// This hook only looks for DNS response packets.  If one is found, a message is sent to
+//  user space for processing.  NOTE: Process ID and such will be added to the event but
+//  it is not used by the daemon.  This is only used for internal caching.
 unsigned int ec_hook_func_local_in_v4(
-    #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-        unsigned int hooknum,
-    #else
-        const struct nf_hook_ops *ops,
-    #endif
-        struct sk_buff *skb,
-        const struct net_device *in,
-        const struct net_device *out,
-    #if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 2)
-        const struct nf_hook_state *state
-    #else
-        int (*okfn)(struct sk_buff *)
-    #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{ RHEL8
+    void *priv
+    , struct sk_buff *skb
+    , const struct nf_hook_state *state
+#else  //}{ RHEL7, RHEL6:  start over!
+  #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)  //{ RHEL6
+      unsigned int hooknum
+  #else  //}{ RHEL7
+      const struct nf_hook_ops *ops
+  #endif  //}
+    , struct sk_buff *skb
+    , const struct net_device *in
+    , const struct net_device *out
+    #if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 2)  //{
+        , const struct nf_hook_state *state
+    #else  //}{ RHEL7.0, RHEL7.1: truly ancient
+          , int (*okfn)(struct sk_buff *)
+    #endif  //}
+#endif  //}
     )
 {
     struct iphdr *ip_header;
@@ -174,19 +192,25 @@ CATCH_DEFAULT:
 }
 
 unsigned int ec_hook_func_local_in_v6(
-    #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-        unsigned int hooknum,
-    #else
-        const struct nf_hook_ops *ops,
-    #endif
-        struct sk_buff *skb,
-        const struct net_device *in,
-        const struct net_device *out,
-    #if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 2)
-        const struct nf_hook_state *state
-    #else
-        int (*okfn)(struct sk_buff *)
-    #endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{ RHEL8
+    void *priv
+    , struct sk_buff *skb
+    , const struct nf_hook_state *state
+#else  //}{ RHEL7, RHEL6:  start over!
+  #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)  //{ RHEL6
+      unsigned int hooknum
+  #else  //}{ RHEL7
+      const struct nf_hook_ops *ops
+  #endif  //}
+    , struct sk_buff *skb
+    , const struct net_device *in
+    , const struct net_device *out
+    #if RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7, 2)  //{
+        , const struct nf_hook_state *state
+    #else  //}{ RHEL7.0, RHEL7.1: truly ancient
+          , int (*okfn)(struct sk_buff *)
+    #endif  //}
+#endif  //}
     )
 {
     uint8_t         protocol;
@@ -454,7 +478,11 @@ bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
     nfho_local_out[3].pf       = PF_INET6;
     nfho_local_out[3].priority = NF_IP_PRI_FIRST;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
     if (enableHooks & CB__NF_local_out) nf_register_hooks(nfho_local_out, NUM_HOOKS);
+#else //}{
+    if (enableHooks & CB__NF_local_out) nf_register_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
+#endif //}
 
     TRACE(DL_INIT, "Netfilter hook has been inserted");
 
@@ -464,22 +492,34 @@ bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
 void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks)
 {
     TRACE(DL_SHUTDOWN, "Netfilter hook has been unregistered");
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
     if (enableHooks & CB__NF_local_out) nf_unregister_hooks(nfho_local_out, NUM_HOOKS);
+#else  //}{
+    if (enableHooks & CB__NF_local_out) nf_unregister_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
+#endif  //}
 }
 
 #ifdef HOOK_SELECTOR
 void setNetfilter(const char *buf, const char *name, uint32_t call, void *cb_hook, int cb_hook_nr)
 {
-    if (0 == strncmp("1", buf, sizeof(char)))
+    if ('1' == buf[0])
     {
         pr_info("Adding %s\n", name);
         g_enableHooks |= call;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
         nf_register_hooks(cb_hook, cb_hook_nr);
-    } else if (0 == strncmp("0", buf, sizeof(char)))
+#else  //}{
+        nf_register_net_hooks(&init_net, cb_hook, cb_hook_nr);
+#endif  //}
+    } else if ('0' == buf[0])
     {
         pr_info("Removing %s\n", name);
         g_enableHooks &= ~call;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
         nf_unregister_hooks(cb_hook, cb_hook_nr);
+#else  //}{
+        nf_unregister_net_hooks(&init_net, cb_hook, cb_hook_nr);
+#endif  //}
     } else
     {
         pr_err("Error adding %s to %s\n", buf, name);

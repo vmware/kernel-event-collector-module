@@ -22,8 +22,6 @@ static bool g_lsmRegistered;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{ not RHEL8
 struct        security_operations  *g_original_ops_ptr;   // Any LSM which we are layered on top of
 static struct security_operations   g_combined_ops;       // Original LSM plus our hooks combined
-#else  //}{
-static struct security_hook_heads *p_security_hook_heads;
 #endif //}
 
 extern int  ec_lsm_bprm_check_security(struct linux_binprm *bprm);
@@ -76,14 +74,14 @@ bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
     } while (0)
 
 #else  // }{ LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-    TRY_CB_RESOLVED(p_security_hook_heads);
+    TRY_CB_RESOLVED(security_hook_heads);
     cblsm_hooks_count = 0;
     memset(cblsm_hooks, 0, sizeof(cblsm_hooks));
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
         if (enableHooks & CB__LSM_##NAME) { \
-            pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &p_security_hook_heads->NAME, #NAME); \
-            cblsm_hooks[cblsm_hooks_count].head = &p_security_hook_heads->NAME; \
+            pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &security_hook_heads.NAME, #NAME); \
+            cblsm_hooks[cblsm_hooks_count].head = &security_hook_heads.NAME; \
             cblsm_hooks[cblsm_hooks_count].hook.NAME = ec_lsm_##NAME; \
             cblsm_hooks[cblsm_hooks_count].lsm = "eclsm"; \
             cblsm_hooks_count++; \

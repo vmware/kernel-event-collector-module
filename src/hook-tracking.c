@@ -25,6 +25,8 @@ void ec_hook_tracking_shutdown(ProcessContext *context)
     ec_spinlock_destroy(&s_hook_tracking.lock, context);
 }
 
+#define CURRENT_TIME_SEC ((struct timespec) { get_seconds(), 0 })
+
 void ec_hook_tracking_add_entry(ProcessContext *context)
 {
     CANCEL_VOID(context);
@@ -67,11 +69,11 @@ int ec_hook_tracking_print_active(ProcessContext *context)
     {
         if (atomic64_read(&list_entry->count) > 0)
         {
-            pr_info("Hook %s has %ld active users, last pid %ld, last entry %lds ago\n",
+            pr_info("Hook %s has %u active users, last pid %d, last entry %lus ago\n",
                     list_entry->hook_name,
-                    atomic64_read(&list_entry->count),
-                    atomic64_read(&list_entry->last_pid),
-                    CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time)
+                    (unsigned int)atomic64_read(&list_entry->count),
+                    (pid_t)atomic64_read(&list_entry->last_pid),
+                    (unsigned long)(CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time))
             );
         }
     }
@@ -96,11 +98,11 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
     {
         total_active += atomic64_read(&list_entry->count);
 
-        seq_printf(seq_file, "%25s | %6ld | %6ld | %6ld |\n",
+        seq_printf(seq_file, "%25s | %6u | %6u | %6lu |\n",
                       list_entry->hook_name,
-                      atomic64_read(&list_entry->count),
-                      atomic64_read(&list_entry->last_pid),
-                      CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time)
+                      (unsigned int)atomic64_read(&list_entry->count),
+                      (pid_t)atomic64_read(&list_entry->last_pid),
+                      (unsigned long)(CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time))
                       );
     }
 
