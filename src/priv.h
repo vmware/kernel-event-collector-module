@@ -415,6 +415,7 @@ file_ctx, *pfile_ctx;
 //  These symbols will be discovered at runtime and can be used in code with the CB_RESOLVED( S_NAME )
 //  macro.
 
+
 // This macro can be used in code to access a symbol we looked up at runtime.  It is important to verify
 //  symbol is not NULL before use.  (It will be NULL if the symbol was not found.)
 #define CB_RESOLVED(S_NAME)             g_resolvedSymbols.S_NAME
@@ -434,7 +435,8 @@ CB_RESOLV_FUNCTION(pte_t *, lookup_address, unsigned long address _C unsigned in
 CB_RESOLV_VARIABLE(rwlock_t, tasklist_lock) \
 CB_RESOLV_VARIABLE(void*, sys_call_table) \
 CB_RESOLV_VARIABLE(void*, ia32_sys_call_table) \
-CB_RESOLV_VARIABLE(struct security_operations*, security_ops) \
+CB_RESOLV_VARIABLE_LT4(struct security_operations*, security_ops) \
+CB_RESOLV_VARIABLE_GE4(struct security_hook_heads, security_hook_heads) \
 CB_RESOLV_VARIABLE(const struct sched_class, idle_sched_class) \
 CB_RESOLV_VARIABLE(const struct sched_class, fair_sched_class) \
 CB_RESOLV_VARIABLE(const struct sched_class, rt_sched_class) \
@@ -445,22 +447,55 @@ CB_RESOLV_FUNCTION(void, putname, struct filename *) \
 
 // Here we declare the typedefs for the symbol pointer we will eventually look up.  "p_" will be prepended to the
 //  symbol name.
-#undef CB_RESOLV_VARIABLE
-#undef CB_RESOLV_FUNCTION
-#undef CB_RESOLV_FUNCTION_310
-#define CB_RESOLV_VARIABLE(V_TYPE, V_NAME)            typedef V_TYPE * p_ ## V_NAME;
+#undef  CB_RESOLV_FUNCTION
 #define CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL) typedef F_TYPE(*p_ ## F_NAME)(ARGS_DECL);
+
+#undef  CB_RESOLV_FUNCTION_310
 #define CB_RESOLV_FUNCTION_310(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL);
+
+#undef  CB_RESOLV_VARIABLE
+#define CB_RESOLV_VARIABLE(V_TYPE, V_NAME)            typedef V_TYPE * p_ ## V_NAME;
+
+#undef  CB_RESOLV_VARIABLE_LT4
+#if LINUX_VERSION_CODE <  KERNEL_VERSION(4, 0, 0)  //{
+#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+#else  //}{
+#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME)
+#endif  //}
+
+#undef  CB_RESOLV_VARIABLE_GE4
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
+#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+#else  //}{
+#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME)
+#endif  //}
 CB_RESOLV_SYMBOLS
 
 // Here we declare CB_RESOLVED_SYMS struct that holds all the symbols we will eventually look up.
 typedef struct _CB_RESOLVED_SYMS {
-    #undef CB_RESOLV_FUNCTION
-    #undef CB_RESOLV_FUNCTION_310
-    #undef CB_RESOLV_VARIABLE
-    #define CB_RESOLV_VARIABLE(V_TYPE, V_NAME)            p_ ## V_NAME V_NAME;
+    #undef  CB_RESOLV_FUNCTION
     #define CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_VARIABLE(F_TYPE, F_NAME);
+
+    #undef  CB_RESOLV_FUNCTION_310
     #define CB_RESOLV_FUNCTION_310(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL);
+
+    #undef  CB_RESOLV_VARIABLE
+    #define CB_RESOLV_VARIABLE(V_TYPE, V_NAME)            p_ ## V_NAME V_NAME;
+
+    #undef  CB_RESOLV_VARIABLE_LT4
+    #if LINUX_VERSION_CODE <  KERNEL_VERSION(4, 0, 0)  //{
+    #define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+    #else  //}{
+    #define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME)
+    #endif  //}
+
+    #undef  CB_RESOLV_VARIABLE_GE4
+    #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
+    #define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+    #else  //}{
+    #define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME)
+    #endif  //}
+
     CB_RESOLV_SYMBOLS
 } CB_RESOLVED_SYMS;
 // checkpatch-no-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON
