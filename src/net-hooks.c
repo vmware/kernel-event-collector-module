@@ -100,11 +100,10 @@ static int imax(int a, int b)
     return (a >= b) ? a : b;
 }
 
-#define N_BUGBUF 1200
 struct Bugbuf {
-    unsigned short used;
-    short avail;
-    char buffer[N_BUGBUF];
+    short avail;  // decremented by return value of snprintf()
+    unsigned short used;  // next position for output
+    char *buffer;
 };
 
 static int my_timed_recv(
@@ -118,7 +117,7 @@ static int my_timed_recv(
     int return_code = 0;
     struct Bugbuf *const bugbuf = *(struct Bugbuf **)p_recv_arg_block;
 
-    if (bugbuf) {
+    if (bugbuf && bugbuf->buffer) {
         int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "%s\n", __func__);
 
         bugbuf->used  += len;
@@ -175,7 +174,7 @@ static int my_timed_recv(
             }
         } while (our_timeout && return_code == -EAGAIN);
     }
-    if (bugbuf) {
+    if (bugbuf && bugbuf->buffer) {
         int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptF %x\n", return_code);
 
         bugbuf->used  += len;
@@ -521,7 +520,7 @@ static int64_t my_peek(
     int32_t xcode;
     struct Bugbuf *const bugbuf = *(struct Bugbuf **)p_recv_arg_block;
 
-    if (bugbuf) {
+    if (bugbuf && bugbuf->buffer) {
         int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "%s\n", __func__);
 
         bugbuf->used  += len;
@@ -537,7 +536,7 @@ static int64_t my_peek(
     }
 
     TRY(xcode >= 0);
-    if (bugbuf) {
+    if (bugbuf && bugbuf->buffer) {
         int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptB %x\n", xcode);
 
         bugbuf->used  += len;
@@ -565,7 +564,7 @@ static int64_t my_peek(
             our_timeout = false;
         }
     }
-    if (bugbuf) {
+    if (bugbuf && bugbuf->buffer) {
         int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptC %x\n", xcode);
 
         bugbuf->used  += len;
@@ -574,7 +573,7 @@ static int64_t my_peek(
     return  (0ul<<32) | (uint32_t)xcode;
 
 CATCH_DEFAULT:
-    if (bugbuf) {
+    if (bugbuf && bugbuf->buffer) {
         int len = snprintf(&bugbuf->buffer[bugbuf->used], imax(0, bugbuf->avail), "ptD %x\n", xcode);
 
         bugbuf->used  += len;
@@ -1651,6 +1650,8 @@ static long call_ec_orig_sys_recvmmsg(void *ab_arg)
     return ec_orig_sys_recvmmsg(ab->fd, ab->mmsghdr, ab->vlen, ab->flags, ab->p_timeout);
 }
 
+extern uint32_t ec_prsock_buflen;
+
 asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
                                 unsigned int vlen, unsigned int flags,
                                 struct timespec __user *timeout)
@@ -1664,11 +1665,17 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
     long            sk_rcvtimeo      = MAX_SCHEDULE_TIMEOUT;
     long            sk_rcvtimeo_arg  = MAX_SCHEDULE_TIMEOUT;
     long            sk_rcvtimeo_dlta = 0;
-    struct Bugbuf bugbuf;
+    struct Bugbuf bugbuf = {
+        .avail = ec_prsock_buflen,
+        .used  = 0,
+        .buffer = __builtin_alloca(ec_prsock_buflen)
+    };
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    bugbuf.used = 0; bugbuf.avail = N_BUGBUF;
+    if (!ec_prsock_buflen)
+        bugbuf.buffer = NULL;
+
     MODULE_GET();
 
     sock = sockfd_lookup(fd, &xcode);
@@ -1802,12 +1809,6 @@ CATCH_DISABLED:
     {
         struct recvmmsg_argblock ab = {&bugbuf, fd, msg, vlen, flags, timeout};
 
-        if (1) {
-            int len = snprintf(&bugbuf.buffer[bugbuf.used], imax(0, bugbuf.avail), "ptG flags=%x timeout=%p\n", flags, timeout);
-
-            bugbuf.used  += len;
-            bugbuf.avail -= len;
-        }
         xcode = my_timed_recv(call_ec_orig_sys_recvmmsg, (void *)&ab, sock, sk_rcvtimeo_dlta, weSetTimeout);
     }
 
@@ -1819,8 +1820,10 @@ CATCH_DEFAULT:
         sockfd_put(sock);
     }
     MODULE_PUT();
-    pr_err("(used=%u avail=%d) xcode=0x%x: %s\n",
-        bugbuf.used, bugbuf.avail, xcode, &bugbuf.buffer[0]);
+    if (bugbuf.buffer) {
+        pr_err("(used=%u avail=%d) xcode=0x%x: %s\n",
+            bugbuf.used, bugbuf.avail, xcode, bugbuf.buffer);
+    }
     return xcode;
 }
 
