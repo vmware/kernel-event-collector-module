@@ -7,6 +7,10 @@
 #include "process-context.h"
 #include "priv.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
+#define CURRENT_TIME_SEC ((struct timespec) { get_seconds(), 0 })
+#endif  //}
+
 static struct ec_hook_tracking_node
 {
     uint64_t          lock;
@@ -25,8 +29,6 @@ void ec_hook_tracking_shutdown(ProcessContext *context)
     ec_spinlock_destroy(&s_hook_tracking.lock, context);
 }
 
-#define CURRENT_TIME_SEC ((struct timespec) { get_seconds(), 0 })
-
 void ec_hook_tracking_add_entry(ProcessContext *context)
 {
     CANCEL_VOID(context);
@@ -35,6 +37,7 @@ void ec_hook_tracking_add_entry(ProcessContext *context)
     if (list_empty(&context->hook_tracking->list))
     {
         ec_write_lock(&s_hook_tracking.lock, context);
+        TRACE(DL_WARNING, "Adding %s hook to list", context->hook_tracking->hook_name);
         // Now that we're inside the lock check this hook still has not been added
         if (list_empty(&context->hook_tracking->list))
         {
@@ -88,7 +91,7 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     HookTracking *list_entry;
-    uint64_t total_active = 0;
+    unsigned long total_active = 0;
 
     seq_printf(seq_file, "%25s | %6s | %6s | %6s\n",
                 "HOOK", "USERS", "LAST PID", "TIME");
@@ -105,8 +108,7 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
                       (unsigned long)(CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time))
                       );
     }
-
-    seq_printf(seq_file, "Total Active %llu\n", total_active);
+    seq_printf(seq_file, "Total Active %lu\n", total_active);
     ec_read_unlock(&s_hook_tracking.lock, &context);
 
     return 0;

@@ -189,10 +189,16 @@ kbpbi_exit:
     return false;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0) && RHEL_MINOR >= 1  //{
+#define my_siginfo kernel_siginfo
+#else  //}{
+#define my_siginfo siginfo
+#endif //}
+
 void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
     pid_t pid;
-    struct siginfo info;
+    struct my_siginfo info;
     int ret;
     struct list_head *pos, *safe_del;
     ProcessTracking *procp = NULL;
@@ -207,7 +213,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
 
     TRACE(DL_ERROR, "Kill process with [%llu:%llu]", device, ino);
 
-    memset(&info, 0, sizeof(struct siginfo));
+    memset(&info, 0, sizeof(info));
     info.si_signo = SIGKILL;
     info.si_code = 0;
     info.si_errno = 1234;

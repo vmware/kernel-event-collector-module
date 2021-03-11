@@ -203,7 +203,7 @@ void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
 
     __ec_hashtbl_for_each_generic(hashTblp, __ec_hashtbl_delete_callback, NULL, true, context);
 
-    HASHTBL_PRINT("hash shutdown inst=" PRFs64 " alloc=" PRFs64 "\n",
+    HASHTBL_PRINT("hash shutdown inst=%" PRFs64 " alloc=%" PRFs64 "\n",
         (long long)atomic64_read(&(hashTblp->tableInstance)),
         (long long)atomic64_read(&(hashTblp->hash_cache.allocated_count)));
 

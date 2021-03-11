@@ -55,7 +55,7 @@ void ec_mem_cache_shutdown(ProcessContext *context)
 
     if (generic_buffer_count != 0)
     {
-        TRACE(DL_ERROR, "Exiting with " PRFs64 " allocated objects (total size: " PRFs64 ")",
+        TRACE(DL_ERROR, "Exiting with %" PRFs64 " allocated objects (total size: %" PRFs64 ")",
             (long long)generic_buffer_count, (long long)atomic64_read(&s_mem_cache.generic_buffer_size));
     }
 
@@ -84,6 +84,7 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
             SLAB_HWCACHE_ALIGN,
             NULL);
         atomic64_set(&cache->allocated_count, 0);
+        cache->object_size = size;
 
         if (cache->kmem_cache)
         {
@@ -115,7 +116,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
 
         if (allocated_count > 0)
         {
-            TRACE(DL_ERROR, "Destroying Memory Cache (%s) with " PRFu64 " allocated items.",
+            TRACE(DL_ERROR, "Destroying Memory Cache (%s) with %" PRFu64 " allocated items.",
                    cache->name, (unsigned long long)allocated_count);
 
             if (printval_callback)
@@ -269,7 +270,7 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
     __ec_simplify_size(&size, &suffix);
 
     seq_printf(m, "Allocated Generic Memory       : %ld %s\n", size, suffix);
-    seq_printf(m, "Allocated Generic Memory Count : " PRFs64 "\n", (long long)atomic64_read(&s_mem_cache.generic_buffer_count));
+    seq_printf(m, "Allocated Generic Memory Count : %" PRFs64 "\n", (long long)atomic64_read(&s_mem_cache.generic_buffer_count));
 
     return 0;
 }
