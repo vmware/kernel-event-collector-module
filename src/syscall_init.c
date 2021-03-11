@@ -250,18 +250,18 @@ CATCH_DEFAULT:
 }
 
 
-#ifdef HOOK_SELECTOR
-void setSyscall(const char *buf, const char *name, uint64_t syscall, int nr, void *ec_call, void *krn_call, void **table)
+#ifdef HOOK_SELECTOR  //{
+static void setSyscall(const char *buf, const char *name, uint64_t syscall, int nr, void *cb_call, void *krn_call, void **table)
 {
     int cpu;
     void *call = NULL;
 
-    if (0 == strncmp("1", buf, sizeof(char)))
+    if ('1' == buf[0])
     {
         pr_info("Adding %s\n", name);
         g_enableHooks |= syscall;
         call = ec_call;
-    } else if (0 == strncmp("0", buf, sizeof(char)))
+    } else if ('0' == buf[0])
     {
         pr_info("Removing %s\n", name);
         g_enableHooks &= ~syscall;
@@ -339,4 +339,4 @@ ssize_t ec_set_sys_delete_module(struct file *file, const char *buf, size_t size
     setSyscall(buf, "delete_module", CB__NR_delete_module,   __NR_delete_module, ec_sys_delete_module, ec_orig_sys_delete_module, CB_RESOLVED(sys_call_table));
     return size;
 }
-#endif
+#endif  //}

@@ -743,6 +743,11 @@ CATCH_DEFAULT:
     return ret;
 }
 
+asmlinkage long ec_sys_renameat(int olddirfd, char __user const *oldname, int newdirfd, char __user const *newname)
+{
+    return -EIO;  // 2021-01-14 FIXME
+}
+
 asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *newname)
 {
     long         ret;
@@ -795,7 +800,7 @@ bool ec_file_exists(const char __user *filename)
 
     TRY(filename);
 
-    exists = user_path(filename, &path) == 0;
+    exists = user_path_at(AT_FDCWD, filename, LOOKUP_FOLLOW, &path) == 0;
 
 CATCH_DEFAULT:
     if (exists)

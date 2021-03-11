@@ -153,8 +153,17 @@ int __init ec_init(void)
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
     // Here we look up symbols at runtime to fill in the CB_RESOLVED_SYMS struct.
 #undef CB_RESOLV_VARIABLE
+#undef CB_RESOLV_VARIABLE_LT4
+#undef CB_RESOLV_VARIABLE_GE4
 #undef CB_RESOLV_FUNCTION
 #undef CB_RESOLV_FUNCTION_310
+#if LINUX_VERSION_CODE <  KERNEL_VERSION(4, 0, 0)  //{
+#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME)
+#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+#else  //}{
+#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME)
+#endif  //}
 #define CB_RESOLV_VARIABLE(V_TYPE, V_NAME) { #V_NAME, strlen(#V_NAME), (unsigned long *)&g_resolvedSymbols.V_NAME },
 #define CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_VARIABLE(F_TYPE, F_NAME)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
