@@ -37,7 +37,6 @@ void ec_hook_tracking_add_entry(ProcessContext *context)
     if (list_empty(&context->hook_tracking->list))
     {
         ec_write_lock(&s_hook_tracking.lock, context);
-        TRACE(DL_WARNING, "Adding %s hook to list", context->hook_tracking->hook_name);
         // Now that we're inside the lock check this hook still has not been added
         if (list_empty(&context->hook_tracking->list))
         {
