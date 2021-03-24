@@ -5,17 +5,22 @@
 cmake_minimum_required(VERSION 2.8.7)
 project (KernelEventCollectorModule)
 
-# Include the CbKernelUtil helpers
-set(ROOT_DIR "${CMAKE_SOURCE_DIR}/..")
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROOT_DIR}/cmake")
-find_package(CbKernelUtil REQUIRED)
-
 # LOCAL_BUILD defines if the build will be performed with configuration options
 # provided directly in this CMake file, or if the CB build utility will \
 # substitute values in.
 if(NOT DEFINED LOCAL_BUILD)
     set(LOCAL_BUILD no)
 endif()
+
+
+set(ROOT_DIR "${CMAKE_SOURCE_DIR}/..")
+
+if (${LOCAL_BUILD})
+    # Include the CbKernelUtil helpers
+    set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROOT_DIR}/cmake")
+endif()
+
+find_package(CbKernelUtil REQUIRED)
 
 # Common variable definitions
 set(INCLUDE_DIR ${ROOT_DIR}/include)
@@ -30,10 +35,9 @@ set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -Wformat")
 set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -Werror")
 set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -include \"version.h\"")
 set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${CMAKE_CURRENT_SOURCE_DIR}")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${ROOT_DIR}/include")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${CONAN_INCLUDE_DIRS_EVENTCOLLECTOR}")
+set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${CMAKE_CURRENT_SOURCE_DIR}/tests")
+set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${INCLUDE_DIR}")
 set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} ${VERACODE_FLAGS}")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -DPRODVER=${NAME_SFX}")
 
 # Variables determined from build type
 if (${LOCAL_BUILD})
@@ -54,7 +58,6 @@ if (${LOCAL_BUILD})
     set(MODULE_VERSION_SUFFIX 2_0_0)
     set(MODULE_NAME event_collector)
     set(PROC_DIR event_collector)
-    set(VERBOSE 1)
 
     set(KERNEL_LIST "${KERNEL_NAME}")
 else()
@@ -140,7 +143,6 @@ foreach(kernel_name ${KERNEL_LIST})
             KERNEL_BUILD_DIR    ${KERNEL_BUILD_DIR}
             FLAGS               ${CBSENSOR_FLAGS}
             AFLAGS              ${CBSENSOR_AFLAGS}
-            VERBOSE             ${VERBOSE}
             SOURCE_FILES        ${SOURCE_FILES}
             USE_NATIVE_COMPILER)
 endforeach()

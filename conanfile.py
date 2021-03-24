@@ -61,10 +61,10 @@ class KernelEventCollectorModule(base.CbConanFile):
         return module_version_suffix
 
     def build(self):
-        self.checKernelSource()
         self.buildRedhatKernels("redhat6")
         self.buildRedhatKernels("redhat7")
         self.buildRedhatKernels("redhat8")
+        self.checKernelSource()
 
     def checKernelSource(self):
         self.log("## Check Kernel Source")
