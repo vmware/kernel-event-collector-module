@@ -21,7 +21,7 @@ options:
     - module_name=event_collector
     - module_name=cbsensor
 
-conan-replacements:
+file-replacements:
     KERNEL_API_VERSION: CB_EVENT_API_2_1
     CONAN_UTIL_VERSION: ConanUtil/[~=1.9.x]@${UTIL_CHANNEL}
     CPPUTEST_VERSION: CppUTest/3.8.967+967@${VENDOR_CHANNEL}

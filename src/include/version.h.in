@@ -6,6 +6,7 @@
 
 #define MEM_CACHE_PREFIX      "@MEM_CACHE_PREFIX@"
 #define CB_APP_MODULE_NAME    "@MODULE_NAME@"
+#define MODULE_NAME           @MODULE_NAME@
 #define CB_APP_MODULE_DEVICE  "/dev/@MODULE_NAME@"
 #define CB_APP_PROC_DIR       "@PROC_DIR@"
 #define CB_APP_DEBUG_PREFIX   "@DEBUG_PREFIX@"

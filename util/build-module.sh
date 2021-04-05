@@ -9,6 +9,7 @@ function do_validate_env_step
     echo "Beginning do_validate_env_step..."
     BUILD_DIR=$(echo ${BUILD_DIR} | envsubst)
     BUILD_DIR=${BUILD_DIR//${DUB_SLSH}/${SLSH}}
+    export ORIGINAL_SOURCE=${TOP_DIR}/src
 
     export PROJECT_VERSION=$(echo ${PROJECT_VERSION} | envsubst)
     export JOBS=$(echo "-j${JOBS}" | envsubst)
@@ -68,32 +69,20 @@ function do_prepare_step
     echo "Finished do_prepare_step."
 }
 
-#funcion do_gather_dependencies
-#{
-#    echo "Starting do_gather_dependencies..."
-#
-#    echo "Finished do_gather_dependencies."
-#}
-
-function build_kernel_event_collector_module
-{
-    echo "Building kernel event collector module..."
-
-    echo "Done building kernel event collector module."
-}
-
-function tdd_build_kernel_event_collector_module
-{
-    echo "Building kernel event collector module under tdd..."
-
-    echo "Done building kernel event collector module under tdd."
-}
-
 source ${BUILD_UTIL_DIR}/sh-utils/build-tdd.sh
 
 function build_kernel
 {
-    ${CMD_PREFIX} conan build --build-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}
+    pushd ${PLATFORM_BUILD} &>/dev/null
+    if [ ${FAST_BUILD} -ne 1 ]; then
+        cmake -DCMAKE_TOOLCHAIN_FILE=${CONAN_CMAKE_TOOLCHAIN_FILE} \
+              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
+              -S ${ORIGINAL_SOURCE} \
+              -B ${PLATFORM_BUILD}
+    fi
+
+
+    cmake --build ${PLATFORM_BUILD} -- --no-print-directory ${VERBOSE_OPT}
     RET=$?
     if [[ $RET = 0 && "${SKIP_PACKAGING}" != "True" ]]; then
         if [ "$QUIET_PACKAGING" == "yes" ]; then
@@ -104,18 +93,13 @@ function build_kernel
         fi
         # Export the package into the local cache
         echo "# Packaging... $QMSG"
-        flock ${BUILD_DIR} ${CMD_PREFIX} conan export-pkg -f \
+        flock ${BUILD_DIR} conan export-pkg -f \
               --build-folder ${PLATFORM_BUILD} \
+              --source-folder ${ORIGINAL_SOURCE} \
               ${PLATFORM_BUILD} \
               ${PACKAGE_CHANNEL} >&3
-
-        if [ "$ENABLE_COVERAGE" = "yes" ]
-        then
-            echo "Coverage is not currently supported for this project"
-        else
-            echo "Coverage Not Enabled"
-        fi
     fi
+    popd &>/dev/null
 }
 
 function tdd_build_kernel
@@ -126,10 +110,7 @@ function tdd_build_kernel
 
 function sync_source_files
 {
-    sync_directory ${PLATFORM_BUILD}/include ${TOP_DIR}/include
-    sync_directory ${PLATFORM_BUILD}/src ${TOP_DIR}/src
-    rsync -ru --inplace ${opts} ${TOP_DIR}/conanfile.py ${PLATFORM_BUILD}
-    rsync -ru --inplace ${opts} ${TOP_DIR}/CMakeLists.txt ${PLATFORM_BUILD}
+    sync_directory ${PLATFORM_BUILD} ${ORIGINAL_SOURCE}
 
     # Replace the version string
     find ${PLATFORM_BUILD} -type f -iname conanfile.py -print0 | while IFS= read -r -d $'\0' file; do
@@ -141,13 +122,7 @@ function do_build_step
 {
     echo "Doing build step for kernel module..."
 
-    echo "--Creating directory: ${PLATFORM_BUILD}"
-    mkdir -p ${PLATFORM_BUILD}/include ${PLATFORM_BUILD}/src
-
     sync_source_files
-
-    # Call the source method
-    conan source --source-folder ${PLATFORM_BUILD} ${PLATFORM_BUILD}
 
     echo "# Building in ${BUILD_DIR}..."
 
@@ -165,32 +140,22 @@ function do_build_step
         CONAN_UPDATE=""
     fi
 
-    if [ "${EXPORT_RECIPE_ONLY}" = "yes" ]; then
-        flock ${BUILD_DIR} ${CMD_PREFIX} conan export ${PLATFORM_BUILD} ${PACKAGE_NAME}
-        # I need to trick some of the TDD logic to think we are working correctly
-        touch ${PLATFORM_BUILD}/conanbuildinfo.txt
-    else
-        if [ $FAST_BUILD -ne 1 ]; then
-            flock ${BUILD_DIR} ${CMD_PREFIX} conan install \
-                -pr ${CONAN_PROFILE} \
-                ${CONAN_UPDATE} \
-                ${PACKAGE_OPTIONS} \
-                --install-folder ${PLATFORM_BUILD} \
-                ${PLATFORM_BUILD}
-        fi
+    if [ $FAST_BUILD -ne 1 ]; then
+        echo "--- Installing Packages"
+        flock ${BUILD_DIR} conan install \
+            --profile ${CONAN_PROFILE} \
+            ${CONAN_UPDATE} \
+            ${PACKAGE_OPTIONS} \
+            --install-folder ${PLATFORM_BUILD} \
+            ${PLATFORM_BUILD}
+    fi
 
-        # Build the package
-        if [ "${TDD_MODE}" = "yes" ]; then
-            # We need to watch some individual directoris and files.
-            #   Do not allow the wait logic to sync.  We will do that in tdd_build_kernel
-            (watch_for_changes ${TOP_DIR}/conanfile.py - tdd_build_kernel   - ${BUILD_DIR} - "skip_initial") &
-            (watch_for_changes ${TOP_DIR}/CMakeLists.txt - tdd_build_kernel   - ${BUILD_DIR} - "skip_initial") &
-            (watch_for_changes ${TOP_DIR}/include - tdd_build_kernel   - ${BUILD_DIR} - "skip_initial") &
-            (watch_for_changes ${TOP_DIR}/src - tdd_build_kernel   - ${BUILD_DIR} -) &
-            wait
-        else
-            build_kernel
-        fi
+    # Build the package
+    if [ "${TDD_MODE}" = "yes" ]; then\
+        (watch_for_changes ${ORIGINAL_SOURCE} - tdd_build_kernel   - ${BUILD_DIR} -) &
+        wait
+    else
+        build_kernel
     fi
 
     echo "Done doing build step for kernel module."
