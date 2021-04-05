@@ -8,6 +8,7 @@
 #include "mem-cache.h"
 #include "cb-banning.h"
 #include "process-tracking.h"
+#include "version.h"
 
 #pragma pack(push, 1)
 typedef struct _logger_work {

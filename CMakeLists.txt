@@ -19,9 +19,9 @@ FIND_PACKAGE(CbKernelUtil REQUIRED)
 
 file (GLOB SRC_FILES
         RELATIVE ${CMAKE_SOURCE_DIR}
-        include/*.h
-        src/*.h
-        src/*.c
+        src/include/*.h
+        src/module/*.h
+        src/module/*.c
         )
 
 cb_check_kernel_files(
