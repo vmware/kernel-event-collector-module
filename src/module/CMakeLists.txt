@@ -52,8 +52,6 @@ if (${LOCAL_BUILD})
 else()
     message("Building using variables provided by CB build utility")
     find_package(CbUtil REQUIRED)
-    cb_configure_flags(ENABLE_FORTIFY "ON"
-            ENABLE_EXTRA_WARNINGS "ON")
     cb_conan_setup(TARGETS
             CONAN_INCLUDE ${PLATFORM_BUILD_DIR}/conanbuildinfo.cmake)
 
