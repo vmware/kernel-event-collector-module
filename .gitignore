@@ -10,11 +10,11 @@ event_collector/include/event_collector
 hash_processor/include/hash_processor
 
 # Artifacts produced by a local build
-version.h
-cb-module-state-export.c
-Kbuild
-modules.order
-[0-9]*
+#version.h
+#cb-module-state-export.c
+#Kbuild
+#modules.order
+#[0-9]*
 
 # Editor files
 .DS_Store
