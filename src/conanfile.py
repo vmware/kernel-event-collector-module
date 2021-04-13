@@ -63,7 +63,6 @@ class KernelEventCollectorModule(base.CbConanFile):
         self.copy("version.h", dst=include_dir, src="module", keep_path=True)
         self.copy("*.ko.*", excludes="*.debug", dst="modules", src="kernel-builds", keep_path=True)
         self.copy("*.symvers.*", dst="symvers", src="kernel-builds", keep_path=True)
-        self.copy("*.debug", dst="debug", src="kernel-builds", keep_path=True)
 
     def package_info(self):
         self.cpp_info.includedirs = ["include"]
