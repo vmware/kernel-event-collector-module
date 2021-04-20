@@ -104,6 +104,10 @@ void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_EVENT_TYPE ev
 
     event->procInfo.path_found      = procp->shared_data->path_found;
     event->procInfo.path            = ec_mem_cache_get_generic(procp->shared_data->path, context);
+    if (event->procInfo.path)
+    {
+        event->procInfo.path_size    = strlen(event->procInfo.path) + 1;
+    }
 
     // We need to ensure that user-space does not get any exit events for a
     //  process until all events for that process are already collected.

@@ -78,6 +78,10 @@ void ec_event_send_start(ProcessTracking *procp,
     if (procp->shared_data->cmdline)
     {
         event->processStart.path = ec_mem_cache_get_generic(procp->shared_data->cmdline, context);
+        if (event->processStart.path)
+        {
+            event->processStart.path_size = (uint16_t)strlen(event->processStart.path) + 1;
+        }
     }
 
     // Queue it to be sent to usermode
@@ -154,6 +158,7 @@ void ec_event_send_block(ProcessTracking *procp,
                      char             *cmdline,
                      ProcessContext *context)
 {
+    size_t path_size = 0;
     PCB_EVENT event = ec_factory_alloc_event(
         procp,
         CB_EVENT_TYPE_PROCESS_BLOCKED,
@@ -172,7 +177,11 @@ void ec_event_send_block(ProcessTracking *procp,
 
     if (cmdline)
     {
-        event->blockResponse.path = ec_mem_cache_strdup(cmdline, context);
+        event->blockResponse.path = ec_mem_cache_strdup_x(cmdline, &path_size, context);
+        if (event->blockResponse.path && path_size)
+        {
+            event->blockResponse.path_size = (uint16_t)path_size;
+        }
     }
 
 
@@ -190,6 +199,7 @@ void ec_event_send_file(
     const char *path,
     ProcessContext *context)
 {
+    size_t path_size = 0;
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
     char *status_msgp = NULL;
@@ -222,7 +232,11 @@ void ec_event_send_file(
 
     if (path)
     {
-        event->fileGeneric.path = ec_mem_cache_strdup(path, context);
+        event->fileGeneric.path = ec_mem_cache_strdup_x(path, &path_size, context);
+        if (event->fileGeneric.path && path_size)
+        {
+            event->fileGeneric.path_size = (uint16_t)path_size;
+        }
     }
 
     // Queue it to be sent to usermode
@@ -238,6 +252,7 @@ void ec_event_send_modload(
     char *path,
     ProcessContext *context)
 {
+    size_t path_size = 0;
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
     char *status_msgp = NULL;
@@ -280,7 +295,11 @@ void ec_event_send_modload(
 
     if (path)
     {
-        event->moduleLoad.path = ec_mem_cache_strdup(path, context);
+        event->moduleLoad.path = ec_mem_cache_strdup_x(path, &path_size, context);
+        if (event->moduleLoad.path)
+        {
+            event->moduleLoad.path_size = (uint16_t)path_size;
+        }
     }
 
     // Queue it to be sent to usermode
@@ -318,7 +337,13 @@ void ec_event_send_net_proxy(
 
     if (actual_server)
     {
-        event->netConnect.actual_server = ec_mem_cache_strdup(actual_server, context);
+        size_t size = 0;
+
+        event->netConnect.actual_server = ec_mem_cache_strdup_x(actual_server, &size, context);
+        if (event->netConnect.actual_server && size)
+        {
+            event->netConnect.server_size = (uint16_t)size;
+        }
     }
 
     ec_print_address(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
