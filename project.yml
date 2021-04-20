@@ -3,19 +3,27 @@
 # Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 name:            KernelEventCollectorModule
-build-rules:     ${UTIL_DIR}/build-module.sh
+builder:         centos6
 source-version:  ${KERNEL_MAJOR_VERSION}.${KERNEL_MINOR_VERSION}.${KERNEL_PATCH_VERSION}
 allow-sub-docker-builds:
 builders:
-    - redhat6-gcc73-relwithdebinfo
+    - gcc73-relwithdebinfo
+
+packagers:
+    - conan
 
 service-env:
-    PROJECT_VERSION:     $${SOURCE_VERSION}
-    UTIL_DIR:            ${UTIL_DIR}
+    PROJECT_VERSION:     ${SOURCE_VERSION}
+    UTIL_DIR:            /src/util
     JOBS:                1
-    BUILD_TYPE:          release
-    BUILD_VERBOSE:       no
-    BULLSEYE_KEY:
+
+    KERNEL_MAJOR_VERSION: 2
+    KERNEL_MINOR_VERSION: 3
+    KERNEL_PATCH_VERSION: ${BUILD_VERSION}
+
+    UTIL_CHANNEL: ${DEFAULT_CHANNEL}
+    VENDOR_CHANNEL: ${DEFAULT_CHANNEL}
+    COMMON_CHANNEL: ${DEFAULT_CHANNEL}
 
 options:
     - module_name=event_collector
@@ -56,13 +64,3 @@ file-replacements:
     KERNEL_OVERRIDE_LIST: ""
     BUILD_VERSION:
     PROJECT_VERSION:
-
-env:
-    KERNEL_MAJOR_VERSION: 2
-    KERNEL_MINOR_VERSION: 3
-    KERNEL_PATCH_VERSION: ${BUILD_VERSION}
-
-    UTIL_CHANNEL: ${DEFAULT_CHANNEL}
-    VENDOR_CHANNEL: ${DEFAULT_CHANNEL}
-    COMMON_CHANNEL: ${DEFAULT_CHANNEL}
-    UTIL_DIR: /src/util
