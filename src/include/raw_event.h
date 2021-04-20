@@ -138,6 +138,8 @@ typedef struct _CB_EVENT_PROCESS_INFO {
     time_t event_time;         // Windows time this event occured
 
     char *path;
+    uint16_t path_size;
+    uint16_t path_offset;
     bool path_found;
 } CB_EVENT_PROCESS_INFO, *PCB_EVENT_PROCESS_INFO;
 
@@ -148,6 +150,8 @@ typedef struct _CB_EVENT_PROC_ANALYZE {
 
 typedef struct _CB_EVENT_PROCESS_START {
     char *path;
+    uint16_t path_size;
+    uint16_t path_offset;
     uid_t uid;
     int start_action; // 1 = FORK 2 = EXEC 3 = DISCOVER
     bool observed; // Flag to identify if the start was actually observed, or this
@@ -156,6 +160,8 @@ typedef struct _CB_EVENT_PROCESS_START {
 
 typedef struct _CB_EVENT_MODULE_LOAD {
     char *path;
+    uint16_t path_size;
+    uint16_t path_offset;
     int64_t baseaddress;
     uint64_t device;
     uint64_t inode;
@@ -163,6 +169,8 @@ typedef struct _CB_EVENT_MODULE_LOAD {
 
 typedef struct _CB_EVENT_FILE_GENERIC {
     char *path;
+    uint16_t path_size;
+    uint16_t path_offset;
     uint64_t device;
     uint64_t inode;
 } CB_EVENT_FILE_GENERIC, *PCB_EVENT_FILE_GENERIC;
@@ -256,6 +264,8 @@ typedef union _CB_SOCK_ADDR {
 #define PROXY_SERVER_MAX_LEN 256
 typedef struct _CB_EVENT_NETWORK_CONNECT {
     char *actual_server;
+    uint16_t server_size;
+    uint16_t server_offset;
     int32_t protocol;
     CB_SOCK_ADDR localAddr;
     CB_SOCK_ADDR remoteAddr;
@@ -314,6 +324,7 @@ typedef struct _CB_EVENT_DNS_RESPONSE {
     char           qname[DNS_MAX_NAME];
     uint16_t       qtype;
     uint16_t       record_count;
+    uint16_t       record_offset;
     uint16_t       nscount;
     uint16_t       arcount;
 } CB_EVENT_DNS_RESPONSE;
@@ -340,6 +351,8 @@ enum TerminateFailureReason {
 
 typedef struct _CB_EVENT_BLOCK {
     char *path;
+    uint16_t path_size;
+    uint16_t path_offset;
     enum ProcessBlockType blockType;
     enum TerminateFailureReason failureReason;
     uint32_t failureReasonDetails;
@@ -397,15 +410,17 @@ typedef struct CB_EVENT {
     unsigned long canary;
 } *PCB_EVENT;
 
-struct CB_DATA_BUFFER {
-    char    data[PATH_MAX + 1];
-    size_t  size;
+struct CB_EVENT_UM {
+    uint16_t          payload; // Total byte size containing whole event message
+    struct CB_EVENT   event;
 };
 
-struct CB_EVENT_UM {
-    struct CB_EVENT        event;
-    struct CB_DATA_BUFFER  proc_path;
-    struct CB_DATA_BUFFER  event_data;
+// This struct is meant for userspace until
+// multiple events are sent through a single read.
+struct CB_EVENT_UM_BLOB {
+    uint16_t          payload;
+    struct CB_EVENT   event;
+    char              blob[PATH_MAX * 2];
 };
 
 typedef struct _CB_EVENT_DYNAMIC {

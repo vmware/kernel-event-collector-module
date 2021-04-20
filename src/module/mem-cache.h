@@ -59,3 +59,4 @@ void __ec_mem_cache_free_generic(void *value, const char *fn, uint32_t line);
 void *ec_mem_cache_get_generic(void *value, ProcessContext *context);
 size_t ec_mem_cache_get_size_generic(const void *value);
 char *ec_mem_cache_strdup(const char *src, ProcessContext *context);
+char *ec_mem_cache_strdup_x(const char *src, size_t *len, ProcessContext *context);

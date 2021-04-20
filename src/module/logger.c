@@ -64,8 +64,66 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         ec_mem_cache_free_generic(event->procInfo.path);
         event->procInfo.path = NULL;
 
-        ec_mem_cache_free_generic(event->generic_data.data);
-        event->generic_data.data = NULL;
+        switch (event->eventType)
+        {
+        case CB_EVENT_TYPE_PROCESS_START:
+            if (event->processStart.path)
+            {
+                ec_mem_cache_free_generic(event->processStart.path);
+                event->processStart.path = NULL;
+            }
+            break;
+
+        case CB_EVENT_TYPE_MODULE_LOAD:
+            if (event->moduleLoad.path)
+            {
+                ec_mem_cache_free_generic(event->moduleLoad.path);
+                event->moduleLoad.path = NULL;
+            }
+            break;
+
+        case CB_EVENT_TYPE_FILE_CREATE:
+        case CB_EVENT_TYPE_FILE_DELETE:
+        case CB_EVENT_TYPE_FILE_OPEN:
+        case CB_EVENT_TYPE_FILE_WRITE:
+        case CB_EVENT_TYPE_FILE_CLOSE:
+            if (event->fileGeneric.path)
+            {
+                ec_mem_cache_free_generic(event->fileGeneric.path);
+                event->fileGeneric.path = NULL;
+            }
+            break;
+
+        case CB_EVENT_TYPE_DNS_RESPONSE:
+            if (event->dnsResponse.records)
+            {
+                ec_mem_cache_free_generic(event->dnsResponse.records);
+                event->dnsResponse.records = NULL;
+            }
+            break;
+
+        case CB_EVENT_TYPE_NET_CONNECT_PRE:
+        case CB_EVENT_TYPE_NET_CONNECT_POST:
+        case CB_EVENT_TYPE_NET_ACCEPT:
+        case CB_EVENT_TYPE_WEB_PROXY:
+            if (event->netConnect.actual_server)
+            {
+                ec_mem_cache_free_generic(event->netConnect.actual_server);
+                event->netConnect.actual_server = NULL;
+            }
+            break;
+
+        case CB_EVENT_TYPE_PROCESS_BLOCKED:
+            if (event->blockResponse.path)
+            {
+                ec_mem_cache_free_generic(event->blockResponse.path);
+                event->blockResponse.path = NULL;
+            }
+            break;
+
+        default:
+            break;
+        }
 
         ec_mem_cache_free(&s_event_cache, node, context);
     }
@@ -203,6 +261,9 @@ PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     TRY_DO(node, {
         TRACE(DL_WARNING, "Error allocating event with mode %s", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL");
     });
+
+    memset(node, 0, sizeof(*node));
+    INIT_LIST_HEAD(&node->listEntry);
 
     node->process_data = NULL;
     event              = &node->data;

@@ -51,6 +51,8 @@ void __ec_apply_legacy_driver_config(uint32_t eventFilter);
 void __ec_apply_driver_config(CB_DRIVER_CONFIG *config);
 char *__ec_driver_config_option_to_string(CB_CONFIG_OPTION config_option);
 void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
+int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *context);
+int __ec_precompute_payload(struct CB_EVENT *cb_event);
 
 // checkpatch-ignore: CONST_STRUCT
 struct file_operations driver_fops = {
@@ -335,11 +337,20 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     struct list_head *tx_queue   = NULL;
     atomic64_t       *tx_ready   = NULL;
     uint64_t          max_queue_size = 0;
-    CB_EVENT_NODE *eventNode = container_of(msg, CB_EVENT_NODE, data);
+    int               payload;
+    CB_EVENT_NODE    *eventNode;
 
     TRY(ALLOW_SEND_EVENTS(context));
 
     TRY(msg && ec_is_reader_connected());
+
+    eventNode = container_of(msg, CB_EVENT_NODE, data);
+    payload = __ec_precompute_payload(msg);
+
+    // Should not happen but it can
+    TRY(payload >= sizeof(struct CB_EVENT_UM));
+
+    eventNode->payload = (uint16_t)payload;
 
     switch (msg->eventType)
     {
@@ -478,16 +489,7 @@ bool __ec_try_to_gain_capacity(struct list_head *tx_queue)
 
 ssize_t ec_device_read(struct file *f,  char __user *ubuf, size_t count, loff_t *offset)
 {
-    struct CB_EVENT      *msg        = NULL;
-    struct CB_EVENT_UM   *msg_user   = (struct CB_EVENT_UM *)ubuf;
-    int                   rc         = 0;
-    ssize_t               len        = 0;
-    struct list_head     *tx_queue   = NULL;
-    atomic64_t           *tx_ready   = NULL;
-    uint64_t              qlen_pri0  = atomic64_read(&tx_ready_pri0);
-    uint64_t              qlen_pri1  = atomic64_read(&tx_ready_pri1);
-    uint64_t              qlen_pri2  = atomic64_read(&tx_ready_pri2);
-    int                   xcode = -ENOMEM;
+    ssize_t xcode = -ENOMEM;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
@@ -495,77 +497,207 @@ ssize_t ec_device_read(struct file *f,  char __user *ubuf, size_t count, loff_t 
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    // You *must* ask for at least 1 packet
+    // When userspace is ready to handle multiple events throw this into a loop
+    xcode = __ec_copy_cbevent_to_user(ubuf, count, &context);
 
-    TRY_DO_MSG(count >= KF_LEN,
-               { xcode = -ENOMEM; },
-               DL_COMMS, "%s: size mismatch count=%ld KF_LEN=%ld", __func__, count, KF_LEN);
+CATCH_DEFAULT:
+    FINISH_MODULE_DISABLE_CHECK(&context);
+
+    return xcode;
+}
+
+int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessContext *context)
+{
+    uint64_t qlen_pri0;
+    uint64_t qlen_pri1;
+    uint64_t qlen_pri2;
+    struct list_head  *tx_queue = NULL;
+    atomic64_t        *tx_ready = NULL;
+    CB_EVENT_NODE     *eventNode = NULL;
+    int xcode = -ENOMEM;
+
+    if (count < sizeof(struct CB_EVENT_UM))
+    {
+        return -ENOMEM;
+    }
+
+    qlen_pri0 = atomic64_read(&tx_ready_pri0);
+    qlen_pri1 = atomic64_read(&tx_ready_pri1);
+    qlen_pri2 = atomic64_read(&tx_ready_pri2);
 
     TRY_DO_MSG((qlen_pri0 > 0 || qlen_pri1 > 0 || qlen_pri2 > 0),
                 { xcode = -ENOMEM; },
                 DL_COMMS,
                 "%s: empty queue", __func__);
 
-    ec_write_lock(&dev_spinlock, &context);
-
-    __ec_get_tx_queue_to_serve(&tx_queue, &tx_ready);
-
+    ec_write_lock(&dev_spinlock, context);
+    // select the queue - taken from __ec_get_tx_queue_to_serve
+    if (qlen_pri0 != 0)
     {
-        CB_EVENT_NODE *eventNode = NULL;
-
-        eventNode = list_first_entry_or_null(tx_queue, CB_EVENT_NODE, listEntry);
-        if (eventNode)
-        {
-            msg = &eventNode->data;
-            list_del(&eventNode->listEntry);
-            atomic64_dec(tx_ready);
-            rc = TRUE;
-        }
-    }
-    ec_write_unlock(&dev_spinlock, &context);
-
-    TRY_DO_MSG(rc,
-               { xcode = -ENOMEM; },
-               DL_COMMS,
-               "%s: failed to dequeue event", __func__);
-
-    TRY_DO_MSG(msg,
-               { xcode = -ENOMEM; },
-               DL_COMMS,
-               "%s: dequeud msg is NULL", __func__);
-
-    // Write the process path to user memory (if it exists)
-    //  This happens before the main event so that we can clear out the pointer value in the event before writing it
-    if (msg->procInfo.path)
+        tx_queue = &msg_queue_pri0;
+        tx_ready = &tx_ready_pri0;
+    } else if (qlen_pri1 != 0)
     {
-        len = min_t(size_t, ec_mem_cache_get_size_generic(msg->procInfo.path), (size_t) PATH_MAX);
-        rc  = copy_to_user((void *) &msg_user->proc_path.data, msg->procInfo.path, len);
-        TRY_STEP(COPY_FAIL, !rc);
-
-        rc = put_user(len, &msg_user->proc_path.size);
-        TRY_STEP(COPY_FAIL, !rc);
+        tx_queue = &msg_queue_pri1;
+        tx_ready = &tx_ready_pri1;
+    } else
+    {
+        tx_queue = &msg_queue_pri2;
+        tx_ready = &tx_ready_pri2;
     }
 
-    if (msg->generic_data.data)
+    eventNode = list_first_entry_or_null(tx_queue, CB_EVENT_NODE, listEntry);
+    if (eventNode && count >= eventNode->payload &&
+        eventNode->payload >= sizeof(struct CB_EVENT_UM))
     {
-        len = min_t(size_t, ec_mem_cache_get_size_generic(msg->generic_data.data), (size_t) PATH_MAX);
-        rc  = copy_to_user((void *) &msg_user->event_data.data, msg->generic_data.data, len);
-        TRY_STEP(COPY_FAIL, !rc);
+        // when we know for sure we can send this event
+        __ec_decrease_holdoff_counter(tx_ready);
+        list_del_init(&eventNode->listEntry);
+        atomic64_dec(tx_ready);
+        *cb_event = &eventNode->data;
+        xcode = eventNode->payload;
+    }
+    ec_write_unlock(&dev_spinlock, context);
 
-        rc = put_user(len, &msg_user->event_data.size);
-        TRY_STEP(COPY_FAIL, !rc);
+CATCH_DEFAULT:
+
+    return xcode;
+}
+
+int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *context)
+{
+    char __user *p;
+    int rc;
+    uint16_t payload;
+    int xcode = -ENOMEM;
+    struct CB_EVENT *msg = NULL;
+    struct CB_EVENT_UM __user *msg_user = (struct CB_EVENT_UM __user *)ubuf;
+
+    // You *must* ask for at least 1 packet
+
+    rc = ec_obtain_next_cbevent(&msg, count, context);
+    if (rc < 0)
+    {
+        xcode = rc;
+        goto CATCH_DEFAULT;
     }
 
-    // Write the main event to user
-    rc = copy_to_user((void *)&msg_user->event, msg, sizeof(struct CB_EVENT));
+    payload = (uint16_t)rc;
+    p = ubuf + sizeof(struct CB_EVENT_UM);
+
+    // Payload hdr
+    rc = put_user(payload, &msg_user->payload);
     TRY_STEP(COPY_FAIL, !rc);
 
-    // Clear the two pointer values because they are not valid
+    // Write the main event to user
+    rc = copy_to_user(&msg_user->event, msg, sizeof(*msg));
+    TRY_STEP(COPY_FAIL, !rc);
+
+    // Proc Path
+    if (msg->procInfo.path && msg->procInfo.path_size)
+    {
+        rc = copy_to_user(p, msg->procInfo.path, msg->procInfo.path_size);
+        TRY_STEP(COPY_FAIL, !rc);
+        p += msg->procInfo.path_size;
+    }
+    // Always zero it out kaddrs
     rc = put_user(0, &msg_user->event.procInfo.path);
     TRY_STEP(COPY_FAIL, !rc);
 
-    rc = put_user(0, &msg_user->event.generic_data.data);
-    TRY_STEP(COPY_FAIL, !rc);
+    // Use switch for now to allow us to extend in the future
+    switch (msg->eventType)
+    {
+    case CB_EVENT_TYPE_PROCESS_START:
+        if (msg->processStart.path && msg->processStart.path_size)
+        {
+            rc = copy_to_user(p, msg->processStart.path, msg->processStart.path_size);
+            TRY_STEP(COPY_FAIL, !rc);
+            p += msg->processStart.path_size;
+        }
+        rc = put_user(0, &msg_user->event.processStart.path);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
+    case CB_EVENT_TYPE_MODULE_LOAD:
+        if (msg->moduleLoad.path && msg->moduleLoad.path_size)
+        {
+            rc = copy_to_user(p, msg->moduleLoad.path, msg->moduleLoad.path_size);
+            TRY_STEP(COPY_FAIL, !rc);
+
+            p += msg->moduleLoad.path_size;
+        }
+        rc = put_user(0, &msg_user->event.moduleLoad.path);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
+    case CB_EVENT_TYPE_FILE_CREATE:
+    case CB_EVENT_TYPE_FILE_DELETE:
+    case CB_EVENT_TYPE_FILE_OPEN:
+    case CB_EVENT_TYPE_FILE_WRITE:
+    case CB_EVENT_TYPE_FILE_CLOSE:
+        if (msg->fileGeneric.path && msg->fileGeneric.path_size)
+        {
+            rc = copy_to_user(p, msg->fileGeneric.path, msg->fileGeneric.path_size);
+            TRY_STEP(COPY_FAIL, !rc);
+            p += msg->fileGeneric.path_size;
+        }
+        rc = put_user(0, &msg_user->event.fileGeneric.path);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
+    case CB_EVENT_TYPE_DNS_RESPONSE:
+        if (msg->dnsResponse.records && msg->dnsResponse.record_count)
+        {
+            rc = copy_to_user(p, msg->dnsResponse.records,
+                              msg->dnsResponse.record_count * sizeof(CB_DNS_RECORD));
+            TRY_STEP(COPY_FAIL, !rc);
+            p += msg->dnsResponse.record_count * sizeof(CB_DNS_RECORD);
+        }
+        rc = put_user(0, &msg_user->event.dnsResponse.records);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
+    case CB_EVENT_TYPE_NET_CONNECT_PRE:
+    case CB_EVENT_TYPE_NET_CONNECT_POST:
+    case CB_EVENT_TYPE_NET_ACCEPT:
+    case CB_EVENT_TYPE_WEB_PROXY:
+        if (msg->netConnect.actual_server && msg->netConnect.server_size)
+        {
+            rc = copy_to_user(p, msg->netConnect.actual_server,
+                              msg->netConnect.server_size);
+            TRY_STEP(COPY_FAIL, !rc);
+
+            p += msg->netConnect.server_size;
+        }
+        rc = put_user(0, &msg_user->event.netConnect.actual_server);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
+    case CB_EVENT_TYPE_PROCESS_BLOCKED:
+        if (msg->blockResponse.path && msg->blockResponse.path_size)
+        {
+            rc = copy_to_user(p, msg->fileGeneric.path, msg->blockResponse.path_size);
+            TRY_STEP(COPY_FAIL, !rc);
+
+            p += msg->blockResponse.path_size;
+        }
+        rc = put_user(0, &msg_user->event.blockResponse.path);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
+    default:
+        break;
+    }
+
+    if (p - ubuf != payload)
+    {
+        TRACE(DL_ERROR, "%s: Offset:%u Payload:%u", __func__,
+              (unsigned int)(p - ubuf), payload);
+        xcode = -ENXIO;
+        goto CATCH_DEFAULT;
+    }
+
+    xcode = payload;
 
     atomic64_inc(&tx_total);
 
@@ -622,16 +754,14 @@ CATCH_COPY_FAIL:
     {
         TRACE(DL_ERROR, "%s: copy to user failed rc=%d", __func__, rc);
         xcode = -ENXIO;
-    } else
-    {
-        *offset = 0;
-        xcode = KF_LEN;
-        TRACE(DL_COMMS, "%s: read=%ld qlen_pri0=%llu qlen_pri1=%llu", __func__, len, qlen_pri0, qlen_pri1);
     }
 
+    // When we start pausing tasks we will want to handle waking
+    // them when we have an issue with userspace.
+
 CATCH_DEFAULT:
-    ec_free_event(msg, &context);
-    FINISH_MODULE_DISABLE_CHECK(&context);
+    ec_free_event(msg, context);
+
     return xcode;
 }
 
@@ -1342,4 +1472,109 @@ size_t __ec_get_memory_usage(ProcessContext *context)
 {
     return ec_mem_cache_get_memory_usage(context) +
            ec_hashtbl_get_memory(context);
+}
+
+// Eventually do this just before attempting to enqueue the event.
+int __ec_precompute_payload(struct CB_EVENT *cb_event)
+{
+    int payload = 0;
+
+    if (!cb_event)
+    {
+        return -EINVAL;
+    }
+
+    payload += sizeof(struct CB_EVENT_UM);
+
+    if (cb_event->procInfo.path && cb_event->procInfo.path_size)
+    {
+        cb_event->procInfo.path_offset = payload;
+        payload += cb_event->procInfo.path_size;
+    }
+
+    switch (cb_event->eventType)
+    {
+    case CB_EVENT_TYPE_PROCESS_START:
+        if (cb_event->processStart.path && cb_event->processStart.path_size)
+        {
+            cb_event->processStart.path_offset = payload;
+            payload += cb_event->processStart.path_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_PROCESS_EXIT:
+        break;
+
+    case CB_EVENT_TYPE_MODULE_LOAD:
+        if (cb_event->moduleLoad.path && cb_event->moduleLoad.path_size)
+        {
+            cb_event->moduleLoad.path_offset = payload;
+            payload += cb_event->moduleLoad.path_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_FILE_CREATE:
+    case CB_EVENT_TYPE_FILE_DELETE:
+    case CB_EVENT_TYPE_FILE_OPEN:
+    case CB_EVENT_TYPE_FILE_WRITE:
+    case CB_EVENT_TYPE_FILE_CLOSE:
+        if (cb_event->fileGeneric.path && cb_event->fileGeneric.path_size)
+        {
+            cb_event->fileGeneric.path_offset = payload;
+            payload += cb_event->fileGeneric.path_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_NET_CONNECT_PRE:
+    case CB_EVENT_TYPE_NET_CONNECT_POST:
+    case CB_EVENT_TYPE_NET_ACCEPT:
+    case CB_EVENT_TYPE_WEB_PROXY:
+        if (cb_event->netConnect.actual_server && cb_event->netConnect.server_size)
+        {
+            cb_event->netConnect.server_offset = payload;
+            payload += cb_event->netConnect.server_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_DNS_RESPONSE:
+        if (cb_event->dnsResponse.records && cb_event->dnsResponse.record_count)
+        {
+            cb_event->dnsResponse.record_offset = payload;
+            payload += cb_event->dnsResponse.record_count * sizeof(CB_DNS_RECORD);
+        }
+
+        break;
+
+    case CB_EVENT_TYPE_PROCESS_BLOCKED:
+        if (cb_event->blockResponse.path && cb_event->blockResponse.path_size)
+        {
+            cb_event->blockResponse.path_offset = payload;
+            payload += cb_event->blockResponse.path_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_HEARTBEAT:
+        break;
+
+    // Internal To The Kernel
+    case CB_EVENT_TYPE_PROCESS_START_FORK:
+    case CB_EVENT_TYPE_PROCESS_START_EXEC:
+    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
+        return -EINVAL;
+
+    // Unused
+    case CB_EVENT_TYPE_UNKNOWN:
+    case CB_EVENT_TYPE_PROC_ANALYZE:
+    case CB_EVENT_TYPE_PROCESS_NOT_BLOCKED:
+        break;
+
+    default:
+        if (cb_event->eventType < CB_EVENT_TYPE_UNKNOWN || cb_event->eventType >= CB_EVENT_TYPE_MAX)
+        {
+            return -EINVAL;
+        }
+        break;
+    }
+
+    return payload;
 }

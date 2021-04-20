@@ -504,6 +504,7 @@ typedef struct _CB_RESOLVED_SYMS {
 typedef struct _CB_EVENT_NODE {
     struct list_head   listEntry;
     struct CB_EVENT    data;
+    uint16_t           payload; // precomputed size of event data to be sent to userspace
     void              *process_data;
 } CB_EVENT_NODE;
 
