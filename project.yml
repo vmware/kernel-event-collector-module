@@ -24,6 +24,8 @@ service-env:
     UTIL_CHANNEL: ${DEFAULT_CHANNEL}
     VENDOR_CHANNEL: ${DEFAULT_CHANNEL}
     COMMON_CHANNEL: ${DEFAULT_CHANNEL}
+    
+    PACKAGE_PROJECT_USING_CONAN: 1
 
 options:
     - module_name=event_collector
