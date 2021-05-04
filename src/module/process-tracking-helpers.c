@@ -89,7 +89,7 @@ void ec_process_tracking_set_parent_shared_data(ProcessTracking *procp, SharedTr
     procp->parent_shared_data = ec_process_tracking_get_shared_data_ref(shared_data, context);
 }
 
-void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
+void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
 {
     TRY(procp && event);
     TRY(procp->shared_data);
@@ -136,6 +136,8 @@ void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_EVENT_TYPE ev
         ec_event_set_process_data(event, procp->shared_data, context);
         break;
     }
+
+    event->intentType = intentType;
 
 CATCH_DEFAULT:
     // In some cases we expect this function to be called with a NULL event
