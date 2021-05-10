@@ -32,5 +32,15 @@ bool test__proc_track_report_double_exit(ProcessContext *context) __init;
 bool test__begin_finish_macros(ProcessContext *context) __init;
 bool test__hook_tracking_add_del(ProcessContext *context) __init;
 
+bool test__stall_enable(ProcessContext *context) __init;
+
+bool test__perm_id(ProcessContext *context) __init;
+bool test__perm_id_disabled(ProcessContext *context) __init;
+bool test__stall_timedout(ProcessContext *context) __init;
+bool test__stall_event_EPERM(ProcessContext *context) __init;
+bool test__stall_one_during_disable(ProcessContext *context) __init;
+bool test__kthread_may_stall(void) __init;
+bool test__insmod_may_stall(void) __init;
+bool test__stall_event_abort(ProcessContext *context) __init;
 
 #define ASSERT_TRY(stmt) TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED %s:%d -- %s", __FILE__, __LINE__, #stmt)
