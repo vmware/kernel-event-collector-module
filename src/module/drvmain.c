@@ -16,6 +16,7 @@
 #include "cb-banning.h"
 #include "hook-tracking.h"
 #include "tests/run-tests.h"
+#include "stall-event.h"
 
 #ifdef HOOK_SELECTOR
 #define HOOK_MASK  0x0000000000000000
@@ -511,9 +512,11 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
     TRY_STEP(NET_IS,    ec_task_initialize(context));
     TRY_STEP(TASK,      ec_file_process_tracking_init(context));
     TRY_STEP(FILE_PROC, ec_stats_proc_initialize(context));
+    TRY_STEP(STALL,     ec_stall_events_initialize(context));
 
     return 0;
-
+CATCH_STALL:
+    ec_stats_proc_shutdown(context);
 CATCH_FILE_PROC:
     ec_file_process_tracking_shutdown(context);
 CATCH_TASK:
@@ -544,6 +547,7 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
      * Shutdown the different subsystems, note order is important here.
      * Need to shutdown subsystems in the reverse order of dependency.
      */
+    ec_stall_events_shutdown(context);
     ec_stats_proc_shutdown(context);
     ec_task_shutdown(context);
     ec_DestroyNetworkIsolation(context);

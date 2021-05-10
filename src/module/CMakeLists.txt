@@ -129,6 +129,7 @@ file(REMOVE ${CONFIGURED_VERSION_FILE})
 configure_file(${INCLUDE_DIR}/version.h.in ${CONFIGURED_VERSION_FILE})
 
 set(SOURCE_FILES drvmain.c
+        stall-event.c
         hook-tracking.c
         findsyms.c
         page-helpers.c
@@ -166,7 +167,8 @@ set(SOURCE_FILES drvmain.c
         tests/run-tests.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c
-        tests/module-state-tests.c)
+        tests/module-state-tests.c
+        tests/stall-tests.c)
 
 foreach(KERNEL_NAME ${KERNEL_LIST})
     if(${LOCAL_BUILD})
