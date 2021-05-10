@@ -355,19 +355,19 @@ bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name,
 // File Helpers
 //
 extern bool ec_file_helper_init(ProcessContext *context);
-extern bool ec_file_get_path(struct file *file, char *buffer, unsigned int buflen, char **pathname);
+extern bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname);
 extern bool ec_dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname);
 extern char *ec_dentry_to_path(struct dentry *dentry, char *buf, int buflen);
 extern char *ec_lsm_dentry_path(struct dentry *dentry, char *path, int len);
-extern struct inode *ec_get_inode_from_file(struct file *file);
-extern void ec_get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode);
-extern struct inode *ec_get_inode_from_dentry(struct dentry *dentry);
-umode_t ec_get_mode_from_file(struct file *file);
-extern struct super_block *ec_get_sb_from_file(struct file *file);
+extern struct inode const *ec_get_inode_from_file(struct file const *file);
+extern void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode);
+extern struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry);
+umode_t ec_get_mode_from_file(struct file const *file);
+extern struct super_block const *ec_get_sb_from_file(struct file const *file);
 extern bool ec_is_interesting_file(struct file *file);
 extern bool ec_is_excluded_file(uint64_t device, uint64_t inode);
 extern int ec_is_special_file(char *pathname, int len);
-extern bool ec_may_skip_unsafe_vfs_calls(struct file *file);
+extern bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
 
 // schedulers
 extern const struct sched_class idle_sched_class;
@@ -428,7 +428,7 @@ file_ctx, *pfile_ctx;
 // CB_RESOLV_FUNCTION_310 will only resolve the function when built for kernel >= 3.10
 // checkpatch-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON
 #define CB_RESOLV_SYMBOLS \
-CB_RESOLV_FUNCTION(int, access_process_vm, struct task_struct *tsk _C unsigned long addr _C void *buf _C int len _C int write) \
+CB_RESOLV_FUNCTION(int, access_process_vm, struct task_struct const *tsk _C unsigned long addr _C void *buf _C int len _C int write) \
 CB_RESOLV_FUNCTION(char *, dentry_path, struct dentry *dentry _C char *buf _C int buflen) \
 CB_RESOLV_FUNCTION_310(bool, current_chrooted, void) \
 CB_RESOLV_FUNCTION(pte_t *, lookup_address, unsigned long address _C unsigned int *level) \
