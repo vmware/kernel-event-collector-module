@@ -516,4 +516,19 @@ typedef struct CB_REQUEST_MESSAGE {
   };
 } *PCB_REQUEST_MESSAGE;
 
+// Responses 
+#define CB_PERM_RESPONSE_TYPE_ALLOW   0x00
+#define CB_PERM_RESPONSE_TYPE_EPERM   0x01
+#define CB_PERM_RESPONSE_TYPE_EACCES  0x02
+#define CB_PERM_RESPONSE_TYPE_ENOENT  0x04
+
+
+struct CB_PERM_RESPONSE {
+    uint64_t perm_id;
+    uint32_t cacheFlags;
+    pid_t tid;
+    CB_EVENT_TYPE eventType;
+    u8 response;
+};
+
 #pragma pack(pop)

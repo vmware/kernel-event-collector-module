@@ -17,9 +17,9 @@ char *ec_dentry_to_path(struct dentry *dentry, char *buf, int buflen)
     return CB_RESOLVED(dentry_path)(dentry, buf, buflen);
 }
 
-bool ec_file_get_path(struct file *file, char *buffer, unsigned int buflen, char **pathname)
+bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname)
 {
-    struct path *path  = NULL;
+    struct path const *path  = NULL;
     bool         xcode = true;
 
     CANCEL(file, false);
@@ -32,7 +32,11 @@ bool ec_file_get_path(struct file *file, char *buffer, unsigned int buflen, char
 
     CANCEL(path && path->mnt && path->dentry, false);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
     path_get(path);
+#else  //}{ v2.6.32 forgot 'const'
+    path_get((struct path *)path);
+#endif  //}
 
     // Problem here is that dentry_path, which solves pathing issues in chroot/namespace cases is not adequate
     // for the normal use case that d_path satisfies. These two function differ in the way in which they determine
@@ -62,7 +66,11 @@ bool ec_file_get_path(struct file *file, char *buffer, unsigned int buflen, char
         TRACE(DL_WARNING, "Path lookup failed, using |%s| as file name", buffer);
     }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
     path_put(path);
+#else  //}{ v2.6.32 forgot 'const'
+    path_put((struct path *)path);
+#endif  //}
 
     return xcode;
 }
@@ -91,7 +99,7 @@ bool ec_dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen
     return xcode;
 }
 
-struct inode *ec_get_inode_from_dentry(struct dentry *dentry)
+struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry)
 {
     // Skip if dentry is null
     if (!dentry) return NULL;
@@ -101,16 +109,16 @@ struct inode *ec_get_inode_from_dentry(struct dentry *dentry)
     return dentry->d_inode;
 }
 
-struct inode *ec_get_inode_from_file(struct file *file)
+struct inode const *ec_get_inode_from_file(struct file const *file)
 {
     if (!file) return NULL;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
     // The cached inode may be NULL, but the calling code will handle that
     return file->f_inode;
-#else
+#else  //}{
     return ec_get_inode_from_dentry(file->f_path.dentry);
-#endif
+#endif  //}
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
@@ -127,7 +135,7 @@ struct inode *ec_get_inode_from_file(struct file *file)
         // The nosec version is needed because SELinux was rejecting our access to some files.
         //  (You would see messages like this in the log.)
         //  SELinux is preventing /usr/bin/dbus-daemon from getattr access on the fifo_file /run/systemd/sessions/1.ref.
-        int ec_getattr(struct path *path, struct kstat *stat)
+        int ec_getattr(struct path const *path, struct kstat *stat)
         {
             int ret = 0;
             bool should_remove_private = false;
@@ -150,10 +158,10 @@ struct inode *ec_get_inode_from_file(struct file *file)
     #endif
 #endif
 
-void ec_get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *inode)
+void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    struct super_block *sb = NULL;
+    struct super_block const *sb = NULL;
 #else
      int           ret = 0;
      struct kstat  ks;
@@ -199,13 +207,13 @@ void ec_get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *ino
 #endif
 }
 
-umode_t ec_get_mode_from_file(struct file *file)
+umode_t ec_get_mode_from_file(struct file const *file)
 {
     umode_t mode = 0;
 
     if (file)
     {
-        struct inode *inode = ec_get_inode_from_file(file);
+        struct inode const *inode = ec_get_inode_from_file(file);
 
         if (inode)
         {
@@ -216,14 +224,14 @@ umode_t ec_get_mode_from_file(struct file *file)
     return mode;
 }
 
-struct super_block *ec_get_sb_from_dentry(struct dentry *dentry)
+struct super_block const *ec_get_sb_from_dentry(struct dentry const *dentry)
 {
-    struct super_block *sb = NULL;
+    struct super_block const *sb = NULL;
 
     if (dentry)
     {
         // Get super_block from inode first
-        struct inode *inode = ec_get_inode_from_dentry(dentry);
+        struct inode const *inode = ec_get_inode_from_dentry(dentry);
 
         if (inode)
         {
@@ -239,14 +247,14 @@ struct super_block *ec_get_sb_from_dentry(struct dentry *dentry)
     return sb;
 }
 
-struct super_block *ec_get_sb_from_file(struct file *file)
+struct super_block const *ec_get_sb_from_file(struct file const *file)
 {
-    struct super_block *sb = NULL;
+    struct super_block const *sb = NULL;
 
     if (file)
     {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-        struct inode *inode = ec_get_inode_from_file(file);
+        struct inode const *inode = ec_get_inode_from_file(file);
 
         if (inode)
         {
@@ -261,7 +269,7 @@ struct super_block *ec_get_sb_from_file(struct file *file)
     return sb;
 }
 
-bool ec_is_network_filesystem(struct super_block *sb)
+bool ec_is_network_filesystem(struct super_block const *sb)
 {
     if (!sb)
     {
@@ -281,9 +289,9 @@ bool ec_is_network_filesystem(struct super_block *sb)
     return false;
 }
 
-bool ec_may_skip_unsafe_vfs_calls(struct file *file)
+bool ec_may_skip_unsafe_vfs_calls(struct file const *file)
 {
-    struct super_block *sb = ec_get_sb_from_file(file);
+    struct super_block const *sb = ec_get_sb_from_file(file);
 
     // Since we still don't know the file system type
     // it's safer to not perform any VFS ops on the file.

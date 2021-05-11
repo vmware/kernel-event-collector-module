@@ -214,7 +214,7 @@ CATCH_DEFAULT:
 }
 
 // Initializes file_data members from a file struct
-void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct file *file)
+void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct file const *file)
 {
     char *pathname            = NULL;
     char *generic_path_buffer = NULL;

@@ -36,6 +36,16 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__begin_finish_macros(context));
     RUN_TEST(test__hook_tracking_add_del(context));
 
+    RUN_TEST(test__stall_enable(context));
+    RUN_TEST(test__perm_id(context));
+    RUN_TEST(test__perm_id_disabled(context));
+    RUN_TEST(test__stall_timedout(context));
+    RUN_TEST(test__stall_event_EPERM(context));
+    RUN_TEST(test__stall_one_during_disable(context));
+    RUN_TEST(test__kthread_may_stall());
+    RUN_TEST(test__insmod_may_stall());
+    RUN_TEST(test__stall_event_abort(context));
+
     g_traceLevel = origTraceLevel;
     return all_passed;
 }

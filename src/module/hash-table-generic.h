@@ -94,3 +94,15 @@ int ec_hashtbl_show_proc_cache(struct seq_file *m, void *v);
 size_t ec_hashtbl_get_memory(ProcessContext *context);
 void ec_hashtable_debug_on(void);
 void ec_hashtable_debug_off(void);
+
+bool ec_hashtbl_read_bkt_lock(HashTbl *hashTblp, void *key, void **datap, HashTableBkt **bkt,
+                              ProcessContext *context);
+void ec_hashtbl_read_bkt_unlock(HashTableBkt *bkt, ProcessContext *context);
+
+bool ec_hashtbl_write_bkt_lock(HashTbl *hashTblp, void *key, void **datap, HashTableBkt **bkt,
+                               ProcessContext *context);
+void ec_hashtbl_write_bkt_unlock(HashTableBkt *bkt, ProcessContext *context);
+
+// Do not call this directly unless you wrap around ec_hashtbl_write_bkt_lock
+int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
+
