@@ -521,7 +521,7 @@ struct CB_PERM_RESPONSE {
     uint32_t cacheFlags;
     pid_t tid;
     CB_EVENT_TYPE eventType;
-    u8 response;
+    uint8_t response;
 };
 
 #pragma pack(pop)
