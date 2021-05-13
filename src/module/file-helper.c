@@ -11,26 +11,14 @@ bool ec_file_helper_init(ProcessContext *context)
     return true;
 }
 
-char *ec_dentry_to_path(struct dentry *dentry, char *buf, int buflen)
+bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen, char **pathname)
 {
-    CANCEL_CB_RESOLVED(dentry_path, NULL);
-    return CB_RESOLVED(dentry_path)(dentry, buf, buflen);
-}
-
-bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname)
-{
-    struct path const *path  = NULL;
     bool         xcode = true;
 
-    CANCEL(file, false);
     CANCEL(pathname, false);
     CANCEL(buffer, false);
-
-    (*pathname) = NULL;
-
-    path = &file->f_path;
-
     CANCEL(path && path->mnt && path->dentry, false);
+    (*pathname) = NULL;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
     path_get(path);
@@ -75,7 +63,19 @@ bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen
     return xcode;
 }
 
-bool ec_dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname)
+bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname)
+{
+    CANCEL(file, false);
+    return ec_path_get_path(&file->f_path, buffer, buflen, pathname);
+}
+
+char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen)
+{
+    CANCEL_CB_RESOLVED(dentry_path, NULL);
+    return CB_RESOLVED(dentry_path)((struct dentry *)dentry, buf, buflen);
+}
+
+bool ec_dentry_get_path(struct dentry const *dentry, char *buffer, unsigned int buflen, char **pathname)
 {
     bool xcode = true;
 
@@ -157,6 +157,14 @@ struct inode const *ec_get_inode_from_file(struct file const *file)
         #define VFS_GETATTR(PATH, KS)   ec_getattr((PATH), (KS))
     #endif
 #endif
+
+struct super_block const *ec_get_sb_from_dentry(struct dentry const *dentry);  // forward
+
+void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode)
+{
+    *device = new_encode_dev(ec_get_sb_from_dentry(path->dentry)->s_dev);
+    *inode  =                path->dentry->d_inode->i_ino;
+}
 
 void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode)
 {

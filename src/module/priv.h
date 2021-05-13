@@ -63,10 +63,10 @@ extern uint32_t g_max_queue_size_pri2;
 
 //-------------------------------------------------
 // Module usage protection
-//  NOTE: Be very careful when adding new exit points to the hooks that the PUT is properly called
-// module_used tracks usage of our hook functions and blocks module unload but not disable
-// g_module_state_info.module_active_call_count tracks usage of code that requires
-// the module to be in an enabled state and blocks disable but not unload
+//  NOTE: Be very careful when adding new exit points to the hooks that the PUT is properly called.
+// 'module_used' tracks usage of our hook functions and blocks module unload but not disable.
+// 'g_module_state_info.module_active_call_count' tracks usage of code that requires
+// the module to be in an enabled state and blocks disable but not unload.
 extern atomic64_t module_used;
 #define MODULE_GET()  atomic64_inc_return(&module_used)
 #define MODULE_PUT()  ATOMIC64_DEC__CHECK_NEG(&module_used)
@@ -356,11 +356,13 @@ bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name,
 //
 extern bool ec_file_helper_init(ProcessContext *context);
 extern bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname);
-extern bool ec_dentry_get_path(struct dentry *dentry, char *buffer, unsigned int buflen, char **pathname);
-extern char *ec_dentry_to_path(struct dentry *dentry, char *buf, int buflen);
-extern char *ec_lsm_dentry_path(struct dentry *dentry, char *path, int len);
+extern bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen, char **pathname);
+extern bool ec_dentry_get_path(struct dentry const *dentry, char *buffer, unsigned int buflen, char **pathname);
+extern char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen);
+extern char *ec_lsm_dentry_path(struct dentry const *dentry, char *path, int len);
 extern struct inode const *ec_get_inode_from_file(struct file const *file);
 extern void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode);
+extern void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode);
 extern struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry);
 umode_t ec_get_mode_from_file(struct file const *file);
 extern struct super_block const *ec_get_sb_from_file(struct file const *file);
