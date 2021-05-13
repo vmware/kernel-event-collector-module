@@ -252,12 +252,12 @@ int ec_show_active_hooks(struct seq_file *m, void *v);
 extern bool ec_logger_initialize(ProcessContext *context);
 extern void ec_logger_shutdown(ProcessContext *context);
 
-extern PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context);
+extern PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, ProcessContext *context);
 extern void ec_free_event(PCB_EVENT event, ProcessContext *context);
 extern void ec_free_event_on_error(PCB_EVENT event, ProcessContext *context);
 extern void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context);
 
-extern bool ec_logger_should_log(CB_EVENT_TYPE eventType);
+extern bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType);
 
 extern int ec_send_event(struct CB_EVENT *msg, ProcessContext *context);
 extern void ec_fops_comm_wake_up_reader(ProcessContext *context);

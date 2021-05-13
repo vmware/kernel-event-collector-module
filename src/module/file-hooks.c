@@ -361,7 +361,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
 
     CANCEL_VOID(!ec_banning_IgnoreProcess(context, pid));
 
-    CANCEL_VOID(ec_logger_should_log(eventType));
+    CANCEL_VOID(ec_logger_should_log(INTENT_REPORT, eventType));
 
     ec_get_devinfo_from_file(file, &device, &inode);
 

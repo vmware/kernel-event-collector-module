@@ -167,7 +167,7 @@ SharedTrackingData *ec_process_tracking_get_shared_data_ref(SharedTrackingData *
 void ec_process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context);
 
 // Event Helper
-void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
+void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
 void ec_process_tracking_store_exit_event(ProcessTracking *procp, PCB_EVENT event, ProcessContext *context);
 bool ec_process_tracking_should_track_user(void);
 bool ec_process_tracking_has_active_process(ProcessTracking *procp);
