@@ -1578,8 +1578,8 @@ asmlinkage long ec_sys_recvmsg(int fd, struct my_user_msghdr __user *msg, unsign
 
             ycode = my_peek(&context, call_ec_orig_sys_recvmsg, (void *)&ab,
                     sock, &msg_peek, sk_rcvtimeo_dlta, weSetTimeout, flags);
-            TRY(ycode >= 0);
-            xcode = (int32_t)ycode;  // dead: set by CATCH_DISABLED
+
+            TRY_DO(ycode >= 0, { xcode = (int32_t)ycode; });
         }
         set_fs(oldfs);
     }
@@ -1782,8 +1782,8 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
 
             ycode = my_peek(&context, call_ec_orig_sys_recvmmsg, (void *)&ab,
                     sock, &mmsg_peek.msg_hdr, sk_rcvtimeo_dlta_peek, weSetTimeout, flags);
-            TRY(ycode >= 0);
-            xcode = (int32_t)ycode;  // dead: set by CATCH_DISABLED
+
+            TRY_DO(ycode >= 0, { xcode = (int32_t)ycode; });
         }
 
         // If the caller provided timeout our kernel space timespec structure was updated by the recvmmsg() syscall
@@ -1963,8 +1963,8 @@ asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
 
             ycode = my_peek(&context, call_kernel_recvmsg, (void *)&ab,
                     sock, &msg, sk_rcvtimeo_dlta, weSetTimeout, flags);
-            TRY(ycode >= 0);
-            xcode = (int32_t)ycode;  // dead: set by CATCH_DISABLED
+
+            TRY_DO(ycode >= 0, { xcode = (int32_t)ycode; });
         }
     }
 
