@@ -777,7 +777,8 @@ asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *new
 {
     long         ret;
     file_data_t *old_file_data = NULL;
-    file_data_t *new_file_data = NULL;
+    file_data_t *new_file_data_pre_rename = NULL;
+    file_data_t *new_file_data_post_rename = NULL;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
@@ -788,6 +789,7 @@ asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *new
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
     old_file_data = __ec_get_file_data_from_name(&context, oldname);
+    new_file_data_pre_rename = __ec_get_file_data_from_name(&context, newname);
 
 CATCH_DISABLED:
     ret = ec_orig_sys_rename(oldname, newname);
@@ -800,19 +802,26 @@ CATCH_DISABLED:
     {
         __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
 
+        // Send a delete for the destination if the rename will overwrite an existing file
+        if (new_file_data_pre_rename)
+        {
+            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
+        }
+
         FINISH_MODULE_DISABLE_CHECK(&context);
 
         // This could block so call it outside the disable tracking
-        new_file_data = __ec_get_file_data_from_name(&context, newname);
+        new_file_data_post_rename = __ec_get_file_data_from_name(&context, newname);
 
         BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-        __ec_do_generic_file_event(&context, new_file_data, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
     }
 
 CATCH_DEFAULT:
     __ec_put_file_data(&context, old_file_data);
-    __ec_put_file_data(&context, new_file_data);
+    __ec_put_file_data(&context, new_file_data_pre_rename);
+    __ec_put_file_data(&context, new_file_data_post_rename);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
