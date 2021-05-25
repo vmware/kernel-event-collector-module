@@ -57,6 +57,14 @@ class KernelEventCollectorModule(base.CbConanFile):
 
         return module_version_suffix
 
+    def build(self):
+        cmake = CMake(self)
+        env_build = AutoToolsBuildEnvironment(self)
+        with tools.environment_append(env_build.vars):
+            if os.getenv("FAST_BUILD") != "1":
+                cmake.configure(source_dir=self.source_folder + os.path.sep + "src")
+            cmake.build()
+
     def package(self):
         include_dir = "include" + os.path.sep + "k_events_module"
         self.copy("*.h", dst=include_dir, src="include", keep_path=True)
