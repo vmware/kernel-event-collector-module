@@ -11,9 +11,6 @@ include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/raw/52c5e9759fa605157
 variables:
   ARTIFACTORY_PATH: https://${ARTIFACTORY_URL}/artifactory
   BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
-  # Tells the  cb-build-util scripts that this isn't a conan package and it needs to be built like a project
-  IS_PROJECT_REPO: 1
-
 
 stages:
   - build_project
