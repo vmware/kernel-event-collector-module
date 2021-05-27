@@ -185,6 +185,8 @@ void ec_get_devinfo_from_file(struct file *file, uint64_t *device, uint64_t *ino
     }
 
 #else
+    CANCEL_VOID(!ec_may_skip_unsafe_vfs_calls(file));
+
     // Note, on some kernels this will call the security callback inode_getattr
     //  At this time we are not hooking that call.  But if we do in the future,
     //  it may be an issue.
