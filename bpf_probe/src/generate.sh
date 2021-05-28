@@ -1,0 +1,20 @@
+#!/bin/bash
+
+SOURCE_PROG=$1
+OUT_FILE=$2
+
+if [[ x"${SOURCE_PROG}" == x ]]
+then
+	exit 1
+fi
+
+if [[ ! -f "${SOURCE_PROG}" ]]
+then
+	echo "No source program: ${SOURCE_PROG}" 1>&2
+	exit 1
+fi
+
+bcc_prog=$(cat ${SOURCE_PROG})
+printf '#include "BpfApi.h"\n' "${bcc_prog}" > "${OUT_FILE}"
+printf 'const std::string cb_endpoint::cb_ebpf::BpfApi::BPF_PROGRAM = R"(\n%s\n)";\n' "${bcc_prog}" >> "${OUT_FILE}"
+
