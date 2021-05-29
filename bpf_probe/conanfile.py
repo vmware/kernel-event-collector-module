@@ -10,11 +10,11 @@ base = python_requires("CONAN_UTIL_VERSION")
 
 class SHORT_NAME(base.CbConanFile):
     name     = "SHORT_NAME"
-    version  = "PROJECT_VERSION"
-    settings = "os", "arch"
+    version  = "PACKAGE_VERSION"
+    settings = "os", "compiler", "build_type", "arch"
     generators = "cmake"
-    build_requires = "CPPUTEST_VERSION", "LLVM_VERSION", "ELFUTILS_VERSION", "BCC_VERSION", \
-                     "BOOST_VERSION"
+    requires = "LLVM_VERSION", "ELFUTILS_VERSION", "BCC_VERSION", "BOOST_VERSION"
+    build_requires = "CPPUTEST_VERSION"
     default_options = "Boost:shared=False", \
                       "Boost:without_program_options=False", \
                       "Boost:without_thread=False", \
@@ -91,6 +91,7 @@ class SHORT_NAME(base.CbConanFile):
     def package(self):
         self.copy("*.h", dst="include", src="include", keep_path=True)
         self.copy("*.a", dst="lib", keep_path=False)
+        self.copy("check_probe", dst="bin", src="bin")
 
     def package_info(self):
         self.cpp_info.includedirs = ["include"]

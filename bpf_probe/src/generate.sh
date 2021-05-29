@@ -15,6 +15,6 @@ then
 fi
 
 bcc_prog=$(cat ${SOURCE_PROG})
-printf '#include "BpfApi.h"\n' "${bcc_prog}" > "${OUT_FILE}"
-printf 'const std::string cb_endpoint::cb_ebpf::BpfApi::BPF_PROGRAM = R"(\n%s\n)";\n' "${bcc_prog}" >> "${OUT_FILE}"
+printf '#include "BpfProgram.h"\n' "${bcc_prog}" > "${OUT_FILE}"
+printf 'const std::string cb_endpoint::cb_ebpf::BpfProgram::DEFAULT_PROGRAM = R"(\n%s\n)";\n' "${bcc_prog}" >> "${OUT_FILE}"
 

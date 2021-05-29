@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 2.8.7)
 
 project(bpf_probe)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-
 FIND_PACKAGE(CbUtil REQUIRED)
 cb_configure_flags()
 cb_conan_setup(TARGETS)
@@ -13,26 +11,7 @@ set(CMAKE_CXX_STANDARD 11)
 # We shouldn't need this but without out we lose -g. It's probably because LLVM cmake stuff is overriding flags
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
-include(CMakeDependentOption)
-include(GNUInstallDirs)
-include(CheckCXXCompilerFlag)
-include(FindCompilerFlag)
-
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
-
-find_package(LLVM REQUIRED CONFIG)
-message(STATUS "Found LLVM: ${LLVM_INCLUDE_DIRS} ${LLVM_PACKAGE_VERSION}")
-# TODO - Remove this and utilize cmake configs similar to how bcc does it.
-# This will make cross compiling more flexible.
-execute_process(COMMAND "${LLVM_INCLUDE_DIRS}/../bin/llvm-config" --libnames
-        OUTPUT_VARIABLE LLVM_LIBS_RAW OUTPUT_STRIP_TRAILING_WHITESPACE)
-string(REPLACE " " ";" LLVM_LIBS ${LLVM_LIBS_RAW})
-message(STATUS "llvm-config --libnames ${LLVM_LIBS}")
-
-find_package(LibElf REQUIRED)
-
-link_directories(${BCC_LIBRARY_PATHS})
-link_directories(${LLVM_LIBRARY_DIRS})
 
 include_directories(${PROJECT_SOURCE_DIR}/../include)
 
@@ -52,38 +31,25 @@ add_custom_target(bcc_prog ALL DEPENDS ${EPBF_PROG_CPP})
 
 add_library(bpf-probe STATIC
         BpfApi.cpp
+        BpfProgram.cpp
         ${EPBF_PROG_CPP})
 add_dependencies(bpf-probe bcc_prog)
-
 set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
+
 target_link_libraries(bpf-probe
-        libapi-static.a
-        libbcc-loader-static.a
-        libbcc.a
-        libbcc_bpf.a
-        libb_frontend.a
-        libclang_frontend.a
+        CONAN_PKG::bcc
 
         -Wl,--whole-archive
-        clangFrontend.a
-        clangSerialization.a
-        clangDriver.a
-        clangASTMatchers.a
-        clangParse.a
-        clangSema.a
-        clangCodeGen.a
-        clangAnalysis.a
-        clangRewrite.a
-        clangEdit.a
-        clangAST.a
-        clangLex.a
-        clangBasic.a
-
-        ${LLVM_LIBS}
-
-        ${LIBELF_LIBRARIES}
-
+        CONAN_PKG::llvm
+        CONAN_LIB::elfutils_elf
         -Wl,--no-whole-archive
 
-        z
+        z rt dl pthread m
         )
+
+add_executable(check_probe check_probe.cpp)
+target_link_libraries(check_probe
+        bpf-probe
+        z rt dl pthread m)
+
+add_subdirectory(tests)

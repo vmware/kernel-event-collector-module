@@ -3,16 +3,16 @@
 #include "BpfApi.h"
 
 #include <BPF.h>
-#include <cstdio>
-#include <cerrno>
 #include <climits>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 using namespace cb_endpoint::cb_ebpf;
 
-BpfApi::BpfApi() :
-    m_BPF(nullptr)
-    , m_ErrorMessage("")
+BpfApi::BpfApi()
+    : m_BPF(nullptr)
     , m_kptr_restrict_path("/proc/sys/kernel/kptr_restrict")
     , m_bracket_kptr_restrict(false)
     , m_first_syscall_lookup(true)
@@ -126,6 +126,16 @@ bool BpfApi::AttachProbe(const char * name,
     case ProbeType::Return:
         attach_type = BPF_PROBE_RETURN;
         break;
+    case ProbeType::Tracepoint:
+    {
+        auto result = m_BPF->attach_tracepoint(name, callback);
+        if (!result.ok())
+        {
+            m_ErrorMessage = result.msg();
+        }
+
+        return result.ok();
+    }
     default:
         return false;
     }
@@ -178,69 +188,52 @@ int BpfApi::PollEvents(int timeout_ms)
 
 bool BpfApi::GetKptrRestrict(long &kptr_restrict_value)
 {
-//    FileUtil::FileError error;
-//    auto fileHandle = FileUtil::OpenFile(
-//            m_kptr_restrict_path.c_str(),
-//            FileOpenReadOnly,
-//            error,
-//            0);
-//    if (fileHandle <= 0)
-//    {
-//        return false;
-//    }
-//
-//    size_t size = 32;
-//    unsigned char buffer[size] = {};
-//    size_t bytesRead = size;
-//
-//    auto result = FileUtil::ReadFile(
-//            fileHandle,
-//            buffer,
-//            bytesRead,
-//            FileUtil::CurrentFileOffset,
-//            error);
-//    FileUtil::CloseFile(fileHandle);
-//    if (!result || !bytesRead || !buffer[0])
-//    {
-//        return false;
-//    }
-//
-//    long value = strtol(reinterpret_cast<const char *>(buffer), nullptr, 10);
-//    if ((value == LONG_MIN || value == LONG_MAX) && errno == ERANGE)
-//    {
-//        return false;
-//    }
-//
-//    kptr_restrict_value = value;
+    auto fileHandle = open(m_kptr_restrict_path.c_str(), O_RDONLY);
+    if (fileHandle <= 0)
+    {
+        return false;
+    }
+
+    size_t size = 32;
+    unsigned char buffer[size] = {};
+    auto bytesRead = read(fileHandle, buffer, size);
+    close(fileHandle);
+
+    if (!bytesRead || !buffer[0])
+    {
+        return false;
+    }
+
+    long value = strtol(reinterpret_cast<const char *>(buffer), nullptr, 10);
+    if ((value == LONG_MIN || value == LONG_MAX) && errno == ERANGE)
+    {
+        return false;
+    }
+
+    kptr_restrict_value = value;
 
     return true;
 }
 
 void BpfApi::SetKptrRestrict(long value)
 {
-//    size_t size = 32;
-//    char buffer[size] = {};
-//    int ret = snprintf(buffer, sizeof(buffer) -1, "%ld\n", value);
-//    if (ret <= 0 || !buffer[0])
-//    {
-//        return;
-//    }
-//    size = strlen(buffer);
-//    FileUtil::FileError error;
-//
-//    auto fileHandle = FileUtil::OpenFile(
-//            m_kptr_restrict_path.c_str(),
-//            FileOpenCreate,
-//            error,
-//            0);
-//    if (fileHandle <= 0)
-//    {
-//        return;
-//    }
-//
-//    FileUtil::WriteFile(fileHandle,
-//                    reinterpret_cast<const unsigned char*>(buffer), size, 0, error);
-//    FileUtil::CloseFile(fileHandle);
+    size_t size = 32;
+    char buffer[size] = {};
+    int ret = snprintf(buffer, sizeof(buffer) -1, "%ld\n", value);
+    if (ret <= 0 || !buffer[0])
+    {
+        return;
+    }
+    size = strlen(buffer);
+
+    auto fileHandle = open(m_kptr_restrict_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    if (fileHandle <= 0)
+    {
+        return;
+    }
+
+    write(fileHandle, buffer, size);
+    close(fileHandle);
 }
 
 void BpfApi::LowerKptrRestrict()

@@ -21,6 +21,11 @@ service-env:
 
     # Imported from cb-vendor
     CPPUTEST_VERSION: CppUTest/3.8.967+967@${DEFAULT_CHANNEL}
+    BOOST_VERSION: Boost/1.74.0+967@${DEFAULT_CHANNEL}
+    ELFUTILS_VERSION: elfutils/0.174+1031@${DEFAULT_CHANNEL}
+    BCC_VERSION: bcc/0.20.0+1031@${DEFAULT_CHANNEL}
+    LLVM_VERSION: llvm/9.0.1+967@${DEFAULT_CHANNEL}
+
     KERNEL_HEADERS_VERSION: # Note, this is needed here for proper dependency tracking
     KERNEL_RHEL_6_6_VERSION: Kernel_2.6.32-504.el6.x86_64/cb-967@re/develop  # 6.6
     KERNEL_RHEL_6_7_VERSION: Kernel_2.6.32-573.el6.x86_64/cb-967@re/develop  # 6.7
