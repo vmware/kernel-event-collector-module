@@ -26,7 +26,7 @@ process_tracking_data g_process_tracking_data = { 0, };
 // For now, the interpreter list is set from this static array.
 char  *static_interpreter_names[] = {
     "bash", "sh", "csh", "zsh", "ksh", "perl", "python", "ruby", "java", "js", "node", "firefox", "chrome", "lua",
-    "php", "tcl", "dash", "pwsh"};
+    "php", "tcl", "dash", "pwsh", "env"};
 char **g_interpreter_names = static_interpreter_names;
 int    g_interpreter_names_count = sizeof(static_interpreter_names)/sizeof(char *);
 
