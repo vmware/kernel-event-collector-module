@@ -10,7 +10,7 @@ base = python_requires("CONAN_UTIL_VERSION")
 
 class KernelEventCollectorModule(base.CbConanFile):
     name     = "KernelEventCollectorModule"
-    version  = "PROJECT_VERSION"
+    version  = "PACKAGE_VERSION"
     settings = "os", "arch"
     generators = "cmake"
     options = {
@@ -68,7 +68,7 @@ class KernelEventCollectorModule(base.CbConanFile):
     def package(self):
         include_dir = "include" + os.path.sep + "k_events_module"
         self.copy("*.h", dst=include_dir, src="include", keep_path=True)
-        self.copy("version.h", dst=include_dir, src="module", keep_path=True)
+        self.copy("version.h", dst=include_dir, keep_path=True)
         self.copy("*.ko.*", excludes="*.debug", dst="modules", src="kernel-builds", keep_path=True)
         self.copy("*.symvers.*", dst="symvers", src="kernel-builds", keep_path=True)
 
