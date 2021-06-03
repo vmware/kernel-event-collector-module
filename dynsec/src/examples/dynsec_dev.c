@@ -130,19 +130,28 @@ void read_events(int fd, const char *banned_path)
                     //            strlen(path), path);
                     // }
                 }
+
+                // TODO: print/log after any event requiring a response
                 if (path && *path) {
-                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u '%s'\n",
-                           exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
-                           exec_msg->msg.sb_magic, exec_msg->msg.uid, path
-                    );
                     // Ban some matching substring
                     if (banned_path && *banned_path && strstr(path, banned_path)) {
                         response = DYNSEC_RESPONSE_EPERM;
                     }
-                } else {
-                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u\n",
+
+                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u "
+                           "pexecid:%llu execid:%llu '%s'\n",
                            exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
-                           exec_msg->msg.sb_magic, exec_msg->msg.uid
+                           exec_msg->msg.sb_magic, exec_msg->msg.uid,
+                           exec_msg->msg.parent_exec_id, exec_msg->msg.self_exec_id,
+                           path
+                    );
+                } else {
+                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u "
+                           "pexecid:%llu execid:%llu '%s'\n",
+                           exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
+                           exec_msg->msg.sb_magic, exec_msg->msg.uid,
+                           exec_msg->msg.parent_exec_id, exec_msg->msg.self_exec_id,
+                           path
                     );
                 }
             }

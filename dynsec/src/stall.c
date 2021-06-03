@@ -222,6 +222,10 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
         exec_event->kmsg.msg.ppid = current->real_parent->tgid;
     }
 
+    // Extra raw task_struct data
+    exec_event->kmsg.msg.parent_exec_id = current->parent_exec_id;
+    exec_event->kmsg.msg.self_exec_id = current->self_exec_id;
+
     // user DAC context
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     exec_event->kmsg.msg.uid = from_kuid(&init_user_ns, current_uid());
