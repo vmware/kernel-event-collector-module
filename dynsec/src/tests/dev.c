@@ -42,7 +42,45 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
     return ret;
 }
 
-void read_events(int fd)
+int respond_to_access_request(int fd, uint64_t req_id,
+                              uint32_t event_type, int response_type)
+{
+    ssize_t ret;
+    struct dynsec_response response = {
+        .req_id = req_id,
+        .event_type = event_type,
+        .response = response_type,
+        .cache_flags = 0xFFFFFFFF,
+    };
+
+    if (fd < 0) {
+        return -EBADF;
+    }
+    switch (event_type)
+    {
+    case DYNSEC_LSM_bprm_set_creds:
+        break;
+
+    default:
+        return -EINVAL;
+    }
+    switch (response_type) {
+    case DYNSEC_RESPONSE_ALLOW:
+    case DYNSEC_RESPONSE_EPERM:
+        break;
+
+    default:
+        return -EINVAL;
+    }
+
+    ret = write(fd, &response, sizeof(response));
+    if (ret < 0) {
+        return -errno;
+    }
+    return 0;
+}
+
+void read_events(int fd, const char *banned_path)
 {
     char buf[8192];
     struct dynsec_exec_umsg *exec_msg;
@@ -59,6 +97,7 @@ void read_events(int fd)
              .revents = 0,
         };
         int ret = poll(&pollfd, 1, -1);
+        int response = DYNSEC_RESPONSE_ALLOW;
 
         if (ret <= 0) {
             continue;
@@ -66,18 +105,6 @@ void read_events(int fd)
 
         bytes_read = read(fd, buf, sizeof(buf));
         if (bytes_read > 0) {
-            // Respond back ASAP
-            struct dynsec_response response = {
-                .req_id = hdr->req_id,
-                .event_type = hdr->type,
-                .response = DYNSEC_RESPONSE_ALLOW,
-                .cache_flags = 0xFFFFFFFF,
-            };
-            ssize_t wrote = write(fd, &response, sizeof(response));
-
-            if (wrote != sizeof(response)) {
-                fprintf(stderr, "FAIL: write(req_id:%llu) = %m\n", hdr->req_id);
-            }
 
             if (hdr->type == DYNSEC_LSM_bprm_set_creds) {
                 char *path = NULL;
@@ -104,6 +131,10 @@ void read_events(int fd)
                                exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
                                exec_msg->msg.sb_magic, exec_msg->msg.uid, path
                         );
+                        // Ban some matching substring
+                        if (banned_path && *banned_path && strstr(path, banned_path)) {
+                            response = DYNSEC_RESPONSE_EPERM;
+                        }
                     } else {
                         printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u\n",
                                exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
@@ -112,6 +143,13 @@ void read_events(int fd)
                     }
                 }
             }
+
+            ret = respond_to_access_request(fd, hdr->req_id, hdr->type, response);
+            if (ret < 0) {
+                fprintf(stderr, "Unable to response to:%llu %#x resp:%d err:%d\n",
+                        hdr->req_id, hdr->type, response, ret);
+            }
+
             // Observe bytes committed to
             memset(buf, 'A', sizeof(buf));
         } else {
@@ -121,7 +159,6 @@ void read_events(int fd)
         }
     }
 }
-
 
 
 int main(int argc, const char *argv[])
@@ -142,7 +179,7 @@ int main(int argc, const char *argv[])
     if (fd < 0) {
         return 255;
     }
-    read_events(fd);
+    read_events(fd, "/foo.sh");
     close(fd);
 
     return 1;
