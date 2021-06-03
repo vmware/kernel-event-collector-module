@@ -137,8 +137,11 @@ static unsigned dynsec_stall_poll(struct file *file, struct poll_table_struct *p
         return 0;
     }
 
-    poll_wait(file, &stall_tbl->queue.wq, pts);
     size = stall_queue_size(stall_tbl);
+    if (!size) {
+        poll_wait(file, &stall_tbl->queue.wq, pts);
+        size = stall_queue_size(stall_tbl);
+    }
 
     if (size) {
         return POLLIN | POLLRDNORM;
