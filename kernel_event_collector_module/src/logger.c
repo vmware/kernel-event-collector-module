@@ -248,9 +248,6 @@ PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, Pro
     TRY(ec_logger_should_log(intentType, eventType));
     switch (eventType)
     {
-    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-        resolvedEventType = CB_EVENT_TYPE_PROCESS_EXIT;
-        break;
     case CB_EVENT_TYPE_PROCESS_START_FORK:
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
         resolvedEventType = CB_EVENT_TYPE_PROCESS_START;

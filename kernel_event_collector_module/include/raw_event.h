@@ -104,7 +104,7 @@ typedef enum CB_EVENT_TYPE {
 
   CB_EVENT_TYPE_PROCESS_START_FORK = 32, /* internal type (not sent to user space) */
   CB_EVENT_TYPE_PROCESS_START_EXEC = 33, /* internal type (not sent to user space) */
-  CB_EVENT_TYPE_PROCESS_LAST_EXIT = 34, /* internal type (not sent to user space) */
+  CB_EVENT_TYPE_PROCESS_LAST_EXIT = 34,
 
   CB_EVENT_TYPE_MAX
 } CB_EVENT_TYPE;

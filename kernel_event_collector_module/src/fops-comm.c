@@ -356,6 +356,7 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     {
     case CB_EVENT_TYPE_PROCESS_START:
     case CB_EVENT_TYPE_PROCESS_EXIT:
+    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
     case CB_EVENT_TYPE_PROCESS_NOT_BLOCKED:
         tx_queue       = &msg_queue_pri0;
@@ -705,6 +706,7 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     {
     case CB_EVENT_TYPE_PROCESS_START:
     case CB_EVENT_TYPE_PROCESS_EXIT:
+    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         atomic64_inc(&tx_process);
         break;
 
@@ -1503,6 +1505,7 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
         break;
 
     case CB_EVENT_TYPE_PROCESS_EXIT:
+    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         break;
 
     case CB_EVENT_TYPE_MODULE_LOAD:
@@ -1559,7 +1562,6 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     // Internal To The Kernel
     case CB_EVENT_TYPE_PROCESS_START_FORK:
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
-    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         return -EINVAL;
 
     // Unused
