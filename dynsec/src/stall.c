@@ -224,17 +224,16 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
 
     // user DAC context
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    exec_event->kmsg.msg.uid = current_uid().val;
-    exec_event->kmsg.msg.euid = current_euid().val;
-    exec_event->kmsg.msg.gid = current_gid().val;
-    exec_event->kmsg.msg.egid = current_egid().val;
+    exec_event->kmsg.msg.uid = from_kuid(&init_user_ns, current_uid());
+    exec_event->kmsg.msg.euid = from_kuid(&init_user_ns, current_euid());
+    exec_event->kmsg.msg.gid = from_kgid(&init_user_ns, current_gid());
+    exec_event->kmsg.msg.egid = from_kgid(&init_user_ns, current_egid());
 #else
     exec_event->kmsg.msg.uid = current_uid();
     exec_event->kmsg.msg.euid = current_euid();
     exec_event->kmsg.msg.gid = current_gid();
     exec_event->kmsg.msg.egid = current_egid();
 #endif
-
     exec_event->kmsg.hdr.payload += sizeof(exec_event->kmsg.msg);
 
     // file context
