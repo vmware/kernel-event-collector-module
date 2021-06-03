@@ -138,20 +138,14 @@ void read_events(int fd, const char *banned_path)
                         response = DYNSEC_RESPONSE_EPERM;
                     }
 
-                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u "
-                           "pexecid:%llu execid:%llu '%s'\n",
+                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u '%s'\n",
                            exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
-                           exec_msg->msg.sb_magic, exec_msg->msg.uid,
-                           exec_msg->msg.parent_exec_id, exec_msg->msg.self_exec_id,
-                           path
+                           exec_msg->msg.sb_magic, exec_msg->msg.uid, path
                     );
                 } else {
-                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u "
-                           "pexecid:%llu execid:%llu '%s'\n",
+                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u\n",
                            exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
-                           exec_msg->msg.sb_magic, exec_msg->msg.uid,
-                           exec_msg->msg.parent_exec_id, exec_msg->msg.self_exec_id,
-                           path
+                           exec_msg->msg.sb_magic, exec_msg->msg.uid
                     );
                 }
             }
