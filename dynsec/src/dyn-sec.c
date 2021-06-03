@@ -37,6 +37,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
     struct dynsec_event *event = NULL;
     int ret = 0;
     int response = 0;
+    int rc;
 #if 0
     struct opcache_ctx ctx;
     bool found_dev = false;
@@ -72,9 +73,9 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
     }
     if (fill_in_bprm_set_creds(dynsec_event_to_exec(event), bprm,
                                GFP_KERNEL)) {
-        ret = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
-        if (ret != 0 || ret != -EPERM) {
-            ret = 0;
+        rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        if (!rc) {
+            ret = response;
         }
     } else {
         free_dynsec_event(event);
