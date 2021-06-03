@@ -7,7 +7,6 @@
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
 #include <linux/lsm_hooks.h>  // security_hook_heads
 #endif  //}
-#include <linux/security.h>
 #include <linux/rculist.h>  // hlist_add_tail_rcu
 #include "symbols.h"
 #include "lsm_mask.h"
@@ -147,7 +146,8 @@ out_fail:
 bool ec_do_lsm_hooks_changed(uint64_t enableHooks)
 {
     bool changed = false;
-//    struct security_operations *secops = p_lsm->security_ops;
+
+    // TODO: Implement this if we need to perform kmod stacking
 
     return changed;
 }

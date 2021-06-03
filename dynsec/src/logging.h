@@ -18,6 +18,6 @@
 #define DS_LOG(LEVEL, format, ...) \
 { \
    if (LEVEL <= DEFAULT_DS_LOG_LEVEL) {\
-      printk( #format, ##__VA_ARGS__ );\
+      pr_info( #format, ##__VA_ARGS__ );\
    }\
 }

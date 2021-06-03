@@ -268,7 +268,7 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
             exec_event->kmsg.hdr.payload += exec_event->kmsg.msg.path_size;
             exec_event->kmsg.path = buf;
         } else {
-            pr_info("Path alignment off %s %lu\n", p, strlen(p) + 1);
+            // memmove alignment off!
             kfree(buf);
             buf = NULL;
         }

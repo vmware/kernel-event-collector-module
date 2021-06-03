@@ -66,7 +66,7 @@ else()
 endif()
 
 # Check for values from the ENV
-set(MODULE_NAME dyn_sec)
+set(MODULE_NAME dynsec)
 string(TOUPPER "${MODULE_NAME}" UPPER_MODULE_NAME)
 
 if(DEFINED ENV{PROJECT_VERSION})
@@ -125,15 +125,10 @@ file(REMOVE ${CONFIGURED_VERSION_FILE})
 configure_file(${INCLUDE_DIR}/version.h.in ${CONFIGURED_VERSION_FILE})
 
 set(SOURCE_FILES
-    dyn-sec.c
+    dynsec.c
     lsm.c
     lsm_mask.h
     logging.h
-#    opcache.c
-    opcache.h
-#    usercomm.c
-    usercomm.h
-    usercomm_msgs.h
     symbols.c
     symbols.h
     stall.c

@@ -109,8 +109,8 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         key.req_id = event->req_id;
         key.event_type = event->type;
 
-        // Place it back into queue OR wake the stalled task if we
-        // don't have a timeout
+        // Place it back into queue OR resume task if we
+        // don't have a timeout during the stall.
         stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW);
     }
     free_dynsec_event(event);
@@ -169,6 +169,8 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
         return -EINVAL;
     }
 
+    // TODO: Sanitize event_type and response type
+
     // switch (response.event_type)
     // {
     // case DYNSEC_LSM_bprm_set_creds:
@@ -214,10 +216,6 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         stall_tbl = NULL;
         ret = 0;
         break;
-
-    // case DYNSEC_CMD_EXCEPTION:
-    //     ret = 0;
-    //     break;
 
     default:
         ret = -EINVAL;

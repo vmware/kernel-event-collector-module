@@ -9,12 +9,12 @@
 // objects or contexts we want to always allow
 #define DYNSEC_CMD_EXCEPTION     0x00000004
 
+
 // Hook IDs -> maps to msg 'type' and 'event_type'
 #define DYNSEC_LSM_bprm_set_creds       0x00000001
 #define DYNSEC_LSM_inode_rename         0x00000002
 #define DYNSEC_LSM_inode_unlink         0x00000004
-#define DYNSEC_LSM_mmap_file            0x00000008
-#define DYNSEC_LSM_file_mmap            0x00000008
+
 
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
 #define DYNSEC_RESPONSE_EPERM 0x00000001
