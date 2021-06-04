@@ -58,7 +58,7 @@ int respond_to_access_request(int fd, uint64_t req_id,
     }
     switch (event_type)
     {
-    case DYNSEC_LSM_bprm_set_creds:
+    case DYNSEC_EVENT_TYPE_EXEC:
         break;
 
     default:
@@ -110,17 +110,17 @@ void read_events(int fd, const char *banned_path)
             }
         }
 
-        if (hdr->type == DYNSEC_LSM_bprm_set_creds) {
+        if (hdr->event_type == DYNSEC_EVENT_TYPE_EXEC) {
             char *path = NULL;
             struct dynsec_exec_umsg *exec_msg = (struct dynsec_exec_umsg *)hdr;
 
             if (hdr->payload != exec_msg->hdr.payload ||
                 hdr->req_id != exec_msg->hdr.req_id || 
-                hdr->type != exec_msg->hdr.type) {
-                printf("hdr->payload:%u hdr->req_id:%llu hdr->type:%#x\n",
-                       hdr->payload, hdr->req_id, hdr->type);
-                printf("payload:%u req_id:%llu type:%#x\n", exec_msg->hdr.payload,
-                       exec_msg->hdr.req_id, exec_msg->hdr.type);
+                hdr->event_type != exec_msg->hdr.event_type) {
+                printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
+                       hdr->payload, hdr->req_id, hdr->event_type);
+                printf("payload:%u req_id:%llu event_type:%#x\n", exec_msg->hdr.payload,
+                       exec_msg->hdr.req_id, exec_msg->hdr.event_type);
             } else {
                 if (exec_msg->msg.path_offset) {
                     path = buf + exec_msg->msg.path_offset;
@@ -151,10 +151,10 @@ void read_events(int fd, const char *banned_path)
             }
         }
 
-        ret = respond_to_access_request(fd, hdr->req_id, hdr->type, response);
+        ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type, response);
         if (ret < 0) {
             fprintf(stderr, "Unable to response to:%llu %#x resp:%d err:%d\n",
-                    hdr->req_id, hdr->type, response, ret);
+                    hdr->req_id, hdr->event_type, response, ret);
         }
 
         // Observe bytes committed to

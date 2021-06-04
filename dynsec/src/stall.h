@@ -9,7 +9,7 @@
 #pragma pack(push, 1)
 struct dynsec_event {
     uint64_t req_id;
-    uint32_t type;
+    uint32_t event_type;
     struct list_head list;
 };
 
@@ -29,7 +29,7 @@ dynsec_event_to_exec(const struct dynsec_event *dynsec_event)
 
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
 
-extern struct dynsec_event *alloc_dynsec_event(uint32_t type, gfp_t mode);
+extern struct dynsec_event *alloc_dynsec_event(uint32_t event_type, gfp_t mode);
 
 extern void free_dynsec_event(struct dynsec_event *dynsec_event);
 

@@ -16,7 +16,7 @@
 
 // LSM Hooks / Event Types We Want to Enable On Default
 // TODO: Make this overridable via module param
-#define DYNSEC_LSM_default (DYNSEC_LSM_bprm_set_creds)
+#define DYNSEC_LSM_default (DYNSEC_EVENT_TYPE_EXEC)
 
 //
 // Our hook for exec
@@ -52,7 +52,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 
     // TODO: check if stall_tbl's connected tgid matches
 
-    event = alloc_dynsec_event(DYNSEC_LSM_bprm_set_creds, GFP_KERNEL);
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_EXEC, GFP_KERNEL);
     if (!event) {
         goto out;
     }

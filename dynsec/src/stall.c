@@ -30,23 +30,23 @@ static struct dynsec_event *alloc_exec_event(gfp_t mode)
 
     // Set key core data
     exec_event->event.req_id = dynsec_next_req_id();
-    exec_event->event.type = DYNSEC_LSM_bprm_set_creds;
+    exec_event->event.event_type = DYNSEC_EVENT_TYPE_EXEC;
 
     exec_event->kmsg.hdr.req_id = exec_event->event.req_id;
-    exec_event->kmsg.hdr.type = exec_event->event.type;
+    exec_event->kmsg.hdr.event_type = exec_event->event.event_type;
 
     // pr_info("%s: req_id:%llu type:%#x\n", __func__,
-    //         exec_event->event.req_id, exec_event->event.type);
+    //         exec_event->event.req_id, exec_event->event.event_type);
 
     return &exec_event->event;
 }
 
 // Event allocation factory
-struct dynsec_event *alloc_dynsec_event(uint32_t type, gfp_t mode)
+struct dynsec_event *alloc_dynsec_event(uint32_t event_type, gfp_t mode)
 {
-    switch (type)
+    switch (event_type)
     {
-    case DYNSEC_LSM_bprm_set_creds:
+    case DYNSEC_EVENT_TYPE_EXEC:
         return alloc_exec_event(mode);
 
     default:
@@ -62,9 +62,9 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         return;
     }
 
-    switch (dynsec_event->type)
+    switch (dynsec_event->event_type)
     {
-    case DYNSEC_LSM_bprm_set_creds:
+    case DYNSEC_EVENT_TYPE_EXEC:
         {
             struct dynsec_exec_event *exec_event =
                     dynsec_event_to_exec(dynsec_event);
@@ -90,9 +90,9 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
         return 0;
     }
 
-    switch (dynsec_event->type)
+    switch (dynsec_event->event_type)
     {
-    case DYNSEC_LSM_bprm_set_creds:
+    case DYNSEC_EVENT_TYPE_EXEC:
         {
             struct dynsec_exec_event *exec_event =
                     dynsec_event_to_exec(dynsec_event);
@@ -176,9 +176,9 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
     }
 
     // Copy might be different per event type
-    switch (dynsec_event->type)
+    switch (dynsec_event->event_type)
     {
-    case DYNSEC_LSM_bprm_set_creds:
+    case DYNSEC_EVENT_TYPE_EXEC:
         {
             const struct dynsec_exec_event *dee = 
                                     dynsec_event_to_exec(dynsec_event);
@@ -211,7 +211,7 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
 
     // hdr data
     exec_event->kmsg.hdr.req_id = exec_event->event.req_id;
-    exec_event->kmsg.hdr.type = exec_event->event.type;
+    exec_event->kmsg.hdr.event_type = exec_event->event.event_type;
 
     exec_event->kmsg.hdr.payload += sizeof(exec_event->kmsg.hdr);
 

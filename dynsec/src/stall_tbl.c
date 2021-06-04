@@ -250,7 +250,7 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
 
     // Copy event unique identifiers
     entry->key.req_id = event->req_id;
-    entry->key.event_type = event->type;
+    entry->key.event_type = event->event_type;
 
     // Build bucket lookup data
     entry->hash = stall_hash(tbl->secret, &entry->key);

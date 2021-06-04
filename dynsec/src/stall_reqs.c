@@ -107,7 +107,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
 
         memset(&key, 0, sizeof(key));
         key.req_id = event->req_id;
-        key.event_type = event->type;
+        key.event_type = event->event_type;
 
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
@@ -173,7 +173,7 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
 
     // switch (response.event_type)
     // {
-    // case DYNSEC_LSM_bprm_set_creds:
+    // case DYNSEC_EVENT_TYPE_EXEC:
     //     break;
 
     // default:

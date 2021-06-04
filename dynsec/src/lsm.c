@@ -77,6 +77,10 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 #endif
     p_lsm = &lsm_syms;
 
+    BUILD_BUG_ON(DYNSEC_LSM_bprm_set_creds != DYNSEC_EVENT_TYPE_EXEC);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_rename   != DYNSEC_EVENT_TYPE_RENAME);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_unlink   != DYNSEC_EVENT_TYPE_UNLINK);
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     //
     // Save off the old LSM pointers

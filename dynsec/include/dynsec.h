@@ -10,10 +10,16 @@
 #define DYNSEC_CMD_EXCEPTION     0x00000004
 
 
-// Hook IDs -> maps to msg 'type' and 'event_type'
-#define DYNSEC_LSM_bprm_set_creds       0x00000001
-#define DYNSEC_LSM_inode_rename         0x00000002
-#define DYNSEC_LSM_inode_unlink         0x00000004
+#define DYNSEC_EVENT_TYPE_EXEC      0x00000001
+#define DYNSEC_EVENT_TYPE_RENAME    0x00000002
+#define DYNSEC_EVENT_TYPE_UNLINK    0x00000004
+#define DYNSEC_EVENT_TYPE_SETATTR   0x00000008
+
+// Well see how long this can map 1:1
+#define DYNSEC_LSM_bprm_set_creds       DYNSEC_EVENT_TYPE_EXEC
+#define DYNSEC_LSM_inode_rename         DYNSEC_EVENT_TYPE_RENAME
+#define DYNSEC_LSM_inode_unlink         DYNSEC_EVENT_TYPE_UNLINK
+#define DYNSEC_LSM_inode_setattr        DYNSEC_EVENT_TYPE_SETATTR
 
 
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
@@ -24,7 +30,7 @@
 struct dynsec_msg_hdr {
     uint16_t payload;
     uint64_t req_id;
-    uint32_t type;
+    uint32_t event_type;
 };
 
 // Response from usermode
