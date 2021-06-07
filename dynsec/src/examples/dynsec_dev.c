@@ -12,6 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/sysmacros.h>
 
 #include "dynsec.h"
 
@@ -52,26 +53,6 @@ int respond_to_access_request(int fd, uint64_t req_id,
         .response = response_type,
         .cache_flags = 0xFFFFFFFF,
     };
-
-    if (fd < 0) {
-        return -EBADF;
-    }
-    switch (event_type)
-    {
-    case DYNSEC_EVENT_TYPE_EXEC:
-        break;
-
-    default:
-        return -EINVAL;
-    }
-    switch (response_type) {
-    case DYNSEC_RESPONSE_ALLOW:
-    case DYNSEC_RESPONSE_EPERM:
-        break;
-
-    default:
-        return -EINVAL;
-    }
 
     ret = write(fd, &response, sizeof(response));
     if (ret < 0) {
@@ -149,6 +130,50 @@ void read_events(int fd, const char *banned_path)
                     );
                 }
             }
+        } else if (hdr->event_type == DYNSEC_EVENT_TYPE_UNLINK {
+            char *path = NULL;
+
+            struct dynsec_unlink_umsg *unlink_msg = (struct dynsec_unlink_umsg *)hdr;
+
+            if (hdr->payload != unlink_msg->hdr.payload ||
+                hdr->req_id != unlink_msg->hdr.req_id || 
+                hdr->event_type != unlink_msg->hdr.event_type) {
+                printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
+                       hdr->payload, hdr->req_id, hdr->event_type);
+                printf("payload:%u req_id:%llu event_type:%#x\n", unlink_msg->hdr.payload,
+                       unlink_msg->hdr.req_id, unlink_msg->hdr.event_type);
+            } else {
+                if (unlink_msg->msg.path_offset) {
+                    path = buf + unlink_msg->msg.path_offset;
+                }
+
+                if (path && *path) {
+                    // Ban some matching substring
+                    if (banned_path && *banned_path && strstr(path, banned_path)) {
+                        response = DYNSEC_RESPONSE_EPERM;
+                    }
+
+                    printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
+                           "'%s' parent[%llu:%#x]\n",
+                           unlink_msg->msg.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
+                           unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
+                           unlink_msg->msg.uid, path, unlink_msg->msg.parent_ino,
+                           unlink_msg->msg.parent_dev
+                    );
+                } else {
+                    printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
+                           "parent[%llu:%#x]\n",
+                           unlink_msg->msg.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
+                           unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
+                           unlink_msg->msg.uid, unlink_msg->msg.parent_ino,
+                           unlink_msg->msg.parent_dev
+                    );
+                }
+            }
+        }
+        else {
+            printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
+                   hdr->payload, hdr->req_id, hdr->event_type);
         }
 
         ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type, response);

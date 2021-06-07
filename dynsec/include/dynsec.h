@@ -9,17 +9,15 @@
 // objects or contexts we want to always allow
 #define DYNSEC_CMD_EXCEPTION     0x00000004
 
-
 #define DYNSEC_EVENT_TYPE_EXEC      0x00000001
 #define DYNSEC_EVENT_TYPE_RENAME    0x00000002
 #define DYNSEC_EVENT_TYPE_UNLINK    0x00000004
-#define DYNSEC_EVENT_TYPE_SETATTR   0x00000008
+#define DYNSEC_EVENT_TYPE_RMDIR     0x00000008
 
 // Well see how long this can map 1:1
 #define DYNSEC_LSM_bprm_set_creds       DYNSEC_EVENT_TYPE_EXEC
 #define DYNSEC_LSM_inode_rename         DYNSEC_EVENT_TYPE_RENAME
 #define DYNSEC_LSM_inode_unlink         DYNSEC_EVENT_TYPE_UNLINK
-#define DYNSEC_LSM_inode_setattr        DYNSEC_EVENT_TYPE_SETATTR
 
 
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
@@ -68,6 +66,38 @@ struct dynsec_exec_kmsg {
 struct dynsec_exec_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_exec_msg msg;
+};
+
+// Core Unlink Content
+struct dynsec_unlink_msg {
+    uint32_t pid;
+    uint32_t tgid;
+    uint32_t ppid;
+    uint32_t uid;
+    uint32_t euid;
+    uint32_t gid;
+    uint32_t egid;
+    uint64_t sb_magic;
+    uint16_t mode;
+    uint64_t ino;
+    uint32_t dev;
+    uint16_t path_offset;
+    uint16_t path_size;
+    uint64_t parent_ino;
+    uint32_t parent_dev;
+};
+
+#ifdef __KERNEL__
+struct dynsec_unlink_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_unlink_msg msg;
+    char *path;
+};
+#endif /* __KERNEL__ */
+
+struct dynsec_unlink_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_unlink_msg msg;
 };
 
 #pragma pack(pop)

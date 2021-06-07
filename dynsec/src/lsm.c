@@ -28,14 +28,14 @@ static struct security_operations   g_combined_ops;       // Original LSM plus o
 #endif //}
 
 extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
-
+extern int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry);
+extern int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
+                               struct inode *new_dir, struct dentry *new_dentry);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
 static unsigned int cblsm_hooks_count;
 static struct security_hook_list cblsm_hooks[64];  // [0..39] not needed?
 #endif  //}
-
-extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
 
 struct lsm_symbols {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
@@ -102,9 +102,9 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     memset(cblsm_hooks, 0, sizeof(cblsm_hooks));
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
-        if (enableHooks & DYNSEC_LSM_##NAME) { \
-            pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &security_hook_heads.NAME, #NAME); \
-            cblsm_hooks[cblsm_hooks_count].head = &security_hook_heads.NAME; \
+        if (p_lsm->security_hook_heads && enableHooks & DYNSEC_LSM_##NAME) { \
+            pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &p_lsm->security_hook_heads->NAME, #NAME); \
+            cblsm_hooks[cblsm_hooks_count].head = &p_lsm->security_hook_heads->NAME; \
             cblsm_hooks[cblsm_hooks_count].hook.NAME = dynsec_##NAME; \
             cblsm_hooks[cblsm_hooks_count].lsm = "dynsec"; \
             cblsm_hooks_count++; \
@@ -115,7 +115,10 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     //
     // Now add our hooks
     //
-    CB_LSM_SETUP_HOOK(bprm_set_creds);   // process banning  (exec)
+    CB_LSM_SETUP_HOOK(bprm_set_creds); // process banning  (exec)
+    CB_LSM_SETUP_HOOK(inode_unlink);   // security_inode_unlink
+    CB_LSM_SETUP_HOOK(inode_rename);   // security_inode_rename
+
 #undef CB_LSM_SETUP_HOOK
 
 

@@ -48,7 +48,7 @@ static int find_symbol_by_kprobe(const char *symbol_name, unsigned long *addr)
 
 static int find_symbol_kallsyms(const char *symbol_name, unsigned long *addr)
 {
-	if (addr) {
+	if (addr && syms.kallsyms_lookup_name) {
 		*addr = syms.kallsyms_lookup_name(symbol_name);
 	}
 	return 0;
@@ -79,6 +79,10 @@ int find_symbol_indirect(const char *symbol_name, unsigned long *addr)
 		*addr = 0;
 	}
 
-	return find_symbol_kallsyms(symbol_name, addr);
+	find_symbol_kallsyms(symbol_name, addr);
+	if (!addr) {
+		find_symbol_by_kprobe(symbol_name, addr);
+	}
+	return 0;
 }
 
