@@ -41,7 +41,7 @@ static struct dynsec_event *alloc_exec_event(gfp_t mode)
 
 static struct dynsec_event *alloc_unlink_event(gfp_t mode)
 {
-    struct dynsec_exec_event *unlink_event = kzalloc(sizeof(*unlink_event), mode);
+    struct dynsec_unlink_event *unlink_event = kzalloc(sizeof(*unlink_event), mode);
 
     if (!unlink_event) {
         return NULL;
