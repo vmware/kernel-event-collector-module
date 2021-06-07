@@ -40,6 +40,19 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
         return PTR_ERR(entry);
     }
 
+#ifdef wait_event_interruptible_timeout
+    ret = wait_event_interruptible_timeout(entry->wq, entry->mode != 0, msecs_to_jiffies(ms));
+    stall_tbl_remove_entry(stall_tbl, entry);
+    if (ret >= 1) {
+        spin_lock(&entry->lock);
+        local_response = entry->response;
+        spin_unlock(&entry->lock);
+    } else if (ret == 0) {
+        pr_info("%s:%d timedout:%u ms\n", __func__, __LINE__, ms);
+    } else {
+        pr_info("%s: interruped %d\n", __func__, ret);
+    }
+#else
     ret = wait_event_timeout(entry->wq, entry->mode != 0, msecs_to_jiffies(ms));
     stall_tbl_remove_entry(stall_tbl, entry);
     if (ret >= 1) {
@@ -49,6 +62,7 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
     } else {
         pr_info("%s:%d timedout:%u ms\n", __func__, __LINE__, ms);
     }
+#endif
     kfree(entry);
     entry = NULL;
 

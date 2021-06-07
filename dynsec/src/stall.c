@@ -57,6 +57,25 @@ static struct dynsec_event *alloc_unlink_event(gfp_t mode)
     return &unlink_event->event;
 }
 
+static struct dynsec_event *alloc_rmdir_event(gfp_t mode)
+{
+    struct dynsec_unlink_event *unlink_event = kzalloc(sizeof(*unlink_event), mode);
+
+    if (!unlink_event) {
+        return NULL;
+    }
+
+    // Set key core data
+    unlink_event->event.req_id = dynsec_next_req_id();
+    unlink_event->event.event_type = DYNSEC_EVENT_TYPE_RMDIR;
+
+    unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
+    unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
+
+    return &unlink_event->event;
+}
+
+
 static struct dynsec_event *alloc_rename_event(gfp_t mode)
 {
     struct dynsec_rename_event *rename_event = kzalloc(sizeof(*rename_event), mode);
@@ -85,6 +104,9 @@ struct dynsec_event *alloc_dynsec_event(uint32_t event_type, gfp_t mode)
 
     case DYNSEC_EVENT_TYPE_UNLINK:
         return alloc_unlink_event(mode);
+
+    case DYNSEC_EVENT_TYPE_RMDIR:
+        return alloc_rmdir_event(mode);
 
     case DYNSEC_EVENT_TYPE_RENAME:
         return alloc_rename_event(mode);
@@ -117,6 +139,7 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_RMDIR:
     case DYNSEC_EVENT_TYPE_UNLINK:
         {
             struct dynsec_unlink_event *unlink_event =
@@ -170,6 +193,7 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_RMDIR:
     case DYNSEC_EVENT_TYPE_UNLINK:
         {
             struct dynsec_unlink_event *unlink_event =
@@ -402,6 +426,7 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_RMDIR:
     case DYNSEC_EVENT_TYPE_UNLINK:
         {
             const struct dynsec_unlink_event *unlink_event =

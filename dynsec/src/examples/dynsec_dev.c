@@ -92,7 +92,7 @@ void read_events(int fd, const char *banned_path)
         }
 
         if (hdr->event_type == DYNSEC_EVENT_TYPE_EXEC) {
-            char *path = NULL;
+            char *path = "";
             struct dynsec_exec_umsg *exec_msg = (struct dynsec_exec_umsg *)hdr;
 
             if (hdr->payload != exec_msg->hdr.payload ||
@@ -113,24 +113,19 @@ void read_events(int fd, const char *banned_path)
                 }
 
                 // TODO: print/log after any event requiring a response
-                if (path && *path) {
-                    // Ban some matching substring
-                    if (banned_path && *banned_path && strstr(path, banned_path)) {
-                        response = DYNSEC_RESPONSE_EPERM;
-                    }
-
-                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u '%s'\n",
-                           exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
-                           exec_msg->msg.sb_magic, exec_msg->msg.uid, path
-                    );
-                } else {
-                    printf("Exec: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u\n",
-                           exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
-                           exec_msg->msg.sb_magic, exec_msg->msg.uid
-                    );
+                // Ban some matching substring
+                if (banned_path && *banned_path && path && *path &&
+                    strstr(path, banned_path)) {
+                    response = DYNSEC_RESPONSE_EPERM;
                 }
+
+                printf("EXEC: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u '%s'\n",
+                       exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
+                       exec_msg->msg.sb_magic, exec_msg->msg.uid, path
+                );
             }
-        } else if (hdr->event_type == DYNSEC_EVENT_TYPE_UNLINK) {
+        } else if (hdr->event_type == DYNSEC_EVENT_TYPE_UNLINK ||
+                   hdr->event_type == DYNSEC_EVENT_TYPE_RMDIR) {
             char *path = "";
 
             struct dynsec_unlink_umsg *unlink_msg = (struct dynsec_unlink_umsg *)hdr;

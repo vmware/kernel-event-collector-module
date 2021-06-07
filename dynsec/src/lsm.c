@@ -29,6 +29,7 @@ static struct security_operations   g_combined_ops;       // Original LSM plus o
 
 extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
 extern int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry);
+extern int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry);
 extern int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
                                struct inode *new_dir, struct dentry *new_dentry);
 
@@ -117,6 +118,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     //
     CB_LSM_SETUP_HOOK(bprm_set_creds); // process banning  (exec)
     CB_LSM_SETUP_HOOK(inode_unlink);   // security_inode_unlink
+    CB_LSM_SETUP_HOOK(inode_rmdir);   // security_inode_rmdir
     CB_LSM_SETUP_HOOK(inode_rename);   // security_inode_rename
 
 #undef CB_LSM_SETUP_HOOK

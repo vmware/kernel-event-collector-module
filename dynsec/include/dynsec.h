@@ -18,7 +18,7 @@
 #define DYNSEC_LSM_bprm_set_creds       DYNSEC_EVENT_TYPE_EXEC
 #define DYNSEC_LSM_inode_rename         DYNSEC_EVENT_TYPE_RENAME
 #define DYNSEC_LSM_inode_unlink         DYNSEC_EVENT_TYPE_UNLINK
-
+#define DYNSEC_LSM_inode_rmdir          DYNSEC_EVENT_TYPE_RMDIR
 
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
 #define DYNSEC_RESPONSE_EPERM 0x00000001

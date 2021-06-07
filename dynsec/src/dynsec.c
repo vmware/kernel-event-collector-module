@@ -18,8 +18,9 @@
 // LSM Hooks / Event Types We Want to Enable On Default
 // TODO: Make this overridable via module param
 #define DYNSEC_LSM_default (\
-    DYNSEC_EVENT_TYPE_EXEC |\
-    DYNSEC_EVENT_TYPE_UNLINK |\
+    DYNSEC_EVENT_TYPE_EXEC      |\
+    DYNSEC_EVENT_TYPE_UNLINK    |\
+    DYNSEC_EVENT_TYPE_RMDIR     |\
     DYNSEC_EVENT_TYPE_RENAME)
 
 
@@ -88,6 +89,57 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     if (g_original_ops_ptr) {
         ret = g_original_ops_ptr->inode_unlink(dir, dentry);
+        if (ret) {
+            goto out;
+        }
+    }
+#endif
+
+    // Only care about certain types of files
+    if (!dentry->d_inode) {
+        goto out;
+    }
+    mode = dentry->d_inode->i_mode;
+    if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
+        goto out;
+    }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        goto out;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
+    if (!event) {
+        goto out;
+    }
+
+    if (fill_in_inode_unlink(dynsec_event_to_unlink(event), dir, dentry,
+                               GFP_KERNEL)) {
+        rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        free_dynsec_event(event);
+    }
+    event = NULL;
+
+out:
+
+    return ret;
+}
+
+int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
+{
+    struct dynsec_event *event = NULL;
+    int ret = 0;
+    int response = 0;
+    int rc;
+    umode_t mode;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        ret = g_original_ops_ptr->inode_rmdir(dir, dentry);
         if (ret) {
             goto out;
         }
