@@ -70,8 +70,9 @@ char *dynsec_d_path(const struct path *path, char *buf, int buflen)
     if (path_syms.d_absolute_path) {
         return path_syms.d_absolute_path(path, buf, buflen);
     }
+
     if (path_syms.d_path) {
-        return d_path(path, buf, buflen);
+        return path_syms.d_path(path, buf, buflen);
     }
 
     return NULL;

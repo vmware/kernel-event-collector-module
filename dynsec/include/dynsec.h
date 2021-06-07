@@ -100,5 +100,44 @@ struct dynsec_unlink_umsg {
     struct dynsec_unlink_msg msg;
 };
 
+// Core Rename Content
+struct dynsec_rename_msg {
+    uint32_t pid;
+    uint32_t tgid;
+    uint32_t ppid;
+    uint32_t uid;
+    uint32_t euid;
+    uint32_t gid;
+    uint32_t egid;
+
+    uint64_t sb_magic;
+    uint32_t dev;
+
+    uint16_t old_mode;
+    uint64_t old_ino;
+    uint16_t old_path_offset;
+    uint16_t old_path_size;
+    uint64_t old_parent_ino;
+
+    uint16_t new_mode;
+    uint64_t new_ino;
+    uint16_t new_path_offset;
+    uint16_t new_path_size;
+    uint64_t new_parent_ino;
+};
+
+#ifdef __KERNEL__
+struct dynsec_rename_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_rename_msg msg;
+    char *old_path;
+    char *new_path;
+};
+#endif /* __KERNEL__ */
+
+struct dynsec_rename_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_rename_msg msg;
+};
 #pragma pack(pop)
 

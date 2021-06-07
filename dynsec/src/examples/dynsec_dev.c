@@ -130,8 +130,8 @@ void read_events(int fd, const char *banned_path)
                     );
                 }
             }
-        } else if (hdr->event_type == DYNSEC_EVENT_TYPE_UNLINK {
-            char *path = NULL;
+        } else if (hdr->event_type == DYNSEC_EVENT_TYPE_UNLINK) {
+            char *path = "";
 
             struct dynsec_unlink_umsg *unlink_msg = (struct dynsec_unlink_umsg *)hdr;
 
@@ -146,29 +146,46 @@ void read_events(int fd, const char *banned_path)
                 if (unlink_msg->msg.path_offset) {
                     path = buf + unlink_msg->msg.path_offset;
                 }
+                printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
+                       "parent[%llu:%#x] '%s'\n",
+                       unlink_msg->msg.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
+                       unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
+                       unlink_msg->msg.uid, unlink_msg->msg.parent_ino,
+                       unlink_msg->msg.parent_dev, path
+                );
+            }
+        } else if (hdr->event_type == DYNSEC_EVENT_TYPE_RENAME) {
+            char *old_path = "";
+            char *new_path = "";
 
-                if (path && *path) {
-                    // Ban some matching substring
-                    if (banned_path && *banned_path && strstr(path, banned_path)) {
-                        response = DYNSEC_RESPONSE_EPERM;
-                    }
+            struct dynsec_rename_umsg *rename_msg = (struct dynsec_rename_umsg *)hdr;
 
-                    printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
-                           "'%s' parent[%llu:%#x]\n",
-                           unlink_msg->msg.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
-                           unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
-                           unlink_msg->msg.uid, path, unlink_msg->msg.parent_ino,
-                           unlink_msg->msg.parent_dev
-                    );
-                } else {
-                    printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
-                           "parent[%llu:%#x]\n",
-                           unlink_msg->msg.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
-                           unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
-                           unlink_msg->msg.uid, unlink_msg->msg.parent_ino,
-                           unlink_msg->msg.parent_dev
-                    );
+            if (hdr->payload != rename_msg->hdr.payload ||
+                hdr->req_id != rename_msg->hdr.req_id || 
+                hdr->event_type != rename_msg->hdr.event_type) {
+                printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
+                       hdr->payload, hdr->req_id, hdr->event_type);
+                printf("payload:%u req_id:%llu event_type:%#x\n", rename_msg->hdr.payload,
+                       rename_msg->hdr.req_id, rename_msg->hdr.event_type);
+            } else {
+                if (rename_msg->msg.old_path_offset) {
+                    old_path = buf + rename_msg->msg.old_path_offset;
                 }
+                if (rename_msg->msg.new_path_offset) {
+                    new_path = buf + rename_msg->msg.new_path_offset;
+                }
+
+                printf("RENAME: tid:%u dev:%#x magic:%#lx uid:%u "
+                       "'%s'[%llu %#04x %llu]->'%s'[%llu %#04x %llu]\n",
+                       rename_msg->msg.pid, rename_msg->msg.dev,
+                       rename_msg->msg.sb_magic,
+                       rename_msg->msg.uid,
+                       old_path, rename_msg->msg.old_ino, rename_msg->msg.old_mode,
+                       rename_msg->msg.old_parent_ino,
+
+                       new_path, rename_msg->msg.new_ino, rename_msg->msg.new_mode,
+                       rename_msg->msg.new_parent_ino
+                );
             }
         }
         else {

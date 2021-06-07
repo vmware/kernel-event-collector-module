@@ -57,6 +57,24 @@ static struct dynsec_event *alloc_unlink_event(gfp_t mode)
     return &unlink_event->event;
 }
 
+static struct dynsec_event *alloc_rename_event(gfp_t mode)
+{
+    struct dynsec_rename_event *rename_event = kzalloc(sizeof(*rename_event), mode);
+
+    if (!rename_event) {
+        return NULL;
+    }
+
+    // Set key core data
+    rename_event->event.req_id = dynsec_next_req_id();
+    rename_event->event.event_type = DYNSEC_EVENT_TYPE_RENAME;
+
+    rename_event->kmsg.hdr.req_id = rename_event->event.req_id;
+    rename_event->kmsg.hdr.event_type = rename_event->event.event_type;
+
+    return &rename_event->event;
+}
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(uint32_t event_type, gfp_t mode)
 {
@@ -67,6 +85,9 @@ struct dynsec_event *alloc_dynsec_event(uint32_t event_type, gfp_t mode)
 
     case DYNSEC_EVENT_TYPE_UNLINK:
         return alloc_unlink_event(mode);
+
+    case DYNSEC_EVENT_TYPE_RENAME:
+        return alloc_rename_event(mode);
 
     default:
         break;
@@ -109,6 +130,23 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_RENAME:
+        {
+            struct dynsec_rename_event *rename_event =
+                    dynsec_event_to_rename(dynsec_event);
+
+            if (rename_event->kmsg.old_path) {
+                kfree(rename_event->kmsg.old_path);
+                rename_event->kmsg.old_path = NULL;
+            }
+            if (rename_event->kmsg.new_path) {
+                kfree(rename_event->kmsg.new_path);
+                rename_event->kmsg.new_path = NULL;
+            }
+            kfree(rename_event);
+        }
+        break;
+
     default:
         break;
     }
@@ -134,13 +172,19 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
 
     case DYNSEC_EVENT_TYPE_UNLINK:
         {
-        {
             struct dynsec_unlink_event *unlink_event =
                     dynsec_event_to_unlink(dynsec_event);
             return unlink_event->kmsg.hdr.payload;
         }
         break;
+
+    case DYNSEC_EVENT_TYPE_RENAME:
+        {
+            struct dynsec_rename_event *rename_event =
+                    dynsec_event_to_rename(dynsec_event);
+            return rename_event->kmsg.hdr.payload;
         }
+        break;
 
     default:
         break;
@@ -210,7 +254,7 @@ out_fail:
 }
 
 static ssize_t copy_unlink_event(const struct dynsec_unlink_event *unlink_event,
-                               char *__user buf, size_t count)
+                                 char *__user buf, size_t count)
 {
     int copied = 0;
     char *__user p = buf;
@@ -235,7 +279,7 @@ static ssize_t copy_unlink_event(const struct dynsec_unlink_event *unlink_event,
         p += sizeof(unlink_event->kmsg.msg);
     }
 
-    // Copy executed file
+    // Copy Path Being Removed
     if (unlink_event->kmsg.path && unlink_event->kmsg.msg.path_offset &&
         unlink_event->kmsg.msg.path_size) {
 
@@ -265,6 +309,80 @@ out_fail:
 }
 
 
+static ssize_t copy_rename_event(const struct dynsec_rename_event *rename_event,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < rename_event->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &rename_event->kmsg.hdr, sizeof(rename_event->kmsg.hdr))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(rename_event->kmsg.hdr);
+        p += sizeof(rename_event->kmsg.hdr);
+    }
+
+    // Copy exec event's static data
+    if (copy_to_user(p, &rename_event->kmsg.msg, sizeof(rename_event->kmsg.msg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(rename_event->kmsg.msg);
+        p += sizeof(rename_event->kmsg.msg);
+    }
+
+    // Copy Old Path
+    if (rename_event->kmsg.old_path && rename_event->kmsg.msg.old_path_offset &&
+        rename_event->kmsg.msg.old_path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    rename_event->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, rename_event->kmsg.old_path, rename_event->kmsg.msg.old_path_size)) {
+            goto out_fail;
+        }  else {
+            copied += rename_event->kmsg.msg.old_path_size;
+            p += rename_event->kmsg.msg.old_path_size;
+        }
+    }
+
+    // Copy New Path
+    if (rename_event->kmsg.new_path && rename_event->kmsg.msg.new_path_offset &&
+        rename_event->kmsg.msg.new_path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    rename_event->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, rename_event->kmsg.new_path, rename_event->kmsg.msg.new_path_size)) {
+            goto out_fail;
+        }  else {
+            copied += rename_event->kmsg.msg.new_path_size;
+            p += rename_event->kmsg.msg.new_path_size;
+        }
+    }
+
+    if (rename_event->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                rename_event->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 // Copy to userspace
 ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
                                   char *__user p, size_t count)
@@ -278,7 +396,7 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
     {
     case DYNSEC_EVENT_TYPE_EXEC:
         {
-            const struct dynsec_exec_event *dee = 
+            const struct dynsec_exec_event *dee =
                                     dynsec_event_to_exec(dynsec_event);
             return copy_exec_event(dee, p, count);
         }
@@ -286,9 +404,17 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
 
     case DYNSEC_EVENT_TYPE_UNLINK:
         {
-            const struct dynsec_unlink_event *unlink_event = 
+            const struct dynsec_unlink_event *unlink_event =
                                     dynsec_event_to_unlink(dynsec_event);
             return copy_unlink_event(unlink_event, p, count);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_RENAME:
+        {
+            const struct dynsec_rename_event *rename_event =
+                                    dynsec_event_to_rename(dynsec_event);
+            return copy_rename_event(rename_event, p, count);
         }
         break;
 
@@ -358,13 +484,17 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
         found_dev = true;
     }
 
-#define EXEC_PATH_SZ 4096
+    if (!bprm->file || !bprm->file->f_path.dentry) {
+        return true;
+    }
+
+#define EXEC_PATH_SZ 2048
     buf = kzalloc(EXEC_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
 
-    p = dynsec_d_path(&bprm->file->f_path, buf, EXEC_PATH_SZ);
+    p = dynsec_dentry_path(bprm->file->f_path.dentry, buf, EXEC_PATH_SZ);
     if (!IS_ERR(p) || (p && *p)) {
         if (likely(p > buf)) {
             memmove(buf, p, buf - p + EXEC_PATH_SZ -1);
@@ -455,7 +585,7 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
         }
     }
 
-#define UNLINK_PATH_SZ 4096
+#define UNLINK_PATH_SZ 2048
     buf = kzalloc(UNLINK_PATH_SZ, mode);
     if (!buf) {
         return true;
@@ -472,6 +602,136 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
 
             unlink_event->kmsg.hdr.payload += unlink_event->kmsg.msg.path_size;
             unlink_event->kmsg.path = buf;
+        } else {
+            // memmove alignment off!
+            kfree(buf);
+            buf = NULL;
+        }
+    } else {
+        kfree(buf);
+        buf = NULL;
+    }
+
+    return true;
+}
+
+bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
+                          struct inode *old_dir, struct dentry *old_dentry,
+                          struct inode *new_dir, struct dentry *new_dentry,
+                          gfp_t mode)
+{
+    char *buf = NULL;
+    char *p = NULL;
+
+    if (!rename_event || !old_dentry) {
+        return false;
+    }
+
+    rename_event->kmsg.hdr.payload = 0;
+
+    // hdr data
+    rename_event->kmsg.hdr.req_id = rename_event->event.req_id;
+    rename_event->kmsg.hdr.event_type = rename_event->event.event_type;
+
+    rename_event->kmsg.hdr.payload += sizeof(rename_event->kmsg.hdr);
+
+    // pid and tgid
+    rename_event->kmsg.msg.pid = current->pid;
+    rename_event->kmsg.msg.tgid = current->tgid;
+    if (current->real_parent) {
+        rename_event->kmsg.msg.ppid = current->real_parent->tgid;
+    }
+
+    // user DAC context
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    rename_event->kmsg.msg.uid = from_kuid(&init_user_ns, current_uid());
+    rename_event->kmsg.msg.euid = from_kuid(&init_user_ns, current_euid());
+    rename_event->kmsg.msg.gid = from_kgid(&init_user_ns, current_gid());
+    rename_event->kmsg.msg.egid = from_kgid(&init_user_ns, current_egid());
+#else
+    rename_event->kmsg.msg.uid = current_uid();
+    rename_event->kmsg.msg.euid = current_euid();
+    rename_event->kmsg.msg.gid = current_gid();
+    rename_event->kmsg.msg.egid = current_egid();
+#endif
+    rename_event->kmsg.hdr.payload += sizeof(rename_event->kmsg.msg);
+
+    // Common Metadata
+    if (old_dentry->d_sb) {
+        rename_event->kmsg.msg.sb_magic = old_dentry->d_sb->s_magic;
+        rename_event->kmsg.msg.dev = old_dentry->d_sb->s_dev;
+    }
+
+    // Old Dentry Metadata
+    if (old_dentry->d_inode) {
+        rename_event->kmsg.msg.old_ino = old_dentry->d_inode->i_ino;
+        rename_event->kmsg.msg.old_mode = old_dentry->d_inode->i_mode;
+    }
+
+    // Old Parent Info
+    if (old_dir) {
+        rename_event->kmsg.msg.old_parent_ino = old_dir->i_ino;
+    }
+
+    // New Dentry Metadata
+    // If new_dentry->d_inode exist - new_path already existed
+    if (new_dentry->d_inode) {
+        rename_event->kmsg.msg.new_ino = new_dentry->d_inode->i_ino;
+        rename_event->kmsg.msg.new_mode = new_dentry->d_inode->i_mode;
+
+        // if new_ino is 0 new path did not exist yet..
+    }
+
+    // New Parent Info
+    if (new_dir) {
+        rename_event->kmsg.msg.new_parent_ino = new_dir->i_ino;
+    }
+
+#define RENAME_PATH_SZ 2048
+    // Build Old Path
+    buf = kzalloc(RENAME_PATH_SZ, mode);
+    if (!buf) {
+        return true;
+    }
+
+    p = dynsec_dentry_path(old_dentry, buf, RENAME_PATH_SZ);
+    if (!IS_ERR(p) || (p && *p)) {
+        if (likely(p > buf)) {
+            memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
+        }
+        if (likely(*buf)) {
+            rename_event->kmsg.msg.old_path_size = buf - p + RENAME_PATH_SZ;
+            rename_event->kmsg.msg.old_path_offset = rename_event->kmsg.hdr.payload;
+
+            rename_event->kmsg.hdr.payload += rename_event->kmsg.msg.old_path_size;
+            rename_event->kmsg.old_path = buf;
+        } else {
+            // memmove alignment off!
+            kfree(buf);
+            buf = NULL;
+        }
+    } else {
+        kfree(buf);
+        buf = NULL;
+    }
+
+    // Build New Path
+    buf = kzalloc(RENAME_PATH_SZ, mode);
+    if (!buf) {
+        return true;
+    }
+
+    p = dynsec_dentry_path(new_dentry, buf, RENAME_PATH_SZ);
+    if (!IS_ERR(p) || (p && *p)) {
+        if (likely(p > buf)) {
+            memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
+        }
+        if (likely(*buf)) {
+            rename_event->kmsg.msg.new_path_size = buf - p + RENAME_PATH_SZ;
+            rename_event->kmsg.msg.new_path_offset = rename_event->kmsg.hdr.payload;
+
+            rename_event->kmsg.hdr.payload += rename_event->kmsg.msg.new_path_size;
+            rename_event->kmsg.new_path = buf;
         } else {
             // memmove alignment off!
             kfree(buf);

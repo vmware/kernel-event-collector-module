@@ -23,6 +23,10 @@ struct dynsec_unlink_event {
     struct dynsec_unlink_kmsg kmsg;
 };
 
+struct dynsec_rename_event {
+    struct dynsec_event event;
+    struct dynsec_rename_kmsg kmsg;
+};
 #pragma pack(pop)
 
 // Exec Event container_of helper
@@ -36,6 +40,12 @@ static inline struct dynsec_unlink_event *
 dynsec_event_to_unlink(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_unlink_event, event);
+}
+
+static inline struct dynsec_rename_event *
+dynsec_event_to_rename(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_rename_event, event);
 }
 
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
@@ -54,3 +64,8 @@ extern bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
 
 extern bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
                           struct inode *dir, struct dentry *dentry, gfp_t mode);
+
+extern bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
+                                 struct inode *old_dir, struct dentry *old_dentry,
+                                 struct inode *new_dir, struct dentry *new_dentry,
+                                 gfp_t mode);

@@ -19,7 +19,9 @@
 // TODO: Make this overridable via module param
 #define DYNSEC_LSM_default (\
     DYNSEC_EVENT_TYPE_EXEC |\
-    DYNSEC_EVENT_TYPE_UNLINK)
+    DYNSEC_EVENT_TYPE_UNLINK |\
+    DYNSEC_EVENT_TYPE_RENAME)
+
 
 //
 // Our hook for exec
@@ -129,7 +131,11 @@ out:
 int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
                         struct inode *new_dir, struct dentry *new_dentry)
 {
+    struct dynsec_event *event = NULL;
     int ret = 0;
+    int response = 0;
+    int rc;
+    umode_t mode;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     if (g_original_ops_ptr) {
@@ -141,9 +147,35 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
     }
 #endif
 
+    if (!old_dentry->d_inode) {
+        goto out;
+    }
+    mode = old_dentry->d_inode->i_mode;
+    if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
+        goto out;
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_RENAME, GFP_KERNEL);
+    if (!event) {
+        goto out;
+    }
+
+    if (fill_in_inode_rename(dynsec_event_to_rename(event),
+                             old_dir, old_dentry,
+                             new_dir, new_dentry,
+                             GFP_KERNEL)) {
+        rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        free_dynsec_event(event);
+    }
+    event = NULL;
 
 out:
 
@@ -163,12 +195,12 @@ static int __init dynsec_init(void)
         return -EINVAL;
     }
 
-    if (!dynsec_chrdev_init()) {
+    if (!dynsec_init_lsmhooks(DYNSEC_LSM_default)) {
         return -EINVAL;
     }
 
-    if (!dynsec_init_lsmhooks(DYNSEC_LSM_default)) {
-        dynsec_chrdev_shutdown();
+    if (!dynsec_chrdev_init()) {
+        dynsec_lsm_shutdown();
         return -EINVAL;
     }
 
@@ -180,9 +212,9 @@ static void __exit dynsec_exit(void)
     DS_LOG(DS_INFO, "Exiting Dynamic Security Module Brand(%s)",
            CB_APP_MODULE_NAME);
 
-    dynsec_lsm_shutdown();
-
     dynsec_chrdev_shutdown();
+
+    dynsec_lsm_shutdown();
 }
 
 module_init(dynsec_init);
