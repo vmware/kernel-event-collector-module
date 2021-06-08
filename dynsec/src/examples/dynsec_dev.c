@@ -16,6 +16,8 @@
 
 #include "dynsec.h"
 
+static int quiet = 0;
+
 // Pass in the desired char device and the major number
 // That can be grabbed from /proc/devices
 
@@ -118,6 +120,7 @@ void read_events(int fd, const char *banned_path)
                     strstr(path, banned_path)) {
                     response = DYNSEC_RESPONSE_EPERM;
                 }
+                if (quiet) goto dispatch;
 
                 printf("EXEC: tid:%u ino:%llu dev:%#x magic:%#lx uid:%u '%s'\n",
                        exec_msg->msg.pid, exec_msg->msg.ino, exec_msg->msg.dev,
@@ -138,6 +141,7 @@ void read_events(int fd, const char *banned_path)
                 printf("payload:%u req_id:%llu event_type:%#x\n", unlink_msg->hdr.payload,
                        unlink_msg->hdr.req_id, unlink_msg->hdr.event_type);
             } else {
+                if (quiet) goto dispatch;
                 if (unlink_msg->msg.path_offset) {
                     path = buf + unlink_msg->msg.path_offset;
                 }
@@ -163,6 +167,7 @@ void read_events(int fd, const char *banned_path)
                 printf("payload:%u req_id:%llu event_type:%#x\n", rename_msg->hdr.payload,
                        rename_msg->hdr.req_id, rename_msg->hdr.event_type);
             } else {
+                if (quiet) goto dispatch;
                 if (rename_msg->msg.old_path_offset) {
                     old_path = buf + rename_msg->msg.old_path_offset;
                 }
@@ -184,10 +189,12 @@ void read_events(int fd, const char *banned_path)
             }
         }
         else {
+            if (quiet) goto dispatch;
             printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
                    hdr->payload, hdr->req_id, hdr->event_type);
         }
 
+dispatch:
         ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type, response);
         if (ret < 0) {
             fprintf(stderr, "Unable to response to:%llu %#x resp:%d err:%d\n",
@@ -206,13 +213,20 @@ int main(int argc, const char *argv[])
     const char *devpath;
     unsigned long major;
 
-    if (argc != 3) {
+    if (argc < 3) {
         fprintf(stderr, "Usage: %s <desired dev filename> <major dev num>\n", argv[0]);
         return 1;
     }
 
     devpath = argv[1];
     major = strtoul(argv[2], NULL, 0);
+
+    if (argc >= 4) {
+        if (argv[3]) {
+            quiet = (strcmp(argv[3], "-q") == 0 ||
+                     strcmp(argv[3], "--quiet") == 0);
+        }
+    }
 
     fd = create_chrdev(major, 0, devpath);
     if (fd < 0) {
