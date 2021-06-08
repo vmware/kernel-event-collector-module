@@ -6,6 +6,7 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/random.h>
 #include <linux/atomic.h>
 #include <linux/err.h>
@@ -32,35 +33,44 @@ static int stall_bkt_index(u32 hash)
 
 static void stall_tbl_free_entries(struct stall_tbl *stall_tbl)
 {
-    // struct stall_entry *entry, *tmp;
-    // int i;
-    // unsigned long flags;
 
-    // for (i = 0; i < STALL_BUCKETS; i++) {
-    //     spin_lock_irqsave(&stall_tbl->bkt[i].lock, flags);
-    //     list_for_each_entry_safe(entry, tmp, &stall_tbl->bkt[i].list,
-    //                   list) {
-    //         list_del_init(&entry->list);
-    //         kfree(entry);
-    //     }
-    //     stall_tbl->bkt[i].size = 0;
-    //     spin_unlock_irqrestore(&stall_tbl->bkt[i].lock, flags);
-    // }
+}
+
+static inline unsigned long lock_stall_bkt(struct stall_bkt *bkt, unsigned long flags)
+{
+    spin_lock_irqsave(&bkt->lock, flags);
+    return flags;
+}
+
+static inline void unlock_stall_bkt(struct stall_bkt *bkt, unsigned long flags)
+{
+    spin_unlock_irqrestore(&bkt->lock, flags);
+}
+
+static inline unsigned long lock_stall_queue(struct stall_q *queue, unsigned long flags)
+{
+    spin_lock_irqsave(&queue->lock, flags);
+    return flags;
+}
+
+static inline void unlock_stall_queue(struct stall_q *queue, unsigned long flags)
+{
+    spin_unlock_irqrestore(&queue->lock, flags);
 }
 
 static void stall_queue_clear(struct stall_tbl *tbl)
 {
-    unsigned long flags;
+    unsigned long flags = 0;
     struct dynsec_event *entry;
     struct dynsec_event *tmp;
 
-    spin_lock_irqsave(&tbl->queue.lock, flags);
+    flags = lock_stall_queue(&tbl->queue, flags);
     list_for_each_entry_safe(entry, tmp, &tbl->queue.list, list) {
         list_del_init(&entry->list);
         free_dynsec_event(entry);
     }
     tbl->queue.size = 0;
-    spin_unlock_irqrestore(&tbl->queue.lock, flags);
+    unlock_stall_queue(&tbl->queue, flags);
 }
 
 u32 stall_queue_size(struct stall_tbl *tbl)
@@ -71,15 +81,15 @@ u32 stall_queue_size(struct stall_tbl *tbl)
     if (!stall_tbl_enabled(tbl)) {
         return 0;
     }
-    spin_lock_irqsave(&tbl->queue.lock, flags);
+    flags = lock_stall_queue(&tbl->queue, flags);
     size = tbl->queue.size;
-    spin_unlock_irqrestore(&tbl->queue.lock, flags);
+    unlock_stall_queue(&tbl->queue, flags);
     return size;
 }
 
 struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space)
 {
-    unsigned long flags;
+    unsigned long flags = 0;
     struct dynsec_event *event = NULL;
     uint16_t payload;
 
@@ -88,7 +98,7 @@ struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space)
     }
 
     // Check there is enough available space before dequeue
-    spin_lock_irqsave(&tbl->queue.lock, flags);
+    flags = lock_stall_queue(&tbl->queue, flags);
     event = list_first_entry_or_null(&tbl->queue.list, struct dynsec_event, list);
     if (event) {
         payload = get_dynsec_event_payload(event);
@@ -99,7 +109,7 @@ struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space)
             tbl->queue.size -= 1;
         }
     }
-    spin_unlock_irqrestore(&tbl->queue.lock, flags);
+    unlock_stall_queue(&tbl->queue, flags);
 
     return event;
 }
@@ -112,7 +122,7 @@ static void stall_tbl_wake_entries(struct stall_tbl *stall_tbl)
     u32 i;
 
     for (i = 0; i < STALL_BUCKETS; i++) {
-        spin_lock_irqsave(&stall_tbl->bkt[i].lock, flags);
+        flags = lock_stall_bkt(&stall_tbl->bkt[i], flags);
         list_for_each_entry_safe(entry, tmp, &stall_tbl->bkt[i].list,
                       list) {
             entry->mode = DYNSEC_STALL_MODE_DISABLE;
@@ -122,7 +132,7 @@ static void stall_tbl_wake_entries(struct stall_tbl *stall_tbl)
 
             wake_up(&entry->wq);
         }
-        spin_unlock_irqrestore(&stall_tbl->bkt[i].lock, flags);
+        unlock_stall_bkt(&stall_tbl->bkt[i], flags);
     }
 }
 
@@ -165,14 +175,23 @@ struct stall_tbl *stall_tbl_alloc(gfp_t mode)
         return NULL;
     }
     tbl->enabled = false;
+    tbl->used_vmalloc = false;
 
     get_random_bytes(&tbl->secret, sizeof(tbl->secret));
 
     tbl->bkt =
         kcalloc(STALL_BUCKETS, sizeof(struct stall_bkt), mode);
     if (!tbl->bkt) {
-        kfree(tbl);
-        return NULL;
+        tbl->bkt = vmalloc(STALL_BUCKETS *
+                           sizeof(struct stall_bkt));
+        if (!tbl->bkt) {
+            kfree(tbl);
+            return NULL;
+        }
+
+        tbl->used_vmalloc = true;
+        memset(tbl->bkt, 0,
+               STALL_BUCKETS * sizeof(struct stall_bkt));
     }
 
     for (i = 0; i < STALL_BUCKETS; i++) {
@@ -221,6 +240,14 @@ void stall_tbl_shutdown(struct stall_tbl *tbl)
         // Iterate through entries and free
         stall_tbl_free_entries(tbl);
 
+        if (tbl->bkt) {
+            if (tbl->used_vmalloc) {
+                vfree(tbl->bkt);
+            } else {
+                kfree(tbl->bkt);
+            }
+            tbl->bkt = NULL;
+        }
         kfree(tbl);
     }
 }
@@ -258,15 +285,16 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
 
     getrawmonotonic(&entry->start);
 
-    spin_lock_irqsave(&tbl->bkt[index].lock, flags);
+    flags = lock_stall_bkt(&stall_tbl->bkt[index], flags);
     list_add(&entry->list, &tbl->bkt[index].list);
     tbl->bkt[index].size += 1;
-    spin_unlock_irqrestore(&tbl->bkt[index].lock, flags);
+    unlock_stall_bkt(&stall_tbl->bkt[index], flags);
 
-    spin_lock_irqsave(&tbl->queue.lock, flags);
+    flags = lock_stall_queue(&tbl->queue, flags);
     list_add_tail(&event->list, &tbl->queue.list);
     tbl->queue.size += 1;
-    spin_unlock_irqrestore(&tbl->queue.lock, flags);
+    unlock_stall_queue(&tbl->queue, flags);
+
     wake_up(&tbl->queue.wq);
 
     return entry;
@@ -301,7 +329,7 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
     // pr_info("%s:%d hash:%#x idx:%d req_id:%llu type:%x\n",
     //         __func__, __LINE__, hash, index, key->req_id,
     //         key->event_type);
-    spin_lock_irqsave(&tbl->bkt[index].lock, flags);
+    flags = lock_stall_bkt(&tbl->bkt[index], flags);
     entry = lookup_entry_safe(hash, key, &tbl->bkt[index].list);
     if (entry) {
         ret = 0;
@@ -310,9 +338,18 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
         entry->response = response;
         spin_unlock(&entry->lock);
 
-        wake_up(&entry->wq);
+        wake_up(&entry->wq); // Safer to call here?
     }
-    spin_unlock_irqrestore(&tbl->bkt[index].lock, flags);
+    unlock_stall_bkt(&tbl->bkt[index], flags);
+
+    // if (entry) {
+    //     spin_lock(&entry->lock);
+    //     entry->mode = DYNSEC_STALL_MODE_RESUME;
+    //     entry->response = response;
+    //     wake_up(&entry->wq);
+    //     spin_unlock(&entry->lock);
+    // }
+
     return ret;
 }
 
@@ -327,13 +364,13 @@ int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry)
     }
 
     index = stall_bkt_index(entry->hash);
-    spin_lock_irqsave(&tbl->bkt[index].lock, flags);
+    flags = lock_stall_bkt(&tbl->bkt[index], flags);
     if (entry_in_list(entry, &tbl->bkt[index].list)) {
         list_del_init(&entry->list);
         tbl->bkt[index].size += -1;
         ret = 0;
     }
-    spin_unlock_irqrestore(&tbl->bkt[index].lock, flags);
+    unlock_stall_bkt(&tbl->bkt[index], flags);
     // pr_info("%s:%d ret:%d hash:%#x idx:%d req_id:%llu type:%x\n",
     //         __func__, __LINE__, ret, entry->hash, index, entry->key.req_id,
     //         entry->key.event_type);
@@ -354,14 +391,14 @@ int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
 
     hash = stall_hash(tbl->secret, key);
     index = stall_bkt_index(hash);
-    spin_lock_irqsave(&tbl->bkt[index].lock, flags);
+    flags = lock_stall_bkt(&tbl->bkt[index], flags);
     entry = lookup_entry_safe(hash, key, &tbl->bkt[index].list);
     if (entry) {
         list_del_init(&entry->list);
         tbl->bkt[index].size += -1;
         ret = 0;
     }
-    spin_unlock_irqrestore(&tbl->bkt[index].lock, flags);
+    unlock_stall_bkt(&tbl->bkt[index], flags);
 
     return ret;
 }

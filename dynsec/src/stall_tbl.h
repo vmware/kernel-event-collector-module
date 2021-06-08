@@ -44,6 +44,7 @@ struct stall_q {
 
 struct stall_tbl {
     bool enabled;
+    bool used_vmalloc;
     u32 secret;
     struct stall_bkt *bkt;
 
