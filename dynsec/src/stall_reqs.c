@@ -155,11 +155,22 @@ static unsigned dynsec_stall_poll(struct file *file, struct poll_table_struct *p
     if (!size) {
         poll_wait(file, &stall_tbl->queue.wq, pts);
         size = stall_queue_size(stall_tbl);
-    }
-
-    if (size) {
+        if (size) {
+            return POLLIN | POLLRDNORM;
+        }
+    } else {
         return POLLIN | POLLRDNORM;
     }
+//     // As long as we ONLY use list_del_init for stall_q
+//     // we can use list_empty_careful to do lockless peeking.
+//     if (list_empty_careful(&stall_tbl->queue.list)) {
+//         poll_wait(file, &stall_tbl->queue.wq, pts);
+//         if (!list_empty_careful(&stall_tbl->queue.list)) {
+//             return POLLIN | POLLRDNORM;
+//         }
+//     } else {
+//         return POLLIN | POLLRDNORM;
+//     }
 
     return 0;
 }
