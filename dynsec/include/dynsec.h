@@ -27,12 +27,14 @@
 #pragma pack(push, 1)
 struct dynsec_msg_hdr {
     uint16_t payload;
+    uint32_t pid;   // tid
     uint64_t req_id;
     uint32_t event_type;
 };
 
 // Response from usermode
 struct dynsec_response {
+    uint32_t pid;
     uint64_t req_id;
     uint32_t event_type;
     int32_t response;
@@ -41,8 +43,8 @@ struct dynsec_response {
 
 // Core Exec Context
 struct dynsec_exec_msg {
-    uint32_t pid;
-    uint32_t tgid;
+    uint32_t pid;  // tid
+    uint32_t tgid; // pid
     uint32_t ppid;
     uint32_t uid;
     uint32_t euid;
@@ -70,8 +72,8 @@ struct dynsec_exec_umsg {
 
 // Core Unlink Content
 struct dynsec_unlink_msg {
-    uint32_t pid;
-    uint32_t tgid;
+    uint32_t pid;  // tid
+    uint32_t tgid; // pid
     uint32_t ppid;
     uint32_t uid;
     uint32_t euid;
@@ -102,8 +104,8 @@ struct dynsec_unlink_umsg {
 
 // Core Rename Content
 struct dynsec_rename_msg {
-    uint32_t pid;
-    uint32_t tgid;
+    uint32_t pid;  // tid
+    uint32_t tgid; // pid
     uint32_t ppid;
     uint32_t uid;
     uint32_t euid;

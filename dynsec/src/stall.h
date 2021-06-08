@@ -8,6 +8,7 @@
 
 #pragma pack(push, 1)
 struct dynsec_event {
+    uint32_t pid;
     uint64_t req_id;
     uint32_t event_type;
     struct list_head list;

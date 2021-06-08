@@ -32,9 +32,11 @@ static struct dynsec_event *alloc_exec_event(gfp_t mode)
     // Set key core data
     exec_event->event.req_id = dynsec_next_req_id();
     exec_event->event.event_type = DYNSEC_EVENT_TYPE_EXEC;
+    exec_event->event.pid = current->pid;
 
     exec_event->kmsg.hdr.req_id = exec_event->event.req_id;
     exec_event->kmsg.hdr.event_type = exec_event->event.event_type;
+    exec_event->kmsg.hdr.pid = exec_event->event.pid;
 
     return &exec_event->event;
 }
@@ -50,9 +52,11 @@ static struct dynsec_event *alloc_unlink_event(gfp_t mode)
     // Set key core data
     unlink_event->event.req_id = dynsec_next_req_id();
     unlink_event->event.event_type = DYNSEC_EVENT_TYPE_UNLINK;
+    unlink_event->event.pid = current->pid;
 
     unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
     unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
+    unlink_event->kmsg.hdr.pid = unlink_event->event.pid;
 
     return &unlink_event->event;
 }
@@ -68,9 +72,11 @@ static struct dynsec_event *alloc_rmdir_event(gfp_t mode)
     // Set key core data
     unlink_event->event.req_id = dynsec_next_req_id();
     unlink_event->event.event_type = DYNSEC_EVENT_TYPE_RMDIR;
+    unlink_event->event.pid = current->pid;
 
     unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
     unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
+    unlink_event->kmsg.hdr.pid = unlink_event->event.pid;
 
     return &unlink_event->event;
 }
@@ -87,9 +93,11 @@ static struct dynsec_event *alloc_rename_event(gfp_t mode)
     // Set key core data
     rename_event->event.req_id = dynsec_next_req_id();
     rename_event->event.event_type = DYNSEC_EVENT_TYPE_RENAME;
+    rename_event->event.pid = current->pid;
 
     rename_event->kmsg.hdr.req_id = rename_event->event.req_id;
     rename_event->kmsg.hdr.event_type = rename_event->event.event_type;
+    rename_event->kmsg.hdr.pid = rename_event->event.pid;
 
     return &rename_event->event;
 }
@@ -514,7 +522,7 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
     }
 
 #define EXEC_PATH_SZ 2048
-    buf = kzalloc(EXEC_PATH_SZ, mode);
+    buf = kmalloc(EXEC_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
@@ -611,7 +619,7 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
     }
 
 #define UNLINK_PATH_SZ 2048
-    buf = kzalloc(UNLINK_PATH_SZ, mode);
+    buf = kmalloc(UNLINK_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
@@ -714,7 +722,7 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
 
 #define RENAME_PATH_SZ 2048
     // Build Old Path
-    buf = kzalloc(RENAME_PATH_SZ, mode);
+    buf = kmalloc(RENAME_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
@@ -741,7 +749,7 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
     }
 
     // Build New Path
-    buf = kzalloc(RENAME_PATH_SZ, mode);
+    buf = kmalloc(RENAME_PATH_SZ, mode);
     if (!buf) {
         return true;
     }

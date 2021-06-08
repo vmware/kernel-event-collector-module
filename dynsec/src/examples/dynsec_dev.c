@@ -46,12 +46,13 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
 }
 
 int respond_to_access_request(int fd, uint64_t req_id,
-                              uint32_t event_type, int response_type)
+                              uint32_t event_type, uint32_t pid, int response_type)
 {
     ssize_t ret;
     struct dynsec_response response = {
         .req_id = req_id,
         .event_type = event_type,
+        .pid = pid,
         .response = response_type,
         .cache_flags = 0xFFFFFFFF,
     };
@@ -147,7 +148,7 @@ void read_events(int fd, const char *banned_path)
                 }
                 printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
                        "parent[%llu:%#x] '%s'\n",
-                       unlink_msg->msg.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
+                       unlink_msg->hdr.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
                        unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
                        unlink_msg->msg.uid, unlink_msg->msg.parent_ino,
                        unlink_msg->msg.parent_dev, path
@@ -177,7 +178,7 @@ void read_events(int fd, const char *banned_path)
 
                 printf("RENAME: tid:%u dev:%#x magic:%#lx uid:%u "
                        "'%s'[%llu %#04x %llu]->'%s'[%llu %#04x %llu]\n",
-                       rename_msg->msg.pid, rename_msg->msg.dev,
+                       rename_msg->hdr.pid, rename_msg->msg.dev,
                        rename_msg->msg.sb_magic,
                        rename_msg->msg.uid,
                        old_path, rename_msg->msg.old_ino, rename_msg->msg.old_mode,
@@ -195,7 +196,7 @@ void read_events(int fd, const char *banned_path)
         }
 
 dispatch:
-        ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type, response);
+        ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type, hdr->pid, response);
         if (ret < 0) {
             fprintf(stderr, "Unable to response to:%llu %#x resp:%d err:%d\n",
                     hdr->req_id, hdr->event_type, response, ret);

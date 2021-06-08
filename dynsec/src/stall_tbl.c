@@ -144,6 +144,7 @@ static struct stall_entry *lookup_entry_safe(u32 hash, struct stall_key *key,
 
     list_for_each_entry_safe(entry, tmp, head, list) {
         if (entry->hash == hash &&
+            entry->key.pid == key->pid &&
             entry->key.req_id == key->req_id &&
             entry->key.event_type == key->event_type) {
             return entry;
@@ -278,6 +279,7 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     // Copy event unique identifiers
     entry->key.req_id = event->req_id;
     entry->key.event_type = event->event_type;
+    entry->key.pid = event->pid;
 
     // Build bucket lookup data
     entry->hash = stall_hash(tbl->secret, &entry->key);

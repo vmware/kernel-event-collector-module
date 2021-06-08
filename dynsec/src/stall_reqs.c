@@ -208,6 +208,7 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
     memset(&key, 0, sizeof(key));
     key.req_id = response.req_id;
     key.event_type = response.event_type;
+    key.pid = response.pid;
     ret = stall_tbl_resume(stall_tbl, &key, response.response);
     if (ret == 0) {
         ret = sizeof(response);
