@@ -238,6 +238,7 @@ void ec_process_tracking_update_op_cnts(ProcessTracking *procp, CB_EVENT_TYPE ev
         break;
 
     case CB_EVENT_TYPE_PROCESS_EXIT:
+    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         procp->process_op_cnt += 1;
         procp->process_exit += 1;
         break;
