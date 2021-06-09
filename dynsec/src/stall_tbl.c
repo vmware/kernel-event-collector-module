@@ -38,24 +38,24 @@ static void stall_tbl_free_entries(struct stall_tbl *stall_tbl)
 
 static inline unsigned long lock_stall_bkt(struct stall_bkt *bkt, unsigned long flags)
 {
-    spin_lock_irqsave(&bkt->lock, flags);
+    spin_lock_irq(&bkt->lock);
     return flags;
 }
 
 static inline void unlock_stall_bkt(struct stall_bkt *bkt, unsigned long flags)
 {
-    spin_unlock_irqrestore(&bkt->lock, flags);
+    spin_unlock_irq(&bkt->lock);
 }
 
 static inline unsigned long lock_stall_queue(struct stall_q *queue, unsigned long flags)
 {
-    spin_lock_irqsave(&queue->lock, flags);
+    spin_lock_irq(&queue->lock);
     return flags;
 }
 
 static inline void unlock_stall_queue(struct stall_q *queue, unsigned long flags)
 {
-    spin_unlock_irqrestore(&queue->lock, flags);
+    spin_unlock_irq(&queue->lock);
 }
 
 static void stall_queue_clear(struct stall_tbl *tbl)
@@ -153,6 +153,8 @@ static struct stall_entry *lookup_entry_safe(u32 hash, struct stall_key *key,
     return NULL;
 }
 
+#ifdef USE_SAFE_ENTRY_LOOKUP
+// This lookup helper is helpful for debugging
 static struct stall_entry *entry_in_list(struct stall_entry *target,
                                          struct list_head *head)
 {
@@ -166,6 +168,7 @@ static struct stall_entry *entry_in_list(struct stall_entry *target,
     }
     return NULL;
 }
+#endif /* USE_SAFE_ENTRY_LOOKUP */
 
 struct stall_tbl *stall_tbl_alloc(gfp_t mode)
 {
@@ -336,21 +339,13 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
     if (entry) {
         ret = 0;
         entry->mode = DYNSEC_STALL_MODE_RESUME;
-        spin_lock(&entry->lock);
+        // spin_lock(&entry->lock);
         entry->response = response;
-        spin_unlock(&entry->lock);
+        // spin_unlock(&entry->lock);
 
         wake_up(&entry->wq); // Safer to call here?
     }
     unlock_stall_bkt(&tbl->bkt[index], flags);
-
-    // if (entry) {
-    //     spin_lock(&entry->lock);
-    //     entry->mode = DYNSEC_STALL_MODE_RESUME;
-    //     entry->response = response;
-    //     wake_up(&entry->wq);
-    //     spin_unlock(&entry->lock);
-    // }
 
     return ret;
 }
@@ -367,11 +362,15 @@ int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry)
 
     index = stall_bkt_index(entry->hash);
     flags = lock_stall_bkt(&tbl->bkt[index], flags);
+#ifdef USE_SAFE_ENTRY_LOOKUP
     if (entry_in_list(entry, &tbl->bkt[index].list)) {
+#endif /* USE_SAFE_ENTRY_LOOKUP */
         list_del_init(&entry->list);
         tbl->bkt[index].size += -1;
         ret = 0;
+#ifdef USE_SAFE_ENTRY_LOOKUP
     }
+#endif /* USE_SAFE_ENTRY_LOOKUP */
     unlock_stall_bkt(&tbl->bkt[index], flags);
     // pr_info("%s:%d ret:%d hash:%#x idx:%d req_id:%llu type:%x\n",
     //         __func__, __LINE__, ret, entry->hash, index, entry->key.req_id,
