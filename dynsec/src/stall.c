@@ -521,18 +521,20 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
         return true;
     }
 
-#define EXEC_PATH_SZ 2048
-    buf = kmalloc(EXEC_PATH_SZ, mode);
+#define EXEC_PATH_SZ 4096
+    buf = kzalloc(EXEC_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
 
-    p = dynsec_dentry_path(bprm->file->f_path.dentry, buf, EXEC_PATH_SZ);
-    if (!IS_ERR(p) || (p && *p)) {
-        if (likely(p > buf)) {
+    path_get(&bprm->file->f_path);
+    p = dynsec_d_path(&bprm->file->f_path, buf, EXEC_PATH_SZ);
+    path_put(&bprm->file->f_path);
+    if (!IS_ERR_OR_NULL(p) && *p) {
+        if ((p > buf)) {
             memmove(buf, p, buf - p + EXEC_PATH_SZ -1);
         }
-        if (likely(*buf)) {
+        if (*buf) {
             exec_event->kmsg.msg.path_size = buf - p + EXEC_PATH_SZ;
             exec_event->kmsg.msg.path_offset = exec_event->kmsg.hdr.payload;
 
@@ -618,14 +620,16 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
         }
     }
 
-#define UNLINK_PATH_SZ 2048
-    buf = kmalloc(UNLINK_PATH_SZ, mode);
+#define UNLINK_PATH_SZ 4096
+    buf = kzalloc(UNLINK_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
 
+    dget(dentry);
     p = dynsec_dentry_path(dentry, buf, UNLINK_PATH_SZ);
-    if (!IS_ERR(p) || (p && *p)) {
+    dput(dentry);
+    if (!IS_ERR_OR_NULL(p) && *p) {
         if (likely(p > buf)) {
             memmove(buf, p, buf - p + UNLINK_PATH_SZ -1);
         }
@@ -720,15 +724,15 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
         rename_event->kmsg.msg.new_parent_ino = new_dir->i_ino;
     }
 
-#define RENAME_PATH_SZ 2048
+#define RENAME_PATH_SZ 4096
     // Build Old Path
-    buf = kmalloc(RENAME_PATH_SZ, mode);
+    buf = kzalloc(RENAME_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
 
     p = dynsec_dentry_path(old_dentry, buf, RENAME_PATH_SZ);
-    if (!IS_ERR(p) || (p && *p)) {
+    if (!IS_ERR_OR_NULL(p) && *p) {
         if (likely(p > buf)) {
             memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
         }
@@ -749,13 +753,15 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
     }
 
     // Build New Path
-    buf = kmalloc(RENAME_PATH_SZ, mode);
+    buf = kzalloc(RENAME_PATH_SZ, mode);
     if (!buf) {
         return true;
     }
 
+    dget(new_dentry);
     p = dynsec_dentry_path(new_dentry, buf, RENAME_PATH_SZ);
-    if (!IS_ERR(p) || (p && *p)) {
+    dput(new_dentry);
+    if (!IS_ERR_OR_NULL(p) && *p) {
         if (likely(p > buf)) {
             memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
         }
