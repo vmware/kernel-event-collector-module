@@ -300,7 +300,10 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     tbl->queue.size += 1;
     unlock_stall_queue(&tbl->queue, flags);
 
-    wake_up(&tbl->queue.wq);
+    if (waitqueue_active(&tbl->queue.wq)) {
+        // One of the more costly operations
+        wake_up(&tbl->queue.wq);
+    }
 
     return entry;
 }
@@ -342,8 +345,9 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
         // spin_lock(&entry->lock);
         entry->response = response;
         // spin_unlock(&entry->lock);
-
-        wake_up(&entry->wq); // Safer to call here?
+        if (waitqueue_active(&entry->wq)) {
+            wake_up(&entry->wq);
+        }
     }
     unlock_stall_bkt(&tbl->bkt[index], flags);
 

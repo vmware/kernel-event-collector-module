@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 
+#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -13,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/sysmacros.h>
+#include <signal.h>
 
 #include "dynsec.h"
 
@@ -70,6 +72,8 @@ void read_events(int fd, const char *banned_path)
     struct dynsec_exec_umsg *exec_msg;
 
     memset(buf, 'A', sizeof(buf));
+    int timeout;
+    int last_poll_ret = -EAGAIN;
 
     while (1)
     {
@@ -83,15 +87,11 @@ void read_events(int fd, const char *banned_path)
         int ret = poll(&pollfd, 1, -1);
         int response = DYNSEC_RESPONSE_ALLOW;
 
-        if (ret <= 0) {
-            continue;
-        }
 
         bytes_read = read(fd, buf, sizeof(buf));
         if (bytes_read <= 0) {
-            if (bytes_read == 0 || errno != -EAGAIN) {
-                break;
-            }
+            // TODO: handle non-blocking more safely
+            break;
         }
 
         if (hdr->event_type == DYNSEC_EVENT_TYPE_EXEC) {

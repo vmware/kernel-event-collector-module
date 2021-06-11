@@ -29,7 +29,7 @@ struct stall_entry {
 #define DYNSEC_STALL_MODE_SHUTDOWN  0x00000004
     u32 mode;  // switch to atomic or test_bit/set_bit?
     struct timespec start; // rough duration of in tbl/stalled
-    wait_queue_head_t wq;
+    wait_queue_head_t wq; // Optionally we could have this be per-bucket not per-entry
 
     spinlock_t lock;    // likely not needed but shouldn't hurt
     int response;

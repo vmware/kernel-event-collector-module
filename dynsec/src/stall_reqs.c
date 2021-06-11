@@ -40,7 +40,6 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
         return PTR_ERR(entry);
     }
 
-#ifdef wait_event_interruptible_timeout
     ret = wait_event_interruptible_timeout(entry->wq, entry->mode != 0, msecs_to_jiffies(ms));
     stall_tbl_remove_entry(stall_tbl, entry);
     if (ret >= 1) {
@@ -48,21 +47,11 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
         local_response = entry->response;
         // spin_unlock(&entry->lock);
     } else if (ret == 0) {
-        pr_info("%s:%d timedout:%u ms\n", __func__, __LINE__, ms);
+        // pr_info("%s:%d timedout:%u ms\n", __func__, __LINE__, ms);
     } else {
-        pr_info("%s: interruped %d\n", __func__, ret);
+        // pr_info("%s: interruped %d\n", __func__, ret);
     }
-#else
-    ret = wait_event_timeout(entry->wq, entry->mode != 0, msecs_to_jiffies(ms));
-    stall_tbl_remove_entry(stall_tbl, entry);
-    if (ret >= 1) {
-        // spin_lock(&entry->lock);
-        local_response = entry->response;
-        // spin_unlock(&entry->lock);
-    } else {
-        pr_info("%s:%d timedout:%u ms\n", __func__, __LINE__, ms);
-    }
-#endif
+
     kfree(entry);
     entry = NULL;
 
@@ -122,6 +111,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         memset(&key, 0, sizeof(key));
         key.req_id = event->req_id;
         key.event_type = event->event_type;
+        key.pid = event->pid;
 
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
@@ -161,16 +151,15 @@ static unsigned dynsec_stall_poll(struct file *file, struct poll_table_struct *p
     } else {
         return POLLIN | POLLRDNORM;
     }
-//     // As long as we ONLY use list_del_init for stall_q
-//     // we can use list_empty_careful to do lockless peeking.
-//     if (list_empty_careful(&stall_tbl->queue.list)) {
-//         poll_wait(file, &stall_tbl->queue.wq, pts);
-//         if (!list_empty_careful(&stall_tbl->queue.list)) {
-//             return POLLIN | POLLRDNORM;
-//         }
-//     } else {
-//         return POLLIN | POLLRDNORM;
-//     }
+    // Lockless approach but no noticable gains
+    // if (list_empty_careful(&stall_tbl->queue.list)) {
+    //     poll_wait(file, &stall_tbl->queue.wq, pts);
+    //     if (!list_empty_careful(&stall_tbl->queue.list)) {
+    //         return POLLIN | POLLRDNORM;
+    //     }
+    // } else {
+    //     return POLLIN | POLLRDNORM;
+    // }
 
     return 0;
 }
