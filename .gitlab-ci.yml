@@ -32,6 +32,10 @@ build_release:
   extends: .build_release_template
   stage: build_project
 
+build_coverity:
+  extends: .build_coverity_template
+  stage: build_project
+
 deploy_release:
   extends: .deploy_release_template
   stage: deploy_release
