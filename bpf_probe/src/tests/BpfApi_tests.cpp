@@ -1,4 +1,5 @@
 // Copyright (c) 2021 VMWare, Inc. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0
 
 #include "mock/BpfApi_Mock.h"
 #include "BpfProgram.h"

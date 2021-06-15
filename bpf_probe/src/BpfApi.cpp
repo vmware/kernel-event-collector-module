@@ -1,4 +1,5 @@
 // Copyright (c) 2020 VMWare, Inc. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0
 
 #include "BpfApi.h"
 

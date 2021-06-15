@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2021 VMware Inc.  All rights reserved.
+# SPDX-License-Identifier: GPL-2.0
 
 SOURCE_PROG=$1
 OUT_FILE=$2
