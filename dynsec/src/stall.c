@@ -731,7 +731,9 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
         return true;
     }
 
+    dget(old_dentry);
     p = dynsec_dentry_path(old_dentry, buf, RENAME_PATH_SZ);
+    dput(old_dentry);
     if (!IS_ERR_OR_NULL(p) && *p) {
         if (likely(p > buf)) {
             memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
