@@ -6,9 +6,9 @@ from conans import python_requires, CMake, tools, AutoToolsBuildEnvironment
 import os
 from datetime import datetime
 
-base = python_requires("CONAN_UTIL_VERSION")
+from conan_util.CbConanFile import CbConanFile
 
-class DynSec(base.CbConanFile):
+class DynSec(CbConanFile):
     name     = "DynSec"
     version  = "PROJECT_VERSION"
     settings = "os", "arch"
