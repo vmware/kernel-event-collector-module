@@ -253,16 +253,11 @@ void BpfApi::RaiseKptrRestrict()
     }
 }
 
-void BpfApi::EmitMessage(void *data, int data_size)
-{
-    m_eventCallbackFn(data, data_size);
-}
-
 void BpfApi::on_perf_submit(void *cb_cookie, void *data, int data_size)
 {
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
     if (bpfApi)
     {
-        bpfApi->EmitMessage(data, data_size);
+        bpfApi->m_eventCallbackFn(static_cast<data_t *>(data));
     }
 }
