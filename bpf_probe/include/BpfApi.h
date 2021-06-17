@@ -1,6 +1,9 @@
-// Copyright (c) 2020 VMWare, Inc. All rights reserved.
+/* Copyright (c) 2020 VMWare, Inc. All rights reserved. */
+/* SPDX-License-Identifier: GPL-2.0 */
 
 #pragma once
+
+#include "bcc_sensor.h"
 
 #include <functional>
 #include <cb-memory>
@@ -16,7 +19,7 @@ namespace cb_ebpf {
     {
     public:
         using UPtr = std::unique_ptr<IBpfApi>;
-        using EventCallbackFn = std::function<void(void *data, int data_size)>;
+        using EventCallbackFn = std::function<void(struct data_t *data)>;
 
         enum class ProbeType
         {
@@ -91,7 +94,6 @@ namespace cb_ebpf {
 
         void CleanBuildDir();
 
-        void EmitMessage(void *data, int data_size);
         static void on_perf_submit(void *cb_cookie, void *data, int data_size);
 
         std::unique_ptr<ebpf::BPF>  m_BPF;

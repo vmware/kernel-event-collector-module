@@ -1,3 +1,5 @@
+# Copyright 2021 VMware Inc.  All rights reserved.
+# SPDX-License-Identifier: GPL-2.0
 cmake_minimum_required(VERSION 2.8.7)
 
 project(bpf_probe)
