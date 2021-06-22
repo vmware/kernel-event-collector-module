@@ -486,11 +486,7 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
     exec_event->kmsg.msg.pid = current->pid;
     exec_event->kmsg.msg.tgid = current->tgid;
     if (current->real_parent) {
-#ifdef task_ppid_nr
-        exec_event->kmsg.msg.ppid = task_ppid_nr(current);
-#else
         exec_event->kmsg.msg.ppid = current->real_parent->tgid;
-#endif
     }
 
     // user DAC context
@@ -583,11 +579,7 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
     unlink_event->kmsg.msg.pid = current->pid;
     unlink_event->kmsg.msg.tgid = current->tgid;
     if (current->real_parent) {
-#ifdef task_ppid_nr
-        unlink_event->kmsg.msg.ppid = task_ppid_nr(current);
-#else
         unlink_event->kmsg.msg.ppid = current->real_parent->tgid;
-#endif
     }
 
     // user DAC context
@@ -686,11 +678,7 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
     rename_event->kmsg.msg.pid = current->pid;
     rename_event->kmsg.msg.tgid = current->tgid;
     if (current->real_parent) {
-#ifdef task_ppid_nr
-        rename_event->kmsg.msg.ppid = task_ppid_nr(current);
-#else
         rename_event->kmsg.msg.ppid = current->real_parent->tgid;
-#endif
     }
 
     // user DAC context
