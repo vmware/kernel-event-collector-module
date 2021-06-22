@@ -10,7 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-using namespace cb_endpoint::cb_ebpf;
+using namespace cb_endpoint::bpf_probe;
 
 BpfApi::BpfApi()
     : m_BPF(nullptr)

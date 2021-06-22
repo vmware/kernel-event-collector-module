@@ -1,5 +1,5 @@
 /* Copyright (c) 2020 VMWare, Inc. All rights reserved. */
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
 #pragma once
 
@@ -18,7 +18,7 @@ namespace ebpf {
 }
 
 namespace cb_endpoint {
-namespace cb_ebpf {
+namespace bpf_probe {
 namespace tdd_mock {
 
     class BpfApi_Mock

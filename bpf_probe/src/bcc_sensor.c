@@ -159,12 +159,14 @@ struct mmap_args {
 };
 
 // Tells us the state for a probe point's data message
-#define PP_NO_EXTRA_DATA 0
-#define PP_ENTRY_POINT 1
-#define PP_PATH_COMPONENT 2
-#define PP_FINALIZED 3
-#define PP_APPEND 4
-#define PP_DEBUG 5
+enum PP {
+    PP_NO_EXTRA_DATA,
+    PP_ENTRY_POINT,
+    PP_PATH_COMPONENT,
+    PP_FINALIZED,
+    PP_APPEND,
+    PP_DEBUG,
+};
 
 #define MAX_FNAME 255L
 

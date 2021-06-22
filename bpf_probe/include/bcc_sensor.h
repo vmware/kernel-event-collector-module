@@ -1,43 +1,49 @@
 /* Copyright 2021 VMware Inc.  All rights reserved. */
-/* SPDX-License-Identifier: GPL-2.0 */
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
 #pragma once
 
 #include <cstdint>
 
-#define DNS_SEGMENT_LEN 40
-#define DNS_SEGMENT_FLAGS_START 0x01
-#define DNS_SEGMENT_FLAGS_END 0x02
 
 
-#define PP_NO_EXTRA_DATA 0
-#define PP_ENTRY_POINT 1
-#define PP_PATH_COMPONENT 2
-#define PP_FINALIZED 3
-#define PP_APPEND 4
-#define PP_DEBUG 5
 
 namespace cb_endpoint {
-namespace cb_ebpf {
+namespace bpf_probe {
+
+    static const uint8_t DNS_SEGMENT_LEN = 40;
+    static const uint8_t DNS_SEGMENT_FLAGS_START = 0x01;
+    static const uint8_t DNS_SEGMENT_FLAGS_END = 0x02;
+
+    enum PP
+    {
+        PP_NO_EXTRA_DATA,
+        PP_ENTRY_POINT,
+        PP_PATH_COMPONENT,
+        PP_FINALIZED,
+        PP_APPEND,
+        PP_DEBUG,
+    };
+
     enum event_type
     {
-        EVENT_PROCESS_ARG = 0,
-        EVENT_PROCESS_EXEC = 1,
-        EVENT_PROCESS_EXIT = 2,
-        EVENT_PROCESS_CLONE = 3,
-        EVENT_FILE_READ = 4,
-        EVENT_FILE_WRITE = 5,
-        EVENT_FILE_CREATE = 6,
-        EVENT_FILE_PATH = 7,
-        EVENT_FILE_MMAP = 8,
-        EVENT_FILE_TEST = 9,
-        EVENT_NET_CONNECT_PRE = 10,
-        EVENT_NET_CONNECT_ACCEPT = 11,
-        EVENT_NET_CONNECT_DNS_RESPONSE = 12,
-        EVENT_NET_CONNECT_WEB_PROXY = 13,
-        EVENT_FILE_DELETE = 14,
-        EVENT_FILE_CLOSE = 15,
-        EVENT_FILE_OPEN = 16
+        EVENT_PROCESS_ARG,
+        EVENT_PROCESS_EXEC,
+        EVENT_PROCESS_EXIT,
+        EVENT_PROCESS_CLONE,
+        EVENT_FILE_READ,
+        EVENT_FILE_WRITE,
+        EVENT_FILE_CREATE,
+        EVENT_FILE_PATH,
+        EVENT_FILE_MMAP,
+        EVENT_FILE_TEST,
+        EVENT_NET_CONNECT_PRE,
+        EVENT_NET_CONNECT_ACCEPT,
+        EVENT_NET_CONNECT_DNS_RESPONSE,
+        EVENT_NET_CONNECT_WEB_PROXY,
+        EVENT_FILE_DELETE,
+        EVENT_FILE_CLOSE,
+        EVENT_FILE_OPEN
     };
 
 

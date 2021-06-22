@@ -4,7 +4,7 @@
 #include "BpfApi.h"
 #include "BpfProgram.h"
 
-using namespace cb_endpoint::cb_ebpf;
+using namespace cb_endpoint::bpf_probe;
 
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 
