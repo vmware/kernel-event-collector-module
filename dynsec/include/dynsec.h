@@ -50,6 +50,7 @@ struct dynsec_exec_msg {
     uint32_t euid;
     uint32_t gid;
     uint32_t egid;
+
     uint64_t sb_magic;
     uint64_t ino;
     uint32_t dev;
@@ -79,14 +80,15 @@ struct dynsec_unlink_msg {
     uint32_t euid;
     uint32_t gid;
     uint32_t egid;
+
     uint64_t sb_magic;
     uint16_t mode;
+
     uint64_t ino;
     uint32_t dev;
     uint16_t path_offset;
     uint16_t path_size;
     uint64_t parent_ino;
-    uint32_t parent_dev;
 };
 
 #ifdef __KERNEL__

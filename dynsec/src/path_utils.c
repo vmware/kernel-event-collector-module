@@ -78,6 +78,7 @@ char *dynsec_d_path(const struct path *path, char *buf, int buflen)
     return NULL;
 }
 
+// Test this for stability before future use
 char *dynsec_path_safeish(const struct path *path, char *buf, int buflen)
 {
     if (dynsec_current_chrooted()) {

@@ -73,7 +73,6 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
     } else {
         free_dynsec_event(event);
     }
-    event = NULL;
 
 out:
 
@@ -124,7 +123,6 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
     } else {
         free_dynsec_event(event);
     }
-    event = NULL;
 
 out:
 
@@ -175,7 +173,6 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
     } else {
         free_dynsec_event(event);
     }
-    event = NULL;
 
 out:
 
@@ -229,7 +226,6 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
     } else {
         free_dynsec_event(event);
     }
-    event = NULL;
 
 out:
 

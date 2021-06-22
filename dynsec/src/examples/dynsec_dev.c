@@ -63,8 +63,16 @@ int respond_to_access_request(int fd, uint64_t req_id,
     if (ret < 0) {
         return -errno;
     }
+    if (ret != sizeof(response)) {
+        return (int)ret;
+    }
     return 0;
 }
+
+// Event Structure
+// [    dynsec_msg_hdr    ]
+// [ event specific data  ]
+// [ event specific blobs ]
 
 void read_events(int fd, const char *banned_path)
 {
@@ -147,12 +155,10 @@ void read_events(int fd, const char *banned_path)
                     path = buf + unlink_msg->msg.path_offset;
                 }
                 printf("UNLINK: tid:%u ino:%llu dev:%#x umode:%#04x magic:%#lx uid:%u "
-                       "parent[%llu:%#x] '%s'\n",
+                       "parent_ino:%llu '%s'\n",
                        unlink_msg->hdr.pid, unlink_msg->msg.ino, unlink_msg->msg.dev,
                        unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
-                       unlink_msg->msg.uid, unlink_msg->msg.parent_ino,
-                       unlink_msg->msg.parent_dev, path
-                );
+                       unlink_msg->msg.uid, unlink_msg->msg.parent_ino, path);
             }
         } else if (hdr->event_type == DYNSEC_EVENT_TYPE_RENAME) {
             char *old_path = "";
@@ -197,7 +203,7 @@ void read_events(int fd, const char *banned_path)
 
 dispatch:
         ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type, hdr->pid, response);
-        if (ret < 0) {
+        if (ret) {
             fprintf(stderr, "Unable to response to:%llu %#x resp:%d err:%d\n",
                     hdr->req_id, hdr->event_type, response, ret);
         }
