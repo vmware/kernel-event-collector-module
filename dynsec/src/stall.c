@@ -9,6 +9,8 @@
 #include <linux/mount.h>
 #include <linux/sched.h>
 #include <linux/cred.h>
+#include <linux/fs.h>
+#include <linux/dcache.h>
 
 #include "dynsec.h"
 #include "stall.h"

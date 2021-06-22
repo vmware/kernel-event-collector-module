@@ -7,6 +7,8 @@
 #include <linux/binfmts.h>
 #include <linux/sched.h>
 #include <linux/version.h>
+#include <linux/fs.h>
+#include <linux/dcache.h>
 #include "lsm_mask.h"
 #include "version.h"
 #include "symbols.h"
