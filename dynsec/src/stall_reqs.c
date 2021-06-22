@@ -17,7 +17,6 @@
 
 static dev_t g_maj_t;
 static int maj_no;
-static bool loaded;
 static struct cdev dynsec_cdev;
 
 struct stall_tbl *stall_tbl;
@@ -252,12 +251,9 @@ static const struct file_operations dynsec_queue_ops = {
 
 void dynsec_chrdev_shutdown(void)
 {
-    if (loaded) {
-        cdev_del(&dynsec_cdev);
-        unregister_chrdev_region(g_maj_t, 1);
-        pr_info("%s: major: %d\n", __func__, maj_no);
-        loaded = false;
-    }
+    cdev_del(&dynsec_cdev);
+    unregister_chrdev_region(g_maj_t, 1);
+    pr_info("%s: major: %d\n", __func__, maj_no);
 
     if (stall_tbl) {
         stall_tbl_shutdown(stall_tbl);
@@ -271,7 +267,6 @@ bool dynsec_chrdev_init(void)
     const unsigned int MINOR_FIRST = 0;
 
     stall_tbl = NULL;
-    loaded = false;
     g_maj_t = 0;
     maj_no = 0;
 
@@ -290,8 +285,6 @@ bool dynsec_chrdev_init(void)
     }
 
     pr_info("%s: major: %d\n", __func__, maj_no);
-    loaded = true;
-
     stall_tbl = stall_tbl_alloc(GFP_KERNEL);
     if (!stall_tbl) {
         dynsec_chrdev_shutdown();
