@@ -19,7 +19,7 @@ namespace bpf_probe {
     {
     public:
         using UPtr = std::unique_ptr<IBpfApi>;
-        using EventCallbackFn = std::function<void(struct data_t *data)>;
+        using EventCallbackFn = std::function<void(struct data *data)>;
 
         enum class ProbeType
         {

@@ -8,6 +8,8 @@
 
 
 
+#define MAX_FNAME 255
+
 namespace cb_endpoint {
 namespace bpf_probe {
 
@@ -46,49 +48,69 @@ namespace bpf_probe {
         EVENT_FILE_OPEN
     };
 
+    struct data_header {
+        uint64_t event_time; // Time the event collection started.  (Same across message parts.)
+        uint64_t event_submit_time; // Time we submit the event to bpf.  (Unique for each event.)
+        uint8_t  type;
+        uint8_t  state;
 
-    struct net_t
-    {
-        unsigned int local_addr;
-        unsigned int remote_addr;
-        unsigned short remote_port;
-        unsigned short local_port;
-        unsigned short ipver;
-        unsigned short protocol;
-        unsigned short dns_flag;
-        unsigned int local_addr6[4];
-        unsigned int remote_addr6[4];
-        char dns[DNS_SEGMENT_LEN]; // shared by dns and web-proxy
-        unsigned int name_len;
-    };
-
-    struct mmap_args
-    {
-        uint64_t flags;
-        uint64_t prot;
-    };
-
-    struct data_t
-    {
-        uint64_t event_time;
         uint32_t tid;
         uint32_t pid;
-        uint8_t type;
-        uint8_t state;
         uint32_t uid;
         uint32_t ppid;
-        uint64_t inode;
-        uint32_t device;
         uint32_t mnt_ns;
-        union
-        {
-            struct mmap_args mmap_args;
-            char fname[255];
-            struct net_t net;
-        };
-        int retval;
-        uint64_t start_time;
-        uint64_t event_submit_time;
     };
 
+    struct data {
+        struct data_header header;
+    };
+
+    struct exec_data
+    {
+        struct data_header header;
+
+        int retval;
+    };
+
+    struct file_data {
+        struct data_header header;
+
+        uint64_t inode;
+        uint32_t device;
+        uint64_t flags; // MMAP only
+        uint64_t prot;  // MMAP only
+    };
+
+    struct path_data {
+        struct data_header header;
+
+        char fname[MAX_FNAME];
+    };
+
+    struct net_data
+    {
+        struct data_header header;
+
+        uint16_t ipver;
+        uint16_t protocol;
+        union {
+            uint32_t local_addr;
+            uint32_t local_addr6[4];
+        };
+        uint16_t local_port;
+        union {
+            uint32_t remote_addr;
+            uint32_t remote_addr6[4];
+        };
+        uint16_t remote_port;
+    };
+
+    struct dns_data
+    {
+        struct data_header header;
+
+        unsigned short dns_flag;
+        char dns[DNS_SEGMENT_LEN];
+        unsigned int name_len;
+    };
 }}
