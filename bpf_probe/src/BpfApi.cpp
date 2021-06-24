@@ -8,9 +8,8 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 
-using namespace cb_endpoint::cb_ebpf;
+using namespace cb_endpoint::bpf_probe;
 
 BpfApi::BpfApi()
     : m_BPF(nullptr)
@@ -258,6 +257,6 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *data, int data_size)
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
     if (bpfApi)
     {
-        bpfApi->m_eventCallbackFn(static_cast<data_t *>(data));
+        bpfApi->m_eventCallbackFn(static_cast<struct data *>(data));
     }
 }

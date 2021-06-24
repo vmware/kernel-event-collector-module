@@ -5,7 +5,7 @@
 
 #include <map>
 
-using namespace cb_endpoint::cb_ebpf;
+using namespace cb_endpoint::bpf_probe;
 
 bool BpfProgram::InstallHooks(
     IBpfApi          &bpf_api,
