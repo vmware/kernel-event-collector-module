@@ -179,6 +179,7 @@ while (false)
 #define CB__NR_unlink                     0x0000000000001000
 #define CB__NR_unlinkat                   0x0000000000002000
 #define CB__NR_rename                     0x0000000000004000
+#define CB__NR_renameat                   0x0000000000008000
 
 #define SYSCALL_HOOK_MASK                 0x00000000FFFFFFFF
 

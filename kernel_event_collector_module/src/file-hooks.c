@@ -15,7 +15,7 @@
 
 static FILE_PROCESS_KEY g_log_messages_file_id = {0, 0};
 
-bool ec_file_exists(const char __user *filename);
+bool ec_file_exists(int dfd, const char __user *filename);
 
 #define N_ELEM(x) (sizeof(x) / sizeof(*x))
 
@@ -46,6 +46,7 @@ typedef struct file_data_t_ {
 } file_data_t;
 
 file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename);  // forward
+file_data_t *__ec_get_file_data_from_name_at(ProcessContext *context, int dfd, const char __user *filename);
 file_data_t *__ec_get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
 void __ec_put_file_data(ProcessContext *context, file_data_t *file_data);
 
@@ -247,7 +248,7 @@ void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct
 
 void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_data, struct path const *path); // forward
 
-file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename)
+file_data_t *__ec_get_file_data_from_name_at(ProcessContext *context, int dfd, const char __user *filename)
 {
     file_data_t *file_data = __ec_file_data_alloc(context, filename);
 
@@ -271,6 +272,10 @@ file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __
 CATCH_DEFAULT:
     __ec_put_file_data(context, file_data);  // de-allocate file_data
     return NULL;
+}
+file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename)
+{
+    return __ec_get_file_data_from_name_at(context, AT_FDCWD, filename);
 }
 
 void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_data, struct path const *path)
@@ -533,6 +538,7 @@ long (*ec_orig_sys_creat)(const char __user *filename, umode_t mode);
 long (*ec_orig_sys_unlink)(const char __user *filename);
 long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int flag);
 long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
+long (*ec_orig_sys_renameat)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
 
 asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t count)
 {
@@ -602,7 +608,7 @@ asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode
 
     MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
-    if ((flags & O_CREAT) && !ec_file_exists(filename))
+    if ((flags & O_CREAT) && !ec_file_exists(AT_FDCWD, filename))
     {
         // If this is opened with create mode AND it does not already exist we will report a create event
         eventType = CB_EVENT_TYPE_FILE_CREATE;
@@ -639,7 +645,7 @@ asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, u
 
     MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
-    if ((flags & O_CREAT) && !ec_file_exists(filename))
+    if ((flags & O_CREAT) && !ec_file_exists(dfd, filename))
     {
         // If this is opened with create mode AND it does not already exist we will report a create event
         eventType = CB_EVENT_TYPE_FILE_CREATE;
@@ -678,7 +684,7 @@ asmlinkage long ec_sys_creat(const char __user *filename, umode_t mode)
 
     // If this is opened with create mode AND it does not already exist we
     //  will report an event
-    report_create = (!ec_file_exists(filename));
+    report_create = (!ec_file_exists(AT_FDCWD, filename));
 
 CATCH_DISABLED:
     ret = ec_orig_sys_creat(filename, mode);
@@ -746,7 +752,7 @@ asmlinkage long ec_sys_unlinkat(int dfd, const char __user *filename, int flag)
 
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
-    file_data = __ec_get_file_data_from_name(&context, filename);
+    file_data = __ec_get_file_data_from_name_at(&context, dfd, filename);
 
 CATCH_DISABLED:
     ret = ec_orig_sys_unlinkat(dfd, filename, flag);
@@ -770,7 +776,61 @@ CATCH_DEFAULT:
 
 asmlinkage long ec_sys_renameat(int olddirfd, char __user const *oldname, int newdirfd, char __user const *newname)
 {
-    return -EIO;  // 2021-01-14 FIXME
+    long         ret;
+    file_data_t *old_file_data = NULL;
+    file_data_t *new_file_data_pre_rename = NULL;
+    file_data_t *new_file_data_post_rename = NULL;
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
+    // so do not begin hook tracking yet, since that can block module disable
+    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
+
+    // Collect data about the file before it is modified.  The event will be sent
+    //  after a successful operation
+    old_file_data = __ec_get_file_data_from_name_at(&context, olddirfd, oldname);
+
+    // Only lookup new path when old path was found
+    if (old_file_data)
+    {
+        new_file_data_pre_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
+    }
+
+CATCH_DISABLED:
+    ret = ec_orig_sys_renameat(olddirfd, oldname, newdirfd, newname);
+
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+    // Now the active count is incremented and the hook is being tracked
+
+    if (!IS_ERR_VALUE(ret) && old_file_data)
+    {
+        __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
+
+        // Send a delete for the destination if the renameat will overwrite an existing file
+        if (new_file_data_pre_rename)
+        {
+            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
+        }
+
+        FINISH_MODULE_DISABLE_CHECK(&context);
+
+        // This could block so call it outside the disable tracking
+        new_file_data_post_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
+
+        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
+    }
+
+CATCH_DEFAULT:
+    __ec_put_file_data(&context, old_file_data);
+    __ec_put_file_data(&context, new_file_data_pre_rename);
+    __ec_put_file_data(&context, new_file_data_post_rename);
+
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return ret;
 }
 
 asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *newname)
@@ -827,14 +887,14 @@ CATCH_DEFAULT:
     return ret;
 }
 
-bool ec_file_exists(const char __user *filename)
+bool ec_file_exists(int dfd, const char __user *filename)
 {
     bool         exists     = false;
     struct path path;
 
     TRY(filename);
 
-    exists = user_path_at(AT_FDCWD, filename, LOOKUP_FOLLOW, &path) == 0;
+    exists = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path) == 0;
 
 CATCH_DEFAULT:
     if (exists)
