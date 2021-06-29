@@ -11,12 +11,12 @@
 
 struct file *__ec_get_file_from_mm(struct mm_struct *mm);
 
-pid_t ec_gettid(struct task_struct *task)
+pid_t ec_gettid(struct task_struct const *task)
 {
     return task->pid; // this is the thread id
 }
 
-pid_t ec_getpid(struct task_struct *task)
+pid_t ec_getpid(struct task_struct const *task)
 {
     return task->tgid; // task_tgid_vnr(task);
 }
@@ -26,7 +26,7 @@ pid_t ec_getcurrentpid(void)
     return ec_getpid(current);
 }
 
-pid_t ec_getppid(struct task_struct *task)
+pid_t ec_getppid(struct task_struct const *task)
 {
     if (task->real_parent) // @@review: use parent?
     {
@@ -36,22 +36,26 @@ pid_t ec_getppid(struct task_struct *task)
     return -1;
 }
 
-bool ec_is_task_valid(struct task_struct *task)
+bool ec_is_task_valid(struct task_struct const *task)
 {
     // This tells us if the task_struct data is safe to access
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
     return (task && pid_alive(task));
+#else  //}{ missing 'const' in include/linux/sched.h
+    return (task && pid_alive((struct task_struct *)task));
+#endif  //}
 }
 
-bool ec_is_task_alive(struct task_struct *task)
+bool ec_is_task_alive(struct task_struct const *task)
 {
     // This tells us if the process is actually alive
     return (ec_is_task_valid(task) &&
           !(task->state == TASK_DEAD || task->exit_state == EXIT_DEAD));
 }
 
-struct task_struct *ec_find_task(pid_t pid)
+struct task_struct const *ec_find_task(pid_t pid)
 {
-    struct task_struct *task  = NULL;
+    struct task_struct const *task  = NULL;
 
     rcu_read_lock();
     task = CB_RESOLVED(find_task_by_vpid)(pid);
@@ -80,7 +84,7 @@ void ec_get_starttime(struct timespec *start_time)
     set_normalized_timespec(start_time, current_time.tv_sec, current_time.tv_nsec);
 }
 
-bool ec_task_get_path(struct task_struct *task, char *buffer, unsigned int buflen, char **pathname)
+bool ec_task_get_path(struct task_struct const *task, char *buffer, unsigned int buflen, char **pathname)
 {
     bool ret = true;
 
@@ -100,15 +104,15 @@ bool ec_task_get_path(struct task_struct *task, char *buffer, unsigned int bufle
     return ret;
 }
 
-void ec_get_devinfo_from_task(struct task_struct *task, uint64_t *device, uint64_t *inode)
+void ec_get_devinfo_from_task(struct task_struct const *task, uint64_t *device, uint64_t *inode)
 {
     CANCEL_VOID(task);
     ec_get_devinfo_from_file(__ec_get_file_from_mm(task->mm), device, inode);
 }
 
-struct inode *ec_get_inode_from_task(struct task_struct *task)
+struct inode const *ec_get_inode_from_task(struct task_struct const *task)
 {
-    struct inode *pInode = NULL;
+    struct inode const *pInode = NULL;
 
     if (task)
     {
@@ -121,14 +125,14 @@ struct inode *ec_get_inode_from_task(struct task_struct *task)
     return pInode;
 }
 
-bool __ec_get_cmdline(struct task_struct *task,
+bool __ec_get_cmdline(struct task_struct const *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,
                          char *cmdLine,
                          size_t              cmdLineSize);
 
-bool __ec_get_cmdline_from_task(struct task_struct *task, char *cmdLine, size_t cmdLineSize)
+bool __ec_get_cmdline_from_task(struct task_struct const *task, char *cmdLine, size_t cmdLineSize)
 {
     CANCEL(task && task->mm, false);
 
@@ -138,7 +142,7 @@ bool __ec_get_cmdline_from_task(struct task_struct *task, char *cmdLine, size_t 
     return __ec_get_cmdline(task, task->mm->arg_start, task->mm->arg_end, 0xFFFF, cmdLine, cmdLineSize);
 }
 
-bool ec_get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t cmdLineSize)
+bool ec_get_cmdline_from_binprm(struct linux_binprm const *bprm, char *cmdLine, size_t cmdLineSize)
 {
     CANCEL(bprm && current->mm, false);
 
@@ -166,7 +170,7 @@ bool ec_get_cmdline_from_binprm(struct linux_binprm *bprm, char *cmdLine, size_t
 
 }
 
-bool __ec_get_cmdline(struct task_struct *task,
+bool __ec_get_cmdline(struct task_struct const *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,

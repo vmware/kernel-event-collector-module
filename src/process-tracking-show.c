@@ -44,7 +44,7 @@ void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *co
     struct seq_file    *seq_file     = (struct seq_file *)priv;
     ProcessTracking    *procp        = ec_sorted_tracking_table_get_process(data, context);
     const char         *proc_name    = NULL;
-    struct task_struct *task         = NULL;
+    struct task_struct const *task         = NULL;
     uint64_t            shared_count = 0;
 
     TRY(procp && seq_file);

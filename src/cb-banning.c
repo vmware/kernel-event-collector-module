@@ -228,7 +228,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
 
     list_for_each(pos, &sRunningInodesToBan.BanList.list)
     {
-        struct task_struct *task = NULL;
+        struct task_struct const *task = NULL;
 
         procp = (ProcessTracking *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->procp);
         pid = procp->pt_key.pid;
@@ -236,7 +236,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
         task = ec_find_task(pid);
         if (task)
         {
-            ret = send_sig_info(SIGKILL, &info, task);
+            ret = send_sig_info(SIGKILL, &info, (struct task_struct *)task);
             if (!ret)
             {
                 TRACE(DL_ERROR, "%s: killed process with [%llu:%llu] pid=%d", __func__, device, ino, pid);

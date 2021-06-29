@@ -45,7 +45,7 @@ typedef struct file_data_t_ {
     char            *generic_path_buffer; // on the GENERIC cache
 } file_data_t;
 
-file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename);
+file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename);  // forward
 file_data_t *__ec_get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
 void __ec_put_file_data(ProcessContext *context, file_data_t *file_data);
 
@@ -203,9 +203,19 @@ file_data_t *__ec_file_data_alloc(ProcessContext *context, const char __user *fi
 
     file_data->generic_path_buffer = NULL;
     file_data->name                = NULL;
+    file_data->device = 0;
+    file_data->inode = 0;
 
     file_data->file_s = CB_RESOLVED(getname)(filename);
     TRY(!IS_ERR_OR_NULL(file_data->file_s));
+
+    // If the path begins with a / we know it is already absolute so we dont need to do a lookup.
+    // Otherwise: prepare to do a lookup by allocating a buffer
+    if (file_data->file_s->name[0] != '/')
+    {
+        // need to use the generic cache because the module could disable before we are able to free
+        file_data->generic_path_buffer = ec_mem_cache_alloc_generic(PATH_MAX, context);
+    }
     return file_data;
 
 CATCH_DEFAULT:
@@ -214,24 +224,13 @@ CATCH_DEFAULT:
 }
 
 // Initializes file_data members from a file struct
-void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct file *file)
+void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct file const *file)
 {
     char *pathname            = NULL;
-    char *generic_path_buffer = NULL;
 
-    // if the path begins with a / we know it is already absolute so we dont need to do a lookup
-    // prepare to do a lookup by allocating a buffer
-    if (file_data->file_s->name[0] != '/')
+    if (file_data->generic_path_buffer)  // relative path; find absolute path
     {
-        // need to use the generic cache because the module could disable before we are able to free
-        generic_path_buffer = ec_mem_cache_alloc_generic(PATH_MAX, context);
-    }
-
-    // make sure the kmalloc succeeded
-    if (generic_path_buffer)
-    {
-        ec_file_get_path(file, generic_path_buffer, PATH_MAX, &pathname);
-        file_data->generic_path_buffer = generic_path_buffer;
+        ec_file_get_path(file, file_data->generic_path_buffer, PATH_MAX, &pathname);
         file_data->name = pathname;
     } else
     {
@@ -246,27 +245,53 @@ void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct
     ec_get_devinfo_from_file(file, &file_data->device, &file_data->inode);
 }
 
+void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_data, struct path const *path); // forward
+
 file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename)
 {
-    struct file *file      = NULL;
     file_data_t *file_data = __ec_file_data_alloc(context, filename);
 
     TRY(file_data);
+    {
+        char *pathname = NULL;
+        struct path path = {};
+        int error = user_path_at(AT_FDCWD, filename, LOOKUP_FOLLOW, &path);
 
-    // O_NONBLOCK is needed here in case the file is a named pipe.  Otherwise we
-    //   could deadlock waiting for a writer that may never come.
-    file = filp_open(file_data->file_s->name, O_RDONLY|O_NONBLOCK, 0);
-    TRY(!IS_ERR_OR_NULL(file));
-
-    __ec_file_data_init(context, file_data, file);
-
-    filp_close(file, NULL);
-
+        TRY(!error);
+        __ec_file_data_init_from_path(context, file_data, &path);
+        if (file_data->generic_path_buffer) { // filename not absolute
+            // Get pathname as absolute path, ending at hi end of generic_path_buffer
+            ec_path_get_path(&path, file_data->generic_path_buffer, PATH_MAX, &pathname);
+        }
+        path_put(&path);
+        file_data->name = (pathname ? pathname : file_data->file_s->name);
+    }
     return file_data;
 
 CATCH_DEFAULT:
-    __ec_put_file_data(context, file_data);
+    __ec_put_file_data(context, file_data);  // de-allocate file_data
     return NULL;
+}
+
+void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_data, struct path const *path)
+{
+    char *pathname            = NULL;
+
+    if (file_data->generic_path_buffer)  // is relative; need absolute
+    {
+        ec_path_get_path(path, file_data->generic_path_buffer, PATH_MAX, &pathname);
+        file_data->name = pathname;
+    } else
+    {
+        // if no path buffer that means we already have an absolute path because
+        // it starts with a / or maybe the kmalloc failed. in either case just use the
+        // file_s->name because it is either already absolute or if the buffer failed to
+        // allocate, then we cant do the lookup anyways, so we just report the relative path
+        // as a best effort.
+        file_data->name = file_data->file_s->name;
+    }
+
+    ec_get_devinfo_from_path(path, &file_data->device, &file_data->inode);
 }
 
 file_data_t *__ec_get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd)
