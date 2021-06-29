@@ -162,8 +162,22 @@ struct super_block const *ec_get_sb_from_dentry(struct dentry const *dentry);  /
 
 void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode)
 {
-    *device = new_encode_dev(ec_get_sb_from_dentry(path->dentry)->s_dev);
-    *inode  =                path->dentry->d_inode->i_ino;
+    struct super_block const *sb;
+
+    if (!path)
+    {
+        return;
+    }
+
+    sb = ec_get_sb_from_dentry(path->dentry);
+
+    if (!sb)
+    {
+        return;
+    }
+
+    *device = new_encode_dev(sb->s_dev);
+    *inode  = path->dentry->d_inode->i_ino;
 }
 
 void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode)
