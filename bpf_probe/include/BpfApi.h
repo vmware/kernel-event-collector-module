@@ -50,6 +50,50 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
+        static const char *TypeToString(uint8_t type)
+        {
+            const char *str = "unknown";
+            switch (type)
+            {// LCOV_EXCL_START
+            case EVENT_PROCESS_EXEC_ARG: str = "PROCESS_EXEC_ARG"; break;
+            case EVENT_PROCESS_EXEC_PATH: str = "PROCESS_EXEC_PATH"; break;
+            case EVENT_PROCESS_EXEC_RESULT: str = "PROCESS_EXEC_RESULT"; break;
+            case EVENT_PROCESS_EXIT: str = "PROCESS_EXIT"; break;
+            case EVENT_PROCESS_CLONE: str = "PROCESS_CLONE"; break;
+            case EVENT_FILE_READ: str = "FILE_READ"; break;
+            case EVENT_FILE_WRITE: str = "FILE_WRITE"; break;
+            case EVENT_FILE_CREATE: str = "FILE_CREATE"; break;
+            case EVENT_FILE_PATH: str = "FILE_PATH"; break;
+            case EVENT_FILE_MMAP: str = "FILE_MMAP"; break;
+            case EVENT_FILE_TEST: str = "FILE_TEST"; break;
+            case EVENT_NET_CONNECT_PRE: str = "NET_CONNECT_PRE"; break;
+            case EVENT_NET_CONNECT_ACCEPT: str = "NET_CONNECT_ACCEPT"; break;
+            case EVENT_NET_CONNECT_DNS_RESPONSE: str = "NET_CONNECT_DNS_RESPONSE"; break;
+            case EVENT_NET_CONNECT_WEB_PROXY: str = "NET_CONNECT_WEB_PROXY"; break;
+            case EVENT_FILE_DELETE: str = "FILE_DELETE"; break;
+            case EVENT_FILE_CLOSE: str = "FILE_CLOSE"; break;
+            case EVENT_FILE_OPEN: str = "FILE_OPEN"; break;
+            default: break;
+            }// LCOV_EXCL_END
+            return str;
+        }
+
+        static const char *StateToString(uint8_t state)
+        {
+            const char *str = "unknown";
+            switch (state)
+            {// LCOV_EXCL_START
+            case PP_NO_EXTRA_DATA: str = "NO_EXTRA_DATA"; break;
+            case PP_ENTRY_POINT: str = "ENTRY_POINT"; break;
+            case PP_PATH_COMPONENT: str = "PATH_COMPONENT"; break;
+            case PP_FINALIZED: str = "FINALIZED"; break;
+            case PP_APPEND: str = "APPEND"; break;
+            case PP_DEBUG: str = "DEBUG"; break;
+            default: break;
+            }// LCOV_EXCL_END
+            return str;
+        }
+
     protected:
         std::string                 m_ErrorMessage;
         EventCallbackFn             m_eventCallbackFn;
