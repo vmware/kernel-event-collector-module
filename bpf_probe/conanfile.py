@@ -89,7 +89,7 @@ class SHORT_NAME(CbConanFile):
             cmake.build()
 
     def package(self):
-        self.copy("*.h", dst="include", src="include", keep_path=True)
+        self.copy("*.h", dst="include/bpf_probe", src="include", keep_path=True)
         self.copy("*.a", dst="lib", keep_path=False)
         self.copy("check_probe", dst="bin", src="bin")
 

@@ -1072,7 +1072,7 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 
 	__init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &data.header, task);
 
-	GENERIC_DATA(&data)->header.uid = __kuid_val(task->real_parent->cred->uid); // override
+	data.header.uid = __kuid_val(task->real_parent->cred->uid); // override
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 	// Poorman's method for storing root fs path data->
