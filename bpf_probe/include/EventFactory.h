@@ -78,12 +78,20 @@ namespace bpf_probe {
             const char  *arg)
         {
             return Path(
-                EVENT_PROCESS_ARG,
+                EVENT_PROCESS_EXEC_ARG,
                 PP_ENTRY_POINT,
                 event_time,
                 pid,
                 parent_pid,
                 arg);
+        }
+
+        static Event ExecArgEnd(
+            uint64_t     event_time,
+            uint32_t     pid,
+            uint32_t     parent_pid)
+        {
+            return Data(EVENT_PROCESS_EXEC_ARG, PP_FINALIZED, event_time, pid, parent_pid);
         }
 
         static Event ExecPathStart(
@@ -96,7 +104,7 @@ namespace bpf_probe {
             uint64_t     prot = 0)
         {
             return File(
-                EVENT_PROCESS_EXEC,
+                EVENT_PROCESS_EXEC_PATH,
                 event_time,
                 pid,
                 parent_pid,
@@ -113,7 +121,7 @@ namespace bpf_probe {
             const char  *path)
         {
             return Path(
-                EVENT_PROCESS_EXEC,
+                EVENT_PROCESS_EXEC_PATH,
                 PP_PATH_COMPONENT,
                 event_time,
                 pid,
@@ -126,7 +134,7 @@ namespace bpf_probe {
             uint32_t     pid,
             uint32_t     parent_pid)
         {
-            return Data(EVENT_PROCESS_EXEC, PP_FINALIZED, event_time, pid, parent_pid);
+            return Data(EVENT_PROCESS_EXEC_PATH, PP_FINALIZED, event_time, pid, parent_pid);
         }
 
         static Event ExecResult(
@@ -141,7 +149,7 @@ namespace bpf_probe {
             {
                 auto data = static_cast<struct exec_data *>((void*)event.get());
                 InitHeader(
-                    data->header, EVENT_PROCESS_ARG, PP_FINALIZED,
+                    data->header, EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA,
                     event_time, pid, parent_pid);
 
                 data->retval = retval;

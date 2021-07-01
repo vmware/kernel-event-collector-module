@@ -107,8 +107,9 @@ struct mount {
 } __randomize_layout;
 
 enum event_type {
-	EVENT_PROCESS_ARG,
-	EVENT_PROCESS_EXEC,
+	EVENT_PROCESS_EXEC_ARG,
+	EVENT_PROCESS_EXEC_PATH,
+	EVENT_PROCESS_EXEC_RESULT,
 	EVENT_PROCESS_EXIT,
 	EVENT_PROCESS_CLONE,
 	EVENT_FILE_READ,
@@ -523,6 +524,9 @@ static void submit_all_args(struct pt_regs *ctx,
 	__submit_arg(ctx, (void *)ellipsis, data);
 
 out:
+	data->header.state = PP_FINALIZED;
+	send_event(ctx, (struct data*)data, sizeof(struct data));
+
 	return;
 }
 
@@ -686,7 +690,7 @@ int syscall__on_sys_execveat(struct pt_regs *ctx, int fd,
 {
 	DECLARE_FILE_EVENT(data);
 
-	__init_header(EVENT_PROCESS_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	__init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
 	submit_all_args(ctx, argv, PATH_DATA(&data));
 
@@ -698,7 +702,7 @@ int syscall__on_sys_execve(struct pt_regs *ctx, const char __user *filename,
 {
 	DECLARE_FILE_EVENT(data);
 
-	__init_header(EVENT_PROCESS_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	__init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
 	submit_all_args(ctx, argv, PATH_DATA(&data));
 
@@ -710,7 +714,7 @@ int after_sys_execve(struct pt_regs *ctx)
 {
 	struct exec_data data = {};
 
-	__init_header(EVENT_PROCESS_ARG, PP_FINALIZED, &data.header);
+	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
 	data.retval = PT_REGS_RC(ctx);
 
 	send_event(ctx, &data, sizeof(struct exec_data));
@@ -788,7 +792,7 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 
 	exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-	u8 type = (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE) ? EVENT_PROCESS_EXEC : EVENT_FILE_MMAP);
+	u8 type = (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE) ? EVENT_PROCESS_EXEC_PATH : EVENT_FILE_MMAP);
 	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
 	// event specific data

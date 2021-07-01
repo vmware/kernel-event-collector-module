@@ -29,8 +29,9 @@ namespace bpf_probe {
 
     enum event_type
     {
-        EVENT_PROCESS_ARG,
-        EVENT_PROCESS_EXEC,
+        EVENT_PROCESS_EXEC_ARG,
+        EVENT_PROCESS_EXEC_PATH,
+        EVENT_PROCESS_EXEC_RESULT,
         EVENT_PROCESS_EXIT,
         EVENT_PROCESS_CLONE,
         EVENT_FILE_READ,
