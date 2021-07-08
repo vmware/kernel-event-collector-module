@@ -181,6 +181,7 @@ struct file_data {
 struct path_data {
 	struct data_header header;
 
+	u8 size;
 	char fname[MAX_FNAME];
 };
 
@@ -459,14 +460,28 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 	__init_header_with_task(type, state, header, (struct task_struct *)bpf_get_current_task());
 }
 
+#define PATH_MSG_SIZE(DATA) (sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
+
+static u8 __write_fname(struct path_data *data, const void *ptr)
+{
+    // Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
+    //  substituted by bpf_probe_read.  The return value for these two cases mean something
+    //  different, but that is OK for our logic.
+    // The bpf_probe_read_str will return the actual bytes written
+    // The bpf_probe_read case will return 0, so we need to assume MAX_FNAME
+    u8 result = bpf_probe_read_str(&data->fname, MAX_FNAME, ptr);
+    data->size = result == 0 ? MAX_FNAME : result;
+
+    return result;
+}
+
 static u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
 {
-	// Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
-	//  substituted by bpf_probe_read.  The return value for these two cases mean something
-	//  different, but that is OK for our logic.
 	// Note: On older kernel this may read past the actual arg list into the env.
-	u8 result = bpf_probe_read_str(data->fname, MAX_FNAME, ptr);
-	send_event(ctx, data, sizeof(struct path_data));
+    u8 result = __write_fname(data, ptr);
+
+	// Don't copy the buffer which we did not actually write to.
+	send_event(ctx, data, PATH_MSG_SIZE(data));
 	return result;
 }
 
@@ -608,10 +623,9 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 		} else {
 			bpf_probe_read(&sp, sizeof(sp),
 					   (void *)&(dentry->d_name));
-			bpf_probe_read(&data->fname, sizeof(data->fname),
-					   sp.name);
+            __write_fname(data, sp.name);
 			dentry = parent_dentry;
-			send_event(ctx, data, sizeof(struct path_data));
+			send_event(ctx, data, PATH_MSG_SIZE(data));
 		}
 	}
 
@@ -645,7 +659,10 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 	if (sp.name == NULL) {
 		goto out;
 	}
-	bpf_probe_read(&data->fname, sizeof(data->fname), (void *)sp.name);
+	__write_fname(data, sp.name);
+
+    // Don't copy the buffer which we did not actually write to.
+    send_event(ctx, data, PATH_MSG_SIZE(data));
 
 	bpf_probe_read(&parent_dentry, sizeof(parent_dentry),
 			   &(dentry->d_parent));
@@ -664,9 +681,8 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		bpf_probe_read(&sp, sizeof(struct qstr),
 				   (void *)&(current_dentry->d_name));
 		if ((void *)sp.name != NULL) {
-			bpf_probe_read(data->fname, sizeof(data->fname),
-					   (void *)sp.name);
-			send_event(ctx, data, sizeof(struct path_data));
+            __write_fname(data, sp.name);
+			send_event(ctx, data, PATH_MSG_SIZE(data));
 		}
 
 		bpf_probe_read(&current_dentry, sizeof(current_dentry),
@@ -676,7 +692,8 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 	}
 
 	data->fname[0] = '\0';
-	send_event(ctx, data, sizeof(struct path_data));
+    data->size = 1;
+	send_event(ctx, data, PATH_MSG_SIZE(data));
 
 out:
 	data->header.state = PP_FINALIZED;

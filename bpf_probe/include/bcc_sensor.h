@@ -85,7 +85,8 @@ namespace bpf_probe {
     struct path_data {
         struct data_header header;
 
-        char fname[MAX_FNAME];
+        char size;
+        char fname[];
     };
 
     struct net_data
