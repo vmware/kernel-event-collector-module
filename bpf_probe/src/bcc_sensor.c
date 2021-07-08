@@ -809,8 +809,11 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 
 	exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-	u8 type = (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE) ? EVENT_PROCESS_EXEC_PATH : EVENT_FILE_MMAP);
-	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
+		goto out;
+	}
+
+	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
 	// event specific data
 	__set_inode_from_file(FILE_DATA(&data), file);
@@ -920,7 +923,7 @@ int trace_write_kentry(struct pt_regs *ctx, struct file *file, const void *buf,
 // to create the file if needed. So this will likely be written to next.
 int on_security_file_open(struct pt_regs *ctx, struct file *file)
 {
-  DECLARE_FILE_EVENT(data);
+	DECLARE_FILE_EVENT(data);
 	struct super_block *sb = NULL;
 	struct inode *inode = NULL;
 	int mode;
@@ -932,6 +935,8 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	u8 type;
 	if ((file->f_flags & (O_CREAT | O_TRUNC))) {
 		type = EVENT_FILE_CREATE;
+	} else if (file->f_flags & FMODE_EXEC) {
+		type = EVENT_PROCESS_EXEC_PATH;
 	} else if (!(file->f_flags & (O_RDWR | O_WRONLY))) {
 		type = EVENT_FILE_OPEN;
 	} else {
