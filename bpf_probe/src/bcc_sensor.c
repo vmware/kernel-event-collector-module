@@ -655,42 +655,29 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		root_fs_dentry = *t_dentry;
 	}
 #endif
-	bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
-	if (sp.name == NULL) {
-		goto out;
-	}
-	__write_fname(data, sp.name);
 
-    // Don't copy the buffer which we did not actually write to.
-    send_event(ctx, data, PATH_MSG_SIZE(data));
-
-	bpf_probe_read(&parent_dentry, sizeof(parent_dentry),
-			   &(dentry->d_parent));
-	bpf_probe_read(&current_dentry, sizeof(current_dentry), &(dentry));
 	data->header.state = PP_PATH_COMPONENT;
-
 #pragma unroll
 	for (int i = 0; i < MAX_PATH_ITER; i++) {
 		if (dentry == root_fs_dentry) {
 			goto out;
 		}
 
-		if (parent_dentry == current_dentry || parent_dentry == NULL) {
-			break;
-		}
-		bpf_probe_read(&sp, sizeof(struct qstr),
-				   (void *)&(current_dentry->d_name));
+		bpf_probe_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
+		bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
 		if ((void *)sp.name != NULL) {
-            __write_fname(data, sp.name);
+			__write_fname(data, sp.name);
 			send_event(ctx, data, PATH_MSG_SIZE(data));
 		}
 
-		bpf_probe_read(&current_dentry, sizeof(current_dentry),
-				   &(parent_dentry));
-		bpf_probe_read(&parent_dentry, sizeof(parent_dentry),
-				   &(parent_dentry->d_parent));
+		if (parent_dentry == dentry || parent_dentry == NULL) {
+			break;
+		}
+
+		dentry = parent_dentry;
 	}
 
+	// Trigger the agent to add the mount path
 	data->fname[0] = '\0';
     data->size = 1;
 	send_event(ctx, data, PATH_MSG_SIZE(data));
