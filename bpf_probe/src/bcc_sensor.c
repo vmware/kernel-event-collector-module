@@ -148,7 +148,6 @@ enum PP {
 
 struct data_header {
 	u64 event_time; // Time the event collection started.  (Same across message parts.)
-	u64 event_submit_time; // Time we submit the event to bpf.  (Unique for each event.)
 	u8 type;
 	u8 state;
 
@@ -241,7 +240,6 @@ static void send_event(
 	void           *data,
 	size_t          data_size)
 {
-	((struct data*)data)->header.event_submit_time = bpf_ktime_get_ns();
 	events.perf_submit(ctx, data, data_size);
 }
 

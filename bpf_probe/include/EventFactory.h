@@ -27,7 +27,6 @@ namespace bpf_probe {
             header.type = type;
             header.state = state;
             header.event_time = event_time;
-            header.event_submit_time = event_time;
 
             header.tid = pid;
             header.pid = pid;
