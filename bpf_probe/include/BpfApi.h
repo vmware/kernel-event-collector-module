@@ -6,7 +6,14 @@
 #include "bcc_sensor.h"
 
 #include <functional>
-#include <cb-memory>
+#include <memory>
+
+// A number of calls are annotated with 'warn_unused_result' in their definition, so a
+// normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
+// the compiler into properly allowing the call to be ignored.
+#define IGNORE_UNUSED_RETURN_VALUE(statement) do { \
+    static_cast<void>(!statement); \
+} while (0)
 
 namespace ebpf {
     class BPF;

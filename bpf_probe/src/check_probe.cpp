@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
     ParseArgs(argc, argv);
 
     printf("Attempting to load probe...\n");
-    auto bpf_api = std::make_unique<BpfApi>();
+    std::unique_ptr<BpfApi> bpf_api = std::unique_ptr<BpfApi>(new BpfApi());
     if (!bpf_api)
     {
         printf("Create probe failed\n");
@@ -94,7 +94,7 @@ static void ReadProbeSource(const std::string &probe_source)
         {
             std::unique_ptr<unsigned char []> buffer(new unsigned char[data.st_size + 1]);
 
-            read(fileHandle, buffer.get(), data.st_size);
+            IGNORE_UNUSED_RETURN_VALUE(read(fileHandle, buffer.get(), data.st_size));
 
             s_bpf_program = (const char *)buffer.get();
         }
