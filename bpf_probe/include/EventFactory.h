@@ -5,7 +5,7 @@
 
 #include "bcc_sensor.h"
 
-#include <cb-memory>
+#include <memory>
 #include <string.h>
 
 namespace cb_endpoint {
