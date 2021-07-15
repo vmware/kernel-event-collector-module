@@ -148,7 +148,6 @@ enum PP {
 
 struct data_header {
 	u64 event_time; // Time the event collection started.  (Same across message parts.)
-	u64 event_submit_time; // Time we submit the event to bpf.  (Unique for each event.)
 	u8 type;
 	u8 state;
 
@@ -181,6 +180,7 @@ struct file_data {
 struct path_data {
 	struct data_header header;
 
+	u8 size;
 	char fname[MAX_FNAME];
 };
 
@@ -240,7 +240,6 @@ static void send_event(
 	void           *data,
 	size_t          data_size)
 {
-	((struct data*)data)->header.event_submit_time = bpf_ktime_get_ns();
 	events.perf_submit(ctx, data, data_size);
 }
 
@@ -274,7 +273,13 @@ static inline struct super_block *_sb_from_file(struct file *file)
 	}
 
 	if (file->f_inode) {
-		sb = file->f_inode->i_sb;
+		struct inode *pinode = NULL;
+
+		bpf_probe_read(&pinode, sizeof(pinode), &(file->f_inode));
+		if (!pinode) {
+			goto out;
+		}
+		bpf_probe_read(&sb, sizeof(sb), &(pinode->i_sb));
 	}
 	if (sb) {
 		goto out;
@@ -335,92 +340,58 @@ static inline unsigned int __get_mnt_ns_id(struct task_struct *task)
 	return 0;
 }
 
-static inline void __set_device_from_sb(struct file_data *data,
-					struct super_block *sb)
+static inline u32 __get_device_from_sb(struct super_block *sb)
 {
-	if (data) {
-		data->device = 0;
+	dev_t device = 0;
+	if (sb) {
+		bpf_probe_read(&device, sizeof(device), &sb->s_dev);
 	}
-
-	if (!data || !sb) {
-		return;
-	}
-
-	data->device = new_encode_dev(sb->s_dev);
+	return new_encode_dev(device);
 }
 
-static inline void __set_device_from_dentry(struct file_data *data,
-											struct dentry *dentry)
+static inline u32 __get_device_from_dentry(struct dentry *dentry)
 {
-	if (data) {
-		data->device = 0;
-	}
-
-	if (!data || !dentry) {
-		return;
-	}
-
-	__set_device_from_sb(data, _sb_from_dentry(dentry));
+	return __get_device_from_sb(_sb_from_dentry(dentry));
 }
 
-static inline void __set_device_from_file(struct file_data *data,
-					  struct file *file)
+static inline u32 __get_device_from_file(struct file *file)
 {
-	struct super_block *sb = NULL;
-
-	if (data) {
-		data->device = 0;
-	}
-
-	if (!data || !file) {
-		return;
-	}
-
-	sb = _sb_from_file(file);
-	if (!sb) {
-		return;
-	}
-	__set_device_from_sb(data, sb);
+	return __get_device_from_sb(_sb_from_file(file));
 }
 
-static inline void __set_inode_from_file(struct file_data *data, struct file *file)
+static inline u64 __get_inode_from_pinode(struct inode *pinode)
 {
-	struct inode *pinode = NULL;
+	u64 inode = 0;
 
-	if (data) {
-		data->inode = 0;
+	if (pinode) {
+		bpf_probe_read(&inode, sizeof(inode), &pinode->i_ino);
 	}
 
-	if (!data || !file) {
-		return;
-	}
-
-	bpf_probe_read(&pinode, sizeof(pinode), &(file->f_inode));
-	if (!pinode) {
-		return;
-	}
-
-	bpf_probe_read(&data->inode, sizeof(data->inode), &pinode->i_ino);
+	return inode;
 }
 
-static inline void __set_inode_from_dentry(struct file_data *data, struct dentry *dentry)
+static inline u64 __get_inode_from_file(struct file *file)
 {
-	struct inode *pinode = NULL;
+	if (file) {
+		struct inode *pinode = NULL;
 
-	if (data) {
-		data->inode = 0;
+		bpf_probe_read(&pinode, sizeof(pinode), &(file->f_inode));
+		return __get_inode_from_pinode(pinode);
 	}
 
-	if (!data || !dentry) {
-		return;
+	return 0;
+}
+
+static inline u64 __get_inode_from_dentry(struct dentry *dentry)
+{
+	if (dentry) {
+		struct inode *pinode = NULL;
+
+		bpf_probe_read(&pinode, sizeof(pinode), &(dentry->d_inode));
+		return __get_inode_from_pinode(pinode);
 	}
 
-	bpf_probe_read(&pinode, sizeof(pinode), &(dentry->d_inode));
-	if (!pinode) {
-		return;
-	}
-
-	bpf_probe_read(&data->inode, sizeof(data->inode), &pinode->i_ino);
+	return 0;
 }
 
 static inline void __init_header_with_task(u8 type, u8 state, struct data_header *header, struct task_struct *task)
@@ -459,14 +430,28 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 	__init_header_with_task(type, state, header, (struct task_struct *)bpf_get_current_task());
 }
 
-static u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
+#define PATH_MSG_SIZE(DATA) (sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
+
+static u8 __write_fname(struct path_data *data, const void *ptr)
 {
 	// Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
 	//  substituted by bpf_probe_read.  The return value for these two cases mean something
 	//  different, but that is OK for our logic.
+	// The bpf_probe_read_str will return the actual bytes written
+	// The bpf_probe_read case will return 0, so we need to assume MAX_FNAME
+	u8 result = bpf_probe_read_str(&data->fname, MAX_FNAME, ptr);
+	data->size = result == 0 ? MAX_FNAME : result;
+
+	return result;
+}
+
+static u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
+{
 	// Note: On older kernel this may read past the actual arg list into the env.
-	u8 result = bpf_probe_read_str(data->fname, MAX_FNAME, ptr);
-	send_event(ctx, data, sizeof(struct path_data));
+	u8 result = __write_fname(data, ptr);
+
+	// Don't copy the buffer which we did not actually write to.
+	send_event(ctx, data, PATH_MSG_SIZE(data));
 	return result;
 }
 
@@ -608,10 +593,9 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 		} else {
 			bpf_probe_read(&sp, sizeof(sp),
 					   (void *)&(dentry->d_name));
-			bpf_probe_read(&data->fname, sizeof(data->fname),
-					   sp.name);
+			__write_fname(data, sp.name);
 			dentry = parent_dentry;
-			send_event(ctx, data, sizeof(struct path_data));
+			send_event(ctx, data, PATH_MSG_SIZE(data));
 		}
 	}
 
@@ -641,42 +625,32 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		root_fs_dentry = *t_dentry;
 	}
 #endif
-	bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
-	if (sp.name == NULL) {
-		goto out;
-	}
-	bpf_probe_read(&data->fname, sizeof(data->fname), (void *)sp.name);
 
-	bpf_probe_read(&parent_dentry, sizeof(parent_dentry),
-			   &(dentry->d_parent));
-	bpf_probe_read(&current_dentry, sizeof(current_dentry), &(dentry));
 	data->header.state = PP_PATH_COMPONENT;
-
 #pragma unroll
 	for (int i = 0; i < MAX_PATH_ITER; i++) {
 		if (dentry == root_fs_dentry) {
 			goto out;
 		}
 
-		if (parent_dentry == current_dentry || parent_dentry == NULL) {
+		bpf_probe_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
+		bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
+		if ((void *)sp.name != NULL) {
+			__write_fname(data, sp.name);
+			send_event(ctx, data, PATH_MSG_SIZE(data));
+		}
+
+		if (parent_dentry == dentry || parent_dentry == NULL) {
 			break;
 		}
-		bpf_probe_read(&sp, sizeof(struct qstr),
-				   (void *)&(current_dentry->d_name));
-		if ((void *)sp.name != NULL) {
-			bpf_probe_read(data->fname, sizeof(data->fname),
-					   (void *)sp.name);
-			send_event(ctx, data, sizeof(struct path_data));
-		}
 
-		bpf_probe_read(&current_dentry, sizeof(current_dentry),
-				   &(parent_dentry));
-		bpf_probe_read(&parent_dentry, sizeof(parent_dentry),
-				   &(parent_dentry->d_parent));
+		dentry = parent_dentry;
 	}
 
+	// Trigger the agent to add the mount path
 	data->fname[0] = '\0';
-	send_event(ctx, data, sizeof(struct path_data));
+	data->size = 1;
+	send_event(ctx, data, PATH_MSG_SIZE(data));
 
 out:
 	data->header.state = PP_FINALIZED;
@@ -761,10 +735,8 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 		FILE_DATA(&data)->device = ((struct file_data_cache *)cachep)->device;
 		FILE_DATA(&data)->inode = ((struct file_data_cache *)cachep)->inode;
 #else
-		FILE_DATA(&data)->device = 0;
-		FILE_DATA(&data)->inode = 0;
-		__set_device_from_file(FILE_DATA(&data), file);
-		__set_inode_from_file(FILE_DATA(&data), file);
+		FILE_DATA(&data)->device = __get_device_from_file(file);
+		FILE_DATA(&data)->inode = __get_inode_from_file(file);
 #endif
 
 		send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
@@ -792,12 +764,15 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 
 	exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-	u8 type = (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE) ? EVENT_PROCESS_EXEC_PATH : EVENT_FILE_MMAP);
-	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
+		goto out;
+	}
+
+	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
 	// event specific data
-	__set_inode_from_file(FILE_DATA(&data), file);
-	__set_device_from_file(FILE_DATA(&data), file);
+	FILE_DATA(&data)->device = __get_device_from_file(file);
+	FILE_DATA(&data)->inode = __get_inode_from_file(file);
 	FILE_DATA(&data)->flags = flags;
 	FILE_DATA(&data)->prot = prot;
 	// submit initial event data
@@ -842,8 +817,8 @@ static inline int __trace_write_entry(struct pt_regs *ctx, struct file *file,
 	}
 #endif
 	__init_header(EVENT_FILE_WRITE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-	__set_inode_from_file(FILE_DATA(&data), file);
-	__set_device_from_file(FILE_DATA(&data), file);
+	FILE_DATA(&data)->device = __get_device_from_file(file);
+	FILE_DATA(&data)->inode = __get_inode_from_file(file);
 
 	u64 file_cache_key = (u64)file;
 
@@ -903,7 +878,7 @@ int trace_write_kentry(struct pt_regs *ctx, struct file *file, const void *buf,
 // to create the file if needed. So this will likely be written to next.
 int on_security_file_open(struct pt_regs *ctx, struct file *file)
 {
-  DECLARE_FILE_EVENT(data);
+	DECLARE_FILE_EVENT(data);
 	struct super_block *sb = NULL;
 	struct inode *inode = NULL;
 	int mode;
@@ -915,6 +890,8 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	u8 type;
 	if ((file->f_flags & (O_CREAT | O_TRUNC))) {
 		type = EVENT_FILE_CREATE;
+	} else if (file->f_flags & FMODE_EXEC) {
+		type = EVENT_PROCESS_EXEC_PATH;
 	} else if (!(file->f_flags & (O_RDWR | O_WRONLY))) {
 		type = EVENT_FILE_OPEN;
 	} else {
@@ -942,8 +919,8 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 #endif
 
 	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-	__set_inode_from_file(FILE_DATA(&data), file);
-	__set_device_from_file(FILE_DATA(&data), file);
+	FILE_DATA(&data)->device = __get_device_from_file(file);
+	FILE_DATA(&data)->inode = __get_inode_from_file(file);
 
 	u32 *cachep;
 	u64 file_cache_key = (u64)file;
@@ -992,8 +969,8 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 		{
 			__init_header(EVENT_FILE_DELETE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-			__set_device_from_sb(FILE_DATA(data), sb);
-			__set_inode_from_dentry(FILE_DATA(data), dentry);
+			FILE_DATA(data)->device = __get_device_from_sb(sb);
+			FILE_DATA(data)->inode = __get_inode_from_dentry(dentry);
 
 			__file_tracking_delete(0, FILE_DATA(data)->device, FILE_DATA(data)->inode);
 
@@ -1051,8 +1028,8 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 	inode = NULL;
 
 
-	__set_device_from_dentry(FILE_DATA(&data), new_dentry ? new_dentry : old_dentry);
-	__set_inode_from_dentry(FILE_DATA(&data), old_dentry);
+	FILE_DATA(&data)->device = __get_device_from_dentry(new_dentry ? new_dentry : old_dentry);
+	FILE_DATA(&data)->inode = __get_inode_from_dentry(old_dentry);
 
 	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
 	__do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
@@ -1091,8 +1068,8 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 #endif
 
 	if (!(task->flags & PF_KTHREAD) && task->mm && task->mm->exe_file) {
-		__set_device_from_file(&data, task->mm->exe_file);
-		__set_inode_from_file(&data, task->mm->exe_file);
+		data.device = __get_device_from_file(task->mm->exe_file);
+		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
 
 	send_event(ctx, &data, sizeof(struct file_data));

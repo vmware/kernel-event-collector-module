@@ -51,7 +51,6 @@ namespace bpf_probe {
 
     struct data_header {
         uint64_t event_time; // Time the event collection started.  (Same across message parts.)
-        uint64_t event_submit_time; // Time we submit the event to bpf.  (Unique for each event.)
         uint8_t  type;
         uint8_t  state;
 
@@ -85,7 +84,8 @@ namespace bpf_probe {
     struct path_data {
         struct data_header header;
 
-        char fname[MAX_FNAME];
+        char size;
+        char fname[];
     };
 
     struct net_data
