@@ -1,4 +1,5 @@
 // Copyright (c) 2020 VMWare, Inc. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0
 
 #include "BpfApi.h"
 
@@ -7,9 +8,8 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 
-using namespace cb_endpoint::cb_ebpf;
+using namespace cb_endpoint::bpf_probe;
 
 BpfApi::BpfApi()
     : m_BPF(nullptr)
@@ -252,16 +252,11 @@ void BpfApi::RaiseKptrRestrict()
     }
 }
 
-void BpfApi::EmitMessage(void *data, int data_size)
-{
-    m_eventCallbackFn(data, data_size);
-}
-
 void BpfApi::on_perf_submit(void *cb_cookie, void *data, int data_size)
 {
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
     if (bpfApi)
     {
-        bpfApi->EmitMessage(data, data_size);
+        bpfApi->m_eventCallbackFn(static_cast<struct data *>(data));
     }
 }
