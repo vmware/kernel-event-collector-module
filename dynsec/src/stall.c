@@ -16,14 +16,18 @@
 #include "stall.h"
 #include "path_utils.h"
 
+// Set hook types to disable DYNSEC_REPORT_STALL aka observe timeouts
+uint32_t debug_disable_stall_mask = 0;
+
 static atomic64_t req_id = ATOMIC64_INIT(0);
 
-uint64_t dynsec_next_req_id(void)
+static uint64_t dynsec_next_req_id(void)
 {
     return atomic64_inc_return(&req_id);
 }
 
-static struct dynsec_event *alloc_exec_event(gfp_t mode)
+static struct dynsec_event *alloc_exec_event(uint16_t report_flags, uint32_t hook_type,
+                                             gfp_t mode)
 {
     struct dynsec_exec_event *exec_event = kzalloc(sizeof(*exec_event), mode);
 
@@ -34,16 +38,24 @@ static struct dynsec_event *alloc_exec_event(gfp_t mode)
     // Set key core data
     exec_event->event.req_id = dynsec_next_req_id();
     exec_event->event.event_type = DYNSEC_EVENT_TYPE_EXEC;
-    exec_event->event.pid = current->pid;
+    exec_event->event.tid = current->pid;
 
+    // Set msg hdr data
+    exec_event->kmsg.hdr.report_flags = report_flags;
+    exec_event->kmsg.hdr.hook_type = hook_type;
     exec_event->kmsg.hdr.req_id = exec_event->event.req_id;
     exec_event->kmsg.hdr.event_type = exec_event->event.event_type;
-    exec_event->kmsg.hdr.pid = exec_event->event.pid;
+    exec_event->kmsg.hdr.tid = exec_event->event.tid;
+
+    if (exec_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
+        exec_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
 
     return &exec_event->event;
 }
 
-static struct dynsec_event *alloc_unlink_event(gfp_t mode)
+static struct dynsec_event *alloc_unlink_event(uint16_t report_flags, uint32_t hook_type,
+                                               gfp_t mode)
 {
     struct dynsec_unlink_event *unlink_event = kzalloc(sizeof(*unlink_event), mode);
 
@@ -54,37 +66,52 @@ static struct dynsec_event *alloc_unlink_event(gfp_t mode)
     // Set key core data
     unlink_event->event.req_id = dynsec_next_req_id();
     unlink_event->event.event_type = DYNSEC_EVENT_TYPE_UNLINK;
-    unlink_event->event.pid = current->pid;
+    unlink_event->event.tid = current->pid;
 
+    // Set msg hdr data
+    unlink_event->kmsg.hdr.report_flags = report_flags;
+    unlink_event->kmsg.hdr.hook_type = hook_type;
     unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
     unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
-    unlink_event->kmsg.hdr.pid = unlink_event->event.pid;
+    unlink_event->kmsg.hdr.tid = unlink_event->event.tid;
+
+    if (unlink_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
+        unlink_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
 
     return &unlink_event->event;
 }
 
-static struct dynsec_event *alloc_rmdir_event(gfp_t mode)
+static struct dynsec_event *alloc_rmdir_event(uint16_t report_flags, uint32_t hook_type, gfp_t mode)
 {
-    struct dynsec_unlink_event *unlink_event = kzalloc(sizeof(*unlink_event), mode);
+    struct dynsec_unlink_event *rmdir_event = kzalloc(sizeof(*rmdir_event), mode);
 
-    if (!unlink_event) {
+    if (!rmdir_event) {
         return NULL;
     }
 
     // Set key core data
-    unlink_event->event.req_id = dynsec_next_req_id();
-    unlink_event->event.event_type = DYNSEC_EVENT_TYPE_RMDIR;
-    unlink_event->event.pid = current->pid;
+    rmdir_event->event.req_id = dynsec_next_req_id();
+    rmdir_event->event.event_type = DYNSEC_EVENT_TYPE_RMDIR;
+    rmdir_event->event.tid = current->pid;
 
-    unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
-    unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
-    unlink_event->kmsg.hdr.pid = unlink_event->event.pid;
+    // Set msg hdr data
+    rmdir_event->kmsg.hdr.report_flags = report_flags;
+    rmdir_event->kmsg.hdr.hook_type = hook_type;
+    rmdir_event->kmsg.hdr.req_id = rmdir_event->event.req_id;
+    rmdir_event->kmsg.hdr.event_type = rmdir_event->event.event_type;
+    rmdir_event->kmsg.hdr.tid = rmdir_event->event.tid;
 
-    return &unlink_event->event;
+    if (rmdir_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
+        rmdir_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
+
+    return &rmdir_event->event;
 }
 
 
-static struct dynsec_event *alloc_rename_event(gfp_t mode)
+static struct dynsec_event *alloc_rename_event(uint16_t report_flags, uint32_t hook_type,
+                                               gfp_t mode)
 {
     struct dynsec_rename_event *rename_event = kzalloc(sizeof(*rename_event), mode);
 
@@ -95,31 +122,41 @@ static struct dynsec_event *alloc_rename_event(gfp_t mode)
     // Set key core data
     rename_event->event.req_id = dynsec_next_req_id();
     rename_event->event.event_type = DYNSEC_EVENT_TYPE_RENAME;
-    rename_event->event.pid = current->pid;
+    rename_event->event.tid = current->pid;
 
+    // Set msg hdr data
+    rename_event->kmsg.hdr.report_flags = report_flags;
+    rename_event->kmsg.hdr.hook_type = hook_type;
     rename_event->kmsg.hdr.req_id = rename_event->event.req_id;
     rename_event->kmsg.hdr.event_type = rename_event->event.event_type;
-    rename_event->kmsg.hdr.pid = rename_event->event.pid;
+    rename_event->kmsg.hdr.tid = rename_event->event.tid;
+
+    if (rename_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
+        rename_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
 
     return &rename_event->event;
 }
 
 // Event allocation factory
-struct dynsec_event *alloc_dynsec_event(uint32_t event_type, gfp_t mode)
+struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
+                                        uint32_t hook_type,
+                                        uint16_t report_flags,
+                                        gfp_t mode)
 {
     switch (event_type)
     {
     case DYNSEC_EVENT_TYPE_EXEC:
-        return alloc_exec_event(mode);
+        return alloc_exec_event(report_flags, hook_type, mode);
 
     case DYNSEC_EVENT_TYPE_UNLINK:
-        return alloc_unlink_event(mode);
+        return alloc_unlink_event(report_flags, hook_type, mode);
 
     case DYNSEC_EVENT_TYPE_RMDIR:
-        return alloc_rmdir_event(mode);
+        return alloc_rmdir_event(report_flags, hook_type, mode);
 
     case DYNSEC_EVENT_TYPE_RENAME:
-        return alloc_rename_event(mode);
+        return alloc_rename_event(report_flags, hook_type, mode);
 
     default:
         break;
@@ -461,46 +498,45 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
     return -EINVAL;
 }
 
+static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
+{
+    task_ctx->tid = current->pid;
+    task_ctx->pid = current->tgid;
+    if (current->real_parent) {
+        task_ctx->ppid = current->real_parent->tgid;
+    }
+
+    // user DAC context
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    task_ctx->uid = from_kuid(&init_user_ns, current_uid());
+    task_ctx->euid = from_kuid(&init_user_ns, current_euid());
+    task_ctx->gid = from_kgid(&init_user_ns, current_gid());
+    task_ctx->egid = from_kgid(&init_user_ns, current_egid());
+#else
+    task_ctx->uid = current_uid();
+    task_ctx->euid = current_euid();
+    task_ctx->gid = current_gid();
+    task_ctx->egid = current_egid();
+#endif
+
+    task_ctx->mnt_ns = get_mnt_ns_id(current);
+}
+
 // Fill in event data and compute payload
 bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
                             const struct linux_binprm *bprm, gfp_t mode)
 {
     bool found_ino = false;
     bool found_dev = false;
-    char *buf = NULL;
-    char *p = NULL;
 
     if (!exec_event || !bprm) {
         return false;
     }
 
-    exec_event->kmsg.hdr.payload = 0;
+    exec_event->kmsg.hdr.payload = sizeof(exec_event->kmsg.hdr);
 
-    // hdr data
-    exec_event->kmsg.hdr.req_id = exec_event->event.req_id;
-    exec_event->kmsg.hdr.event_type = exec_event->event.event_type;
+    fill_in_task_ctx(&exec_event->kmsg.msg.task);
 
-    exec_event->kmsg.hdr.payload += sizeof(exec_event->kmsg.hdr);
-
-    // pid and tgid
-    exec_event->kmsg.msg.pid = current->pid;
-    exec_event->kmsg.msg.tgid = current->tgid;
-    if (current->real_parent) {
-        exec_event->kmsg.msg.ppid = current->real_parent->tgid;
-    }
-
-    // user DAC context
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    exec_event->kmsg.msg.uid = from_kuid(&init_user_ns, current_uid());
-    exec_event->kmsg.msg.euid = from_kuid(&init_user_ns, current_euid());
-    exec_event->kmsg.msg.gid = from_kgid(&init_user_ns, current_gid());
-    exec_event->kmsg.msg.egid = from_kgid(&init_user_ns, current_egid());
-#else
-    exec_event->kmsg.msg.uid = current_uid();
-    exec_event->kmsg.msg.euid = current_euid();
-    exec_event->kmsg.msg.gid = current_gid();
-    exec_event->kmsg.msg.egid = current_egid();
-#endif
     exec_event->kmsg.hdr.payload += sizeof(exec_event->kmsg.msg);
 
     // file context
@@ -523,33 +559,12 @@ bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
         return true;
     }
 
-#define EXEC_PATH_SZ 4096
-    buf = kzalloc(EXEC_PATH_SZ, mode);
-    if (!buf) {
-        return true;
-    }
-
-    path_get(&bprm->file->f_path);
-    p = dynsec_d_path(&bprm->file->f_path, buf, EXEC_PATH_SZ);
-    path_put(&bprm->file->f_path);
-    if (!IS_ERR_OR_NULL(p) && *p) {
-        if ((p > buf)) {
-            memmove(buf, p, buf - p + EXEC_PATH_SZ -1);
-        }
-        if (*buf) {
-            exec_event->kmsg.msg.path_size = buf - p + EXEC_PATH_SZ;
-            exec_event->kmsg.msg.path_offset = exec_event->kmsg.hdr.payload;
-
-            exec_event->kmsg.hdr.payload += exec_event->kmsg.msg.path_size;
-            exec_event->kmsg.path = buf;
-        } else {
-            // memmove alignment off!
-            kfree(buf);
-            buf = NULL;
-        }
-    } else {
-        kfree(buf);
-        buf = NULL;
+    exec_event->kmsg.path = dynsec_build_path(&bprm->file->f_path,
+                                &exec_event->kmsg.msg.path_size,
+                                GFP_KERNEL);
+    if (exec_event->kmsg.path && exec_event->kmsg.msg.path_size) {
+        exec_event->kmsg.msg.path_offset = exec_event->kmsg.hdr.payload;
+        exec_event->kmsg.hdr.payload += exec_event->kmsg.msg.path_size;
     }
 
     return true;
@@ -560,40 +575,15 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
 {
     bool found_ino = false;
     bool found_dev = false;
-    char *buf = NULL;
-    char *p = NULL;
 
     if (!unlink_event || !dentry) {
         return false;
     }
 
-    unlink_event->kmsg.hdr.payload = 0;
+    unlink_event->kmsg.hdr.payload = sizeof(unlink_event->kmsg.hdr);
 
-    // hdr data
-    unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
-    unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
+    fill_in_task_ctx(&unlink_event->kmsg.msg.task);
 
-    unlink_event->kmsg.hdr.payload += sizeof(unlink_event->kmsg.hdr);
-
-    // pid and tgid
-    unlink_event->kmsg.msg.pid = current->pid;
-    unlink_event->kmsg.msg.tgid = current->tgid;
-    if (current->real_parent) {
-        unlink_event->kmsg.msg.ppid = current->real_parent->tgid;
-    }
-
-    // user DAC context
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    unlink_event->kmsg.msg.uid = from_kuid(&init_user_ns, current_uid());
-    unlink_event->kmsg.msg.euid = from_kuid(&init_user_ns, current_euid());
-    unlink_event->kmsg.msg.gid = from_kgid(&init_user_ns, current_gid());
-    unlink_event->kmsg.msg.egid = from_kgid(&init_user_ns, current_egid());
-#else
-    unlink_event->kmsg.msg.uid = current_uid();
-    unlink_event->kmsg.msg.euid = current_euid();
-    unlink_event->kmsg.msg.gid = current_gid();
-    unlink_event->kmsg.msg.egid = current_egid();
-#endif
     unlink_event->kmsg.hdr.payload += sizeof(unlink_event->kmsg.msg);
 
     // dentry metadata
@@ -622,33 +612,12 @@ bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
         }
     }
 
-#define UNLINK_PATH_SZ 4096
-    buf = kzalloc(UNLINK_PATH_SZ, mode);
-    if (!buf) {
-        return true;
-    }
-
-    dget(dentry);
-    p = dynsec_dentry_path(dentry, buf, UNLINK_PATH_SZ);
-    dput(dentry);
-    if (!IS_ERR_OR_NULL(p) && *p) {
-        if (likely(p > buf)) {
-            memmove(buf, p, buf - p + UNLINK_PATH_SZ -1);
-        }
-        if (likely(*buf)) {
-            unlink_event->kmsg.msg.path_size = buf - p + UNLINK_PATH_SZ;
-            unlink_event->kmsg.msg.path_offset = unlink_event->kmsg.hdr.payload;
-
-            unlink_event->kmsg.hdr.payload += unlink_event->kmsg.msg.path_size;
-            unlink_event->kmsg.path = buf;
-        } else {
-            // memmove alignment off!
-            kfree(buf);
-            buf = NULL;
-        }
-    } else {
-        kfree(buf);
-        buf = NULL;
+    unlink_event->kmsg.path = dynsec_build_dentry(dentry,
+                                &unlink_event->kmsg.msg.path_size,
+                                mode);
+    if (unlink_event->kmsg.path && unlink_event->kmsg.msg.path_size) {
+        unlink_event->kmsg.msg.path_offset = unlink_event->kmsg.hdr.payload;
+        unlink_event->kmsg.hdr.payload += unlink_event->kmsg.msg.path_size;
     }
 
     return true;
@@ -659,40 +628,14 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
                           struct inode *new_dir, struct dentry *new_dentry,
                           gfp_t mode)
 {
-    char *buf = NULL;
-    char *p = NULL;
-
     if (!rename_event || !old_dentry) {
         return false;
     }
 
-    rename_event->kmsg.hdr.payload = 0;
+    rename_event->kmsg.hdr.payload = sizeof(rename_event->kmsg.hdr);
 
-    // hdr data
-    rename_event->kmsg.hdr.req_id = rename_event->event.req_id;
-    rename_event->kmsg.hdr.event_type = rename_event->event.event_type;
+    fill_in_task_ctx(&rename_event->kmsg.msg.task);
 
-    rename_event->kmsg.hdr.payload += sizeof(rename_event->kmsg.hdr);
-
-    // pid and tgid
-    rename_event->kmsg.msg.pid = current->pid;
-    rename_event->kmsg.msg.tgid = current->tgid;
-    if (current->real_parent) {
-        rename_event->kmsg.msg.ppid = current->real_parent->tgid;
-    }
-
-    // user DAC context
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    rename_event->kmsg.msg.uid = from_kuid(&init_user_ns, current_uid());
-    rename_event->kmsg.msg.euid = from_kuid(&init_user_ns, current_euid());
-    rename_event->kmsg.msg.gid = from_kgid(&init_user_ns, current_gid());
-    rename_event->kmsg.msg.egid = from_kgid(&init_user_ns, current_egid());
-#else
-    rename_event->kmsg.msg.uid = current_uid();
-    rename_event->kmsg.msg.euid = current_euid();
-    rename_event->kmsg.msg.gid = current_gid();
-    rename_event->kmsg.msg.egid = current_egid();
-#endif
     rename_event->kmsg.hdr.payload += sizeof(rename_event->kmsg.msg);
 
     // Common Metadata
@@ -726,63 +669,20 @@ bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
         rename_event->kmsg.msg.new_parent_ino = new_dir->i_ino;
     }
 
-#define RENAME_PATH_SZ 4096
-    // Build Old Path
-    buf = kzalloc(RENAME_PATH_SZ, mode);
-    if (!buf) {
-        return true;
+    rename_event->kmsg.old_path = dynsec_build_dentry(old_dentry,
+                                &rename_event->kmsg.msg.old_path_size,
+                                mode);
+    if (rename_event->kmsg.old_path && rename_event->kmsg.msg.old_path_size) {
+        rename_event->kmsg.msg.old_path_offset = rename_event->kmsg.hdr.payload;
+        rename_event->kmsg.hdr.payload += rename_event->kmsg.msg.old_path_size;
     }
 
-    dget(old_dentry);
-    p = dynsec_dentry_path(old_dentry, buf, RENAME_PATH_SZ);
-    dput(old_dentry);
-    if (!IS_ERR_OR_NULL(p) && *p) {
-        if (likely(p > buf)) {
-            memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
-        }
-        if (likely(*buf)) {
-            rename_event->kmsg.msg.old_path_size = buf - p + RENAME_PATH_SZ;
-            rename_event->kmsg.msg.old_path_offset = rename_event->kmsg.hdr.payload;
-
-            rename_event->kmsg.hdr.payload += rename_event->kmsg.msg.old_path_size;
-            rename_event->kmsg.old_path = buf;
-        } else {
-            // memmove alignment off!
-            kfree(buf);
-            buf = NULL;
-        }
-    } else {
-        kfree(buf);
-        buf = NULL;
-    }
-
-    // Build New Path
-    buf = kzalloc(RENAME_PATH_SZ, mode);
-    if (!buf) {
-        return true;
-    }
-
-    dget(new_dentry);
-    p = dynsec_dentry_path(new_dentry, buf, RENAME_PATH_SZ);
-    dput(new_dentry);
-    if (!IS_ERR_OR_NULL(p) && *p) {
-        if (likely(p > buf)) {
-            memmove(buf, p, buf - p + RENAME_PATH_SZ -1);
-        }
-        if (likely(*buf)) {
-            rename_event->kmsg.msg.new_path_size = buf - p + RENAME_PATH_SZ;
-            rename_event->kmsg.msg.new_path_offset = rename_event->kmsg.hdr.payload;
-
-            rename_event->kmsg.hdr.payload += rename_event->kmsg.msg.new_path_size;
-            rename_event->kmsg.new_path = buf;
-        } else {
-            // memmove alignment off!
-            kfree(buf);
-            buf = NULL;
-        }
-    } else {
-        kfree(buf);
-        buf = NULL;
+    rename_event->kmsg.new_path = dynsec_build_dentry(new_dentry,
+                                &rename_event->kmsg.msg.new_path_size,
+                                mode);
+    if (rename_event->kmsg.new_path && rename_event->kmsg.msg.new_path_size) {
+        rename_event->kmsg.msg.new_path_offset = rename_event->kmsg.hdr.payload;
+        rename_event->kmsg.hdr.payload += rename_event->kmsg.msg.new_path_size;
     }
 
     return true;

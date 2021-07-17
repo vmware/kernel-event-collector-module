@@ -144,7 +144,7 @@ static struct stall_entry *lookup_entry_safe(u32 hash, struct stall_key *key,
 
     list_for_each_entry_safe(entry, tmp, head, list) {
         if (entry->hash == hash &&
-            entry->key.pid == key->pid &&
+            entry->key.tid == key->tid &&
             entry->key.req_id == key->req_id &&
             entry->key.event_type == key->event_type) {
             return entry;
@@ -282,7 +282,7 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     // Copy event unique identifiers
     entry->key.req_id = event->req_id;
     entry->key.event_type = event->event_type;
-    entry->key.pid = event->pid;
+    entry->key.tid = event->tid;
 
     // Build bucket lookup data
     entry->hash = stall_hash(tbl->secret, &entry->key);
@@ -317,7 +317,10 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
     int ret = -ENOENT;
 
     if (!stall_tbl_enabled(tbl) || !key) {
-        pr_info("%s:%d\n", __func__, __LINE__);
+        return -EINVAL;
+    }
+
+    if (key->event_type < 0 || key->event_type >= DYNSEC_EVENT_TYPE_MAX) {
         return -EINVAL;
     }
 
@@ -328,7 +331,6 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
         break;
 
     default:
-        pr_info("%s:%d\n", __func__, __LINE__);
         return -EINVAL;
     }
 

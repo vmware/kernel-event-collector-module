@@ -3,68 +3,93 @@
 
 #pragma once
 
-// ioctls
-#define DYNSEC_CMD_DISABLE       0x00000001
-#define DYNSEC_CMD_BYPASS        0x00000002
-// objects or contexts we want to always allow
-#define DYNSEC_CMD_EXCEPTION     0x00000004
+#define DYNSEC_HOOK_TYPE_EXEC      0x00000001
+#define DYNSEC_HOOK_TYPE_RENAME    0x00000002
+#define DYNSEC_HOOK_TYPE_UNLINK    0x00000004
+#define DYNSEC_HOOK_TYPE_RMDIR     0x00000008
+#define DYNSEC_HOOK_TYPE_MKDIR     0x00000010
+#define DYNSEC_HOOK_TYPE_CREATE    0x00000020
+#define DYNSEC_HOOK_TYPE_SETATTR   0x00000040
+#define DYNSEC_HOOK_TYPE_OPEN      0x00000080
+#define DYNSEC_HOOK_TYPE_LINK      0x00000100
+#define DYNSEC_HOOK_TYPE_SYMLINK   0x00000200
+#define DYNSEC_HOOK_TYPE_SIGNAL    0x00000400
+#define DYNSEC_HOOK_TYPE_PTRACE    0x00000800
+#define DYNSEC_HOOK_TYPE_MMAP      0x00001000
 
-#define DYNSEC_EVENT_TYPE_EXEC      0x00000001
-#define DYNSEC_EVENT_TYPE_RENAME    0x00000002
-#define DYNSEC_EVENT_TYPE_UNLINK    0x00000004
-#define DYNSEC_EVENT_TYPE_RMDIR     0x00000008
 
-// Well see how long this can map 1:1
-#define DYNSEC_LSM_bprm_set_creds       DYNSEC_EVENT_TYPE_EXEC
-#define DYNSEC_LSM_inode_rename         DYNSEC_EVENT_TYPE_RENAME
-#define DYNSEC_LSM_inode_unlink         DYNSEC_EVENT_TYPE_UNLINK
-#define DYNSEC_LSM_inode_rmdir          DYNSEC_EVENT_TYPE_RMDIR
+// Event Message Flags aka Report
+#define DYNSEC_REPORT_STALL     0x0001
+#define DYNSEC_REPORT_INTENT    0x0002
+#define DYNSEC_REPORT_AUDIT     0x0004
+#define DYNSEC_REPORT_EXITING   0x0008
 
+
+// Response Type For Stalls
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
 #define DYNSEC_RESPONSE_EPERM 0x00000001
 
 
 #pragma pack(push, 1)
+// Event Message Types
+enum dynsec_event_type {
+    DYNSEC_EVENT_TYPE_EXEC,
+    DYNSEC_EVENT_TYPE_RENAME,
+    DYNSEC_EVENT_TYPE_UNLINK,
+    DYNSEC_EVENT_TYPE_RMDIR,
+    DYNSEC_EVENT_TYPE_MKDIR,
+    DYNSEC_EVENT_TYPE_CREATE,
+    DYNSEC_EVENT_TYPE_SETATTR,
+    DYNSEC_EVENT_TYPE_OPEN,
+    DYNSEC_EVENT_TYPE_LINK,
+    DYNSEC_EVENT_TYPE_SYMLINK,
+    DYNSEC_EVENT_TYPE_SIGNAL,
+    DYNSEC_EVENT_TYPE_PTRACE,
+    DYNSEC_EVENT_TYPE_MMAP,
+    DYNSEC_EVENT_TYPE_HEALTH,
+    DYNSEC_EVENT_TYPE_GENERIC_AUDIT,
+    DYNSEC_EVENT_TYPE_GENERIC_DEBUG,
+    DYNSEC_EVENT_TYPE_MAX,
+};
+
 struct dynsec_msg_hdr {
     uint16_t payload;
-    uint32_t pid;   // tid
+    uint16_t report_flags;
+    uint32_t hook_type;  // Context for non-stalling events
+    uint32_t tid;
     uint64_t req_id;
-    uint32_t event_type;
+    enum dynsec_event_type event_type;
 };
 
 // Response from usermode
 struct dynsec_response {
-    uint32_t pid;
+    uint32_t tid;
     uint64_t req_id;
-    uint32_t event_type;
+    enum dynsec_event_type event_type;
     int32_t response;
     uint32_t cache_flags;
 };
 
-// Core Exec Context
-struct dynsec_exec_msg {
-    uint32_t pid;  // tid
-    uint32_t tgid; // pid
+struct dynsec_task_ctx {
+    uint32_t tid;
+    uint32_t pid;
     uint32_t ppid;
     uint32_t uid;
     uint32_t euid;
     uint32_t gid;
     uint32_t egid;
+    uint32_t mnt_ns;
+};
 
+// Core Exec Context
+struct dynsec_exec_msg {
+    struct dynsec_task_ctx task;
     uint64_t sb_magic;
     uint64_t ino;
     uint32_t dev;
     uint16_t path_offset;
     uint16_t path_size;
 };
-
-#ifdef __KERNEL__
-struct dynsec_exec_kmsg {
-    struct dynsec_msg_hdr hdr;
-    struct dynsec_exec_msg msg;
-    char *path;
-};
-#endif /* __KERNEL__ */
 
 struct dynsec_exec_umsg {
     struct dynsec_msg_hdr hdr;
@@ -73,13 +98,7 @@ struct dynsec_exec_umsg {
 
 // Core Unlink Content
 struct dynsec_unlink_msg {
-    uint32_t pid;  // tid
-    uint32_t tgid; // pid
-    uint32_t ppid;
-    uint32_t uid;
-    uint32_t euid;
-    uint32_t gid;
-    uint32_t egid;
+    struct dynsec_task_ctx task;
 
     uint64_t sb_magic;
     uint16_t mode;
@@ -91,14 +110,6 @@ struct dynsec_unlink_msg {
     uint64_t parent_ino;
 };
 
-#ifdef __KERNEL__
-struct dynsec_unlink_kmsg {
-    struct dynsec_msg_hdr hdr;
-    struct dynsec_unlink_msg msg;
-    char *path;
-};
-#endif /* __KERNEL__ */
-
 struct dynsec_unlink_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_unlink_msg msg;
@@ -106,13 +117,7 @@ struct dynsec_unlink_umsg {
 
 // Core Rename Content
 struct dynsec_rename_msg {
-    uint32_t pid;  // tid
-    uint32_t tgid; // pid
-    uint32_t ppid;
-    uint32_t uid;
-    uint32_t euid;
-    uint32_t gid;
-    uint32_t egid;
+    struct dynsec_task_ctx task;
 
     uint64_t sb_magic;
     uint32_t dev;
@@ -129,15 +134,6 @@ struct dynsec_rename_msg {
     uint16_t new_path_size;
     uint64_t new_parent_ino;
 };
-
-#ifdef __KERNEL__
-struct dynsec_rename_kmsg {
-    struct dynsec_msg_hdr hdr;
-    struct dynsec_rename_msg msg;
-    char *old_path;
-    char *new_path;
-};
-#endif /* __KERNEL__ */
 
 struct dynsec_rename_umsg {
     struct dynsec_msg_hdr hdr;

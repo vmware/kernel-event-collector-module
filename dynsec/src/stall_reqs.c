@@ -42,6 +42,7 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
     ret = wait_event_interruptible_timeout(entry->wq, entry->mode != 0, msecs_to_jiffies(ms));
     stall_tbl_remove_entry(stall_tbl, entry);
     if (ret >= 1) {
+        // Act as a memory barrier
         // spin_lock(&entry->lock);
         local_response = entry->response;
         // spin_unlock(&entry->lock);
@@ -110,7 +111,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         memset(&key, 0, sizeof(key));
         key.req_id = event->req_id;
         key.event_type = event->event_type;
-        key.pid = event->pid;
+        key.tid = event->tid;
 
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
@@ -182,21 +183,10 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
         return -EINVAL;
     }
 
-    // TODO: Sanitize event_type and response type
-
-    // switch (response.event_type)
-    // {
-    // case DYNSEC_EVENT_TYPE_EXEC:
-    //     break;
-
-    // default:
-    //     return -EINVAL;
-    // }
-
     memset(&key, 0, sizeof(key));
     key.req_id = response.req_id;
     key.event_type = response.event_type;
-    key.pid = response.pid;
+    key.tid = response.tid;
     ret = stall_tbl_resume(stall_tbl, &key, response.response);
     if (ret == 0) {
         ret = sizeof(response);
@@ -210,31 +200,7 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
 {
     int ret = -EINVAL;
 
-    switch (cmd)
-    {
-    case DYNSEC_CMD_DISABLE:
-        if (!capable(CAP_SYS_ADMIN)) {
-            return -EACCES;
-        }
-        stall_tbl_disable(stall_tbl);
-        ret = 0;
-        break;
-
-    case DYNSEC_CMD_BYPASS:
-        if (!capable(CAP_SYS_ADMIN)) {
-            return -EACCES;
-        }
-        // Eventually set LSM hooks into bypass?
-
-        stall_tbl_shutdown(stall_tbl);
-        stall_tbl = NULL;
-        ret = 0;
-        break;
-
-    default:
-        ret = -EINVAL;
-        break;
-    }
+    // Check capable() on privileged commands.
 
     return ret;
 }

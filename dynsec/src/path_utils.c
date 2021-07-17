@@ -4,8 +4,11 @@
 #include <linux/path.h>
 #include <linux/dcache.h>
 #include <linux/err.h>
+#include <linux/slab.h>
+#include <linux/version.h>
 
 #include "symbols.h"
+#include "path_utils.h"
 
 struct path_symz {
     char *(* dentry_path_raw)(const struct dentry *dentry, char *buf, int buflen);
@@ -89,3 +92,99 @@ char *dynsec_path_safeish(const struct path *path, char *buf, int buflen)
     return dynsec_d_path(path, buf, buflen);
 }
 
+#define PATH_SZ 4096
+
+char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode)
+{
+    char *buf = NULL;
+    char *p;
+    size_t len;
+
+    if (!path) {
+        goto out;
+    }
+
+    // Optionally provide both mnt_ns and global paths if 
+    // path->mnt in init_task's mnt_ns.
+    // if (!is_init_mnt_ns(current)) {
+    //     // still need to check if exists in init_task mnt_ns
+    //     return dynsec_build_dentry(path->dentry, size, mode);
+    // }
+
+    buf = kmalloc(PATH_SZ, mode);
+    if (!buf) {
+        goto out;
+    }
+
+    if (!(mode & __GFP_ATOMIC))
+        path_get(path);
+    p = dynsec_d_path(path, buf, PATH_SZ);
+    if (!(mode & __GFP_ATOMIC))
+        path_put(path);
+
+    if (IS_ERR_OR_NULL(p) || !*p) {
+        goto out_err;
+    }
+
+    len = strlen(p);
+    if (likely(p != buf)) {
+        memmove(buf, p, len);
+    }
+    buf[len] = 0;
+    if (size) {
+        *size = len + 1;
+    }
+
+out:
+    return buf;
+
+out_err:
+    kfree(buf);
+    buf = NULL;
+    goto out;
+}
+
+// On RHEL7+ check if init_task->ns_proxy->mnt_ns NULL or current->ns_proxy->mnt_ns
+
+char *dynsec_build_dentry(struct dentry *dentry, uint16_t *size, gfp_t mode)
+{
+    char *buf = NULL;
+    char *p;
+    size_t len;
+
+    if (!dentry) {
+        goto out;
+    }
+
+    buf = kmalloc(PATH_SZ, mode);
+    if (!buf) {
+        goto out;
+    }
+
+    if (!(mode & __GFP_ATOMIC))
+        dget(dentry);
+    p = dynsec_dentry_path(dentry, buf, PATH_SZ);
+    if (!(mode & __GFP_ATOMIC))
+        dput(dentry);
+
+    if (IS_ERR_OR_NULL(p) || !*p) {
+        goto out_err;
+    }
+
+    len = strlen(p);
+    if (likely(p != buf)) {
+        memmove(buf, p, len);
+    }
+    buf[len] = 0;
+    if (size) {
+        *size = len + 1;
+    }
+
+out:
+    return buf;
+
+out_err:
+    kfree(buf);
+    buf = NULL;
+    goto out;
+}

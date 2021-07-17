@@ -20,6 +20,30 @@
 #define PR_p "%p"
 #endif  //}
 
+
+// Event Type To LSM Hook Names
+#define DYNSEC_LSM_inode_rename         DYNSEC_HOOK_TYPE_RENAME
+#define DYNSEC_LSM_inode_unlink         DYNSEC_HOOK_TYPE_UNLINK
+#define DYNSEC_LSM_inode_rmdir          DYNSEC_HOOK_TYPE_RMDIR
+#define DYNSEC_LSM_inode_mdkir          DYNSEC_HOOK_TYPE_MKDIR
+#define DYNSEC_LSM_inode_create         DYNSEC_HOOK_TYPE_CREATE
+#define DYNSEC_LSM_inode_setattr        DYNSEC_HOOK_TYPE_SETATTR
+#define DYNSEC_LSM_inode_link           DYNSEC_HOOK_TYPE_LINK
+#define DYNSEC_LSM_inode_symlink        DYNSEC_HOOK_TYPE_SYMLINK
+
+// may need another hook
+#define DYNSEC_LSM_bprm_set_creds       DYNSEC_HOOK_TYPE_EXEC
+
+#define DYNSEC_LSM_task_kill            DYNSEC_HOOK_TYPE_SIGNAL
+// depends on kver
+#define DYNSEC_LSM_dentry_open          DYNSEC_HOOK_TYPE_OPEN
+#define DYNSEC_LSM_file_open            DYNSEC_HOOK_TYPE_OPEN
+
+// Ptrace hook type maps to two hooks
+#define DYNSEC_LSM_ptrace_traceme       DYNSEC_HOOK_TYPE_PTRACE
+#define DYNSEC_LSM_ptrace_access_check  DYNSEC_HOOK_TYPE_PTRACE
+
+
 static bool g_lsmRegistered;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{ not RHEL8
@@ -56,12 +80,17 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     g_original_ops_ptr = NULL;
 #endif
+
+    // Add check when implementing LSM hooks
+    BUILD_BUG_ON(DYNSEC_LSM_bprm_set_creds != DYNSEC_HOOK_TYPE_EXEC);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_rename   != DYNSEC_HOOK_TYPE_RENAME);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_unlink   != DYNSEC_HOOK_TYPE_UNLINK);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_rmdir    != DYNSEC_HOOK_TYPE_RMDIR);
+
     memset(&lsm_syms, 0, sizeof(lsm_syms));
 
 #define find_lsm_sym(sym_name, ops) \
-    find_symbol_indirect(#sym_name, (unsigned long *)&ops.sym_name); \
-    pr_info(#sym_name " %#lx\n", *(unsigned long *)&ops.sym_name)
-
+    find_symbol_indirect(#sym_name, (unsigned long *)&ops.sym_name);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     find_lsm_sym(security_ops, lsm_syms);
@@ -77,10 +106,6 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     }
 #endif
     p_lsm = &lsm_syms;
-
-    BUILD_BUG_ON(DYNSEC_LSM_bprm_set_creds != DYNSEC_EVENT_TYPE_EXEC);
-    BUILD_BUG_ON(DYNSEC_LSM_inode_rename   != DYNSEC_EVENT_TYPE_RENAME);
-    BUILD_BUG_ON(DYNSEC_LSM_inode_unlink   != DYNSEC_EVENT_TYPE_UNLINK);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     //
@@ -156,7 +181,7 @@ bool ec_do_lsm_hooks_changed(uint64_t enableHooks)
 {
     bool changed = false;
 
-    // TODO: Implement this if we need to perform kmod stacking
+    // TODO: Implement this if we need check for changed LSM hooks
 
     return changed;
 }

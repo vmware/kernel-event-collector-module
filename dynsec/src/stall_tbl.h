@@ -2,6 +2,7 @@
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 #pragma once
 
+#include "dynsec.h"
 
 struct stall_bkt {
     spinlock_t lock;
@@ -12,9 +13,9 @@ struct stall_bkt {
 #pragma pack(push, 1)
 // Sync fields with `struct dynsec_event`
 struct stall_key {
-    uint32_t pid;
+    uint32_t tid;
     uint64_t req_id;
-    uint32_t event_type;
+    enum dynsec_event_type event_type;
 };
 #pragma pack(pop)
 

@@ -20,10 +20,10 @@
 // LSM Hooks / Event Types We Want to Enable On Default
 // TODO: Make this overridable via module param
 #define DYNSEC_LSM_default (\
-    DYNSEC_EVENT_TYPE_EXEC      |\
-    DYNSEC_EVENT_TYPE_UNLINK    |\
-    DYNSEC_EVENT_TYPE_RMDIR     |\
-    DYNSEC_EVENT_TYPE_RENAME)
+    DYNSEC_HOOK_TYPE_EXEC      |\
+    DYNSEC_HOOK_TYPE_UNLINK    |\
+    DYNSEC_HOOK_TYPE_RMDIR     |\
+    DYNSEC_HOOK_TYPE_RENAME)
 
 
 //
@@ -48,19 +48,14 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
         goto out;
     }
 
-    if (!current->real_parent) {
-        goto out;
-    }
-    if (current->tgid <= 2) {
-        goto out;
-    }
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
 
     // TODO: check if stall_tbl's connected tgid matches
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_EXEC, GFP_KERNEL);
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_EXEC, DYNSEC_HOOK_TYPE_EXEC,
+                               DYNSEC_REPORT_STALL, GFP_KERNEL);
     if (!event) {
         goto out;
     }
@@ -109,7 +104,8 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
         goto out;
     }
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_UNLINK, DYNSEC_HOOK_TYPE_UNLINK,
+                               DYNSEC_REPORT_STALL, GFP_KERNEL);
     if (!event) {
         goto out;
     }
@@ -159,7 +155,8 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
         goto out;
     }
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_RMDIR, DYNSEC_HOOK_TYPE_RMDIR,
+                               DYNSEC_REPORT_STALL, GFP_KERNEL);
     if (!event) {
         goto out;
     }
@@ -210,7 +207,8 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
         goto out;
     }
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_RENAME, GFP_KERNEL);
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_RENAME, DYNSEC_HOOK_TYPE_RENAME,
+                               DYNSEC_REPORT_STALL, GFP_KERNEL);
     if (!event) {
         goto out;
     }
