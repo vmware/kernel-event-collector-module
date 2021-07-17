@@ -6,9 +6,9 @@ from conans import python_requires, CMake, tools, AutoToolsBuildEnvironment
 import os
 from datetime import datetime
 
-base = python_requires("CONAN_UTIL_VERSION")
+from conan_util.CbConanFile import CbConanFile
 
-class SHORT_NAME(base.CbConanFile):
+class SHORT_NAME(CbConanFile):
     name     = "SHORT_NAME"
     version  = "PACKAGE_VERSION"
     settings = "os", "compiler", "build_type", "arch"

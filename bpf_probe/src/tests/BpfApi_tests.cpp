@@ -1,12 +1,13 @@
 // Copyright (c) 2021 VMWare, Inc. All rights reserved.
+// SPDX-License-Identifier: GPL-2.0
 
 #include "mock/BpfApi_Mock.h"
 #include "BpfProgram.h"
 
 #include "CppUTest/TestHarness.h"
 
-using namespace cb_endpoint::cb_ebpf;
-using namespace cb_endpoint::cb_ebpf::tdd_mock;
+using namespace cb_endpoint::bpf_probe;
+using namespace cb_endpoint::bpf_probe::tdd_mock;
 
 static const char *NAME_A = "NAME_A";
 static const char *NAME_B = "NAME_B";

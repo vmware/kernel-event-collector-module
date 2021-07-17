@@ -1,4 +1,5 @@
-
+# Copyright 2021 VMware Inc.  All rights reserved.
+# SPDX-License-Identifier: GPL-2.0
 
 cb_run_tests(NAME          RunAllTests
              TARGETS       RunAllTests.cpp
