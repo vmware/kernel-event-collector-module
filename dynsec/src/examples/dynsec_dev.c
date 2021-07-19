@@ -80,8 +80,8 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
     const char *ev_str = "EXEC";
     const char *start = (const char *)exec_msg;
 
-    if (exec_msg->msg.path_offset) {
-        path = start + exec_msg->msg.path_offset;
+    if (exec_msg->msg.file.path_offset) {
+        path = start + exec_msg->msg.file.path_offset;
     }
 
     // Ban some matching substring
@@ -98,8 +98,8 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
     if (quiet) return;
 
     printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u magic:%#lx uid:%u '%s'\n",
-        ev_str, exec_msg->msg.task.tid, exec_msg->msg.ino, exec_msg->msg.dev,
-        exec_msg->msg.task.mnt_ns, exec_msg->msg.sb_magic, exec_msg->msg.task.uid, path
+        ev_str, exec_msg->msg.task.tid, exec_msg->msg.file.ino, exec_msg->msg.file.dev,
+        exec_msg->msg.task.mnt_ns, exec_msg->msg.file.sb_magic, exec_msg->msg.task.uid, path
     );
 }
 
@@ -113,8 +113,8 @@ void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
     if (unlink_msg->hdr.event_type == DYNSEC_EVENT_TYPE_RMDIR)
         ev_str = "RMDIR";
 
-    if (unlink_msg->msg.path_offset) {
-        path = start + unlink_msg->msg.path_offset;
+    if (unlink_msg->msg.file.path_offset) {
+        path = start + unlink_msg->msg.file.path_offset;
     }
 
     if (unlink_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
@@ -124,9 +124,9 @@ void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
 
     printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#04x magic:%#lx uid:%u "
         "parent_ino:%llu '%s'\n", ev_str,
-        unlink_msg->hdr.tid, unlink_msg->msg.ino, unlink_msg->msg.dev,
-        unlink_msg->msg.task.mnt_ns, unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
-        unlink_msg->msg.task.uid, unlink_msg->msg.parent_ino, path);
+        unlink_msg->hdr.tid, unlink_msg->msg.file.ino, unlink_msg->msg.file.dev,
+        unlink_msg->msg.task.mnt_ns, unlink_msg->msg.file.umode, unlink_msg->msg.file.sb_magic,
+        unlink_msg->msg.task.uid, unlink_msg->msg.file.parent_ino, path);
 }
 
 void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
@@ -136,11 +136,11 @@ void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
     const char *new_path = "";
     const char *start = (const char *)rename_msg;
 
-    if (rename_msg->msg.old_path_offset) {
-        old_path = start + rename_msg->msg.old_path_offset;
+    if (rename_msg->msg.old_file.path_offset) {
+        old_path = start + rename_msg->msg.old_file.path_offset;
     }
-    if (rename_msg->msg.new_path_offset) {
-        new_path = start + rename_msg->msg.new_path_offset;
+    if (rename_msg->msg.new_file.path_offset) {
+        new_path = start + rename_msg->msg.new_file.path_offset;
     }
 
     if (rename_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
@@ -150,14 +150,14 @@ void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
 
     printf("RENAME: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
         "'%s'[%llu %#04x %llu]->'%s'[%llu %#04x %llu]\n",
-        rename_msg->hdr.tid, rename_msg->msg.dev, rename_msg->msg.task.mnt_ns,
-        rename_msg->msg.sb_magic,
+        rename_msg->hdr.tid, rename_msg->msg.old_file.dev, rename_msg->msg.task.mnt_ns,
+        rename_msg->msg.old_file.sb_magic,
         rename_msg->msg.task.uid,
-        old_path, rename_msg->msg.old_ino, rename_msg->msg.old_mode,
-        rename_msg->msg.old_parent_ino,
+        old_path, rename_msg->msg.old_file.ino, rename_msg->msg.old_file.umode,
+        rename_msg->msg.old_file.parent_ino,
 
-        new_path, rename_msg->msg.new_ino, rename_msg->msg.new_mode,
-        rename_msg->msg.new_parent_ino
+        new_path, rename_msg->msg.new_file.ino, rename_msg->msg.new_file.umode,
+        rename_msg->msg.new_file.parent_ino
     );
 }
 

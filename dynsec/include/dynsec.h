@@ -81,16 +81,28 @@ struct dynsec_task_ctx {
     uint32_t gid;
     uint32_t egid;
     uint32_t mnt_ns;
+    uint32_t flags;
+};
+
+struct dynsec_file {
+    uint64_t ino;
+    uint32_t dev;
+    uint16_t umode;
+    uint32_t uid;
+    uint32_t gid;
+    uint64_t sb_magic;
+    uint64_t parent_ino;
+    uint32_t parent_dev;
+    uint32_t parent_uid;
+    uint32_t parent_gid;
+    uint16_t path_offset;
+    uint16_t path_size;
 };
 
 // Core Exec Context
 struct dynsec_exec_msg {
     struct dynsec_task_ctx task;
-    uint64_t sb_magic;
-    uint64_t ino;
-    uint32_t dev;
-    uint16_t path_offset;
-    uint16_t path_size;
+    struct dynsec_file file;
 };
 
 struct dynsec_exec_umsg {
@@ -101,15 +113,7 @@ struct dynsec_exec_umsg {
 // Core Unlink Content
 struct dynsec_unlink_msg {
     struct dynsec_task_ctx task;
-
-    uint64_t sb_magic;
-    uint16_t mode;
-
-    uint64_t ino;
-    uint32_t dev;
-    uint16_t path_offset;
-    uint16_t path_size;
-    uint64_t parent_ino;
+    struct dynsec_file file;
 };
 
 struct dynsec_unlink_umsg {
@@ -120,21 +124,8 @@ struct dynsec_unlink_umsg {
 // Core Rename Content
 struct dynsec_rename_msg {
     struct dynsec_task_ctx task;
-
-    uint64_t sb_magic;
-    uint32_t dev;
-
-    uint16_t old_mode;
-    uint64_t old_ino;
-    uint16_t old_path_offset;
-    uint16_t old_path_size;
-    uint64_t old_parent_ino;
-
-    uint16_t new_mode;
-    uint64_t new_ino;
-    uint16_t new_path_offset;
-    uint16_t new_path_size;
-    uint64_t new_parent_ino;
+    struct dynsec_file old_file;
+    struct dynsec_file new_file;
 };
 
 struct dynsec_rename_umsg {
