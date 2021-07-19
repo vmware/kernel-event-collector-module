@@ -93,6 +93,14 @@ char *dynsec_path_safeish(const struct path *path, char *buf, int buflen)
 }
 
 #define PATH_SZ 4096
+static bool has_gfp_atomic(gfp_t mode)
+{
+#ifdef __GFP_ATOMIC
+    return (mode & __GFP_ATOMIC) == __GFP_ATOMIC;
+#else
+    return (mode & GFP_ATOMIC) == GFP_ATOMIC;
+#endif
+}
 
 char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode)
 {
@@ -116,10 +124,10 @@ char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode)
         goto out;
     }
 
-    if (!(mode & __GFP_ATOMIC))
+    if (!has_gfp_atomic(mode))
         path_get(path);
     p = dynsec_d_path(path, buf, PATH_SZ);
-    if (!(mode & __GFP_ATOMIC))
+    if (!has_gfp_atomic(mode))
         path_put(path);
 
     if (IS_ERR_OR_NULL(p) || !*p) {
@@ -161,10 +169,10 @@ char *dynsec_build_dentry(struct dentry *dentry, uint16_t *size, gfp_t mode)
         goto out;
     }
 
-    if (!(mode & __GFP_ATOMIC))
+    if (!has_gfp_atomic(mode))
         dget(dentry);
     p = dynsec_dentry_path(dentry, buf, PATH_SZ);
-    if (!(mode & __GFP_ATOMIC))
+    if (!has_gfp_atomic(mode))
         dput(dentry);
 
     if (IS_ERR_OR_NULL(p) || !*p) {

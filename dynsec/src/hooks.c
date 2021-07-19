@@ -9,6 +9,7 @@
 #include "factory.h"
 #include "stall_tbl.h"
 #include "stall_reqs.h"
+#include "lsm_mask.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {
