@@ -21,6 +21,8 @@
 
 static int quiet = 0;
 
+// gcc -I../../include -pthread ./dynsec_dev.c -o dynsec
+
 // Pass in the desired char device and the major number
 // That can be grabbed from /proc/devices
 
@@ -48,14 +50,14 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
     return ret;
 }
 
-int respond_to_access_request(int fd, uint64_t req_id,
-                              uint32_t event_type, uint32_t tid, int response_type)
+int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
+                              int response_type)
 {
     ssize_t ret;
     struct dynsec_response response = {
-        .req_id = req_id,
-        .event_type = event_type,
-        .tid = tid,
+        .req_id = hdr->req_id,
+        .event_type = hdr->event_type,
+        .tid = hdr->tid,
         .response = response_type,
         .cache_flags = 0xFFFFFFFF,
     };
@@ -70,6 +72,125 @@ int respond_to_access_request(int fd, uint64_t req_id,
     return 0;
 }
 
+
+void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *banned_path)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *ev_str = "EXEC";
+    const char *start = (const char *)exec_msg;
+
+    if (exec_msg->msg.path_offset) {
+        path = start + exec_msg->msg.path_offset;
+    }
+
+    // Ban some matching substring
+    if (exec_msg->hdr.report_flags & DYNSEC_REPORT_STALL) {
+        if (banned_path && *banned_path && path && *path &&
+            strstr(path, banned_path)) {
+            response = DYNSEC_RESPONSE_EPERM;
+            ev_str = "EXEC DENIED:";
+        }
+    }
+    if (exec_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &exec_msg->hdr, response);
+
+    if (quiet) return;
+
+    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u magic:%#lx uid:%u '%s'\n",
+        ev_str, exec_msg->msg.task.tid, exec_msg->msg.ino, exec_msg->msg.dev,
+        exec_msg->msg.task.mnt_ns, exec_msg->msg.sb_magic, exec_msg->msg.task.uid, path
+    );
+}
+
+void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *ev_str = "UNLINK";
+    const char *start = (const char *)unlink_msg;
+
+    if (unlink_msg->hdr.event_type == DYNSEC_EVENT_TYPE_RMDIR)
+        ev_str = "RMDIR";
+
+    if (unlink_msg->msg.path_offset) {
+        path = start + unlink_msg->msg.path_offset;
+    }
+
+    if (unlink_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &unlink_msg->hdr, response);
+
+    if (quiet) return;
+
+    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#04x magic:%#lx uid:%u "
+        "parent_ino:%llu '%s'\n", ev_str,
+        unlink_msg->hdr.tid, unlink_msg->msg.ino, unlink_msg->msg.dev,
+        unlink_msg->msg.task.mnt_ns, unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
+        unlink_msg->msg.task.uid, unlink_msg->msg.parent_ino, path);
+}
+
+void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *old_path = "";
+    const char *new_path = "";
+    const char *start = (const char *)rename_msg;
+
+    if (rename_msg->msg.old_path_offset) {
+        old_path = start + rename_msg->msg.old_path_offset;
+    }
+    if (rename_msg->msg.new_path_offset) {
+        new_path = start + rename_msg->msg.new_path_offset;
+    }
+
+    if (rename_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &rename_msg->hdr, response);
+
+    if (quiet) return;
+
+    printf("RENAME: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
+        "'%s'[%llu %#04x %llu]->'%s'[%llu %#04x %llu]\n",
+        rename_msg->hdr.tid, rename_msg->msg.dev, rename_msg->msg.task.mnt_ns,
+        rename_msg->msg.sb_magic,
+        rename_msg->msg.task.uid,
+        old_path, rename_msg->msg.old_ino, rename_msg->msg.old_mode,
+        rename_msg->msg.old_parent_ino,
+
+        new_path, rename_msg->msg.new_ino, rename_msg->msg.new_mode,
+        rename_msg->msg.new_parent_ino
+    );
+}
+
+void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+
+    switch (hdr->event_type) {
+    case DYNSEC_EVENT_TYPE_EXEC:
+        print_exec_event(fd, (struct dynsec_exec_umsg *)hdr, banned_path);
+    break;
+
+    case DYNSEC_EVENT_TYPE_UNLINK:
+    case DYNSEC_EVENT_TYPE_RMDIR:
+        print_unlink_event(fd, (struct dynsec_unlink_umsg *)hdr);
+    break;
+
+    case DYNSEC_EVENT_TYPE_RENAME:
+        print_rename_event(fd, (struct dynsec_rename_umsg *)hdr);
+    break;
+
+    default:
+        if (hdr->report_flags & DYNSEC_REPORT_STALL) {
+            respond_to_access_request(fd, hdr, response);
+        }
+        if (quiet)
+            break;
+        printf("UNKNOWN: hdr->tid:%u hdr->payload:%u hdr->req_id:%llu hdr->event_type:%u\n",
+               hdr->tid, hdr->payload, hdr->req_id, hdr->event_type);
+        break;
+    }
+}
+
 // Event Structure
 // [    dynsec_msg_hdr    ]
 // [ event specific data  ]
@@ -81,8 +202,6 @@ void read_events(int fd, const char *banned_path)
     struct dynsec_exec_umsg *exec_msg;
 
     memset(buf, 'A', sizeof(buf));
-    int timeout;
-    int last_poll_ret = -EAGAIN;
 
     while (1)
     {
@@ -94,8 +213,6 @@ void read_events(int fd, const char *banned_path)
              .revents = 0,
         };
         int ret = poll(&pollfd, 1, -1);
-        int response = DYNSEC_RESPONSE_ALLOW;
-
 
         bytes_read = read(fd, buf, sizeof(buf));
         if (bytes_read <= 0) {
@@ -103,117 +220,7 @@ void read_events(int fd, const char *banned_path)
             break;
         }
 
-        switch (hdr->event_type) {
-        case DYNSEC_EVENT_TYPE_EXEC: {
-            char *path = "";
-            struct dynsec_exec_umsg *exec_msg = (struct dynsec_exec_umsg *)hdr;
-
-            if (hdr->payload != exec_msg->hdr.payload ||
-                hdr->req_id != exec_msg->hdr.req_id || 
-                hdr->event_type != exec_msg->hdr.event_type) {
-                printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
-                       hdr->payload, hdr->req_id, hdr->event_type);
-                printf("payload:%u req_id:%llu event_type:%#x\n", exec_msg->hdr.payload,
-                       exec_msg->hdr.req_id, exec_msg->hdr.event_type);
-            } else {
-                if (exec_msg->msg.path_offset) {
-                    path = buf + exec_msg->msg.path_offset;
-                }
-
-                // Ban some matching substring
-                if (banned_path && *banned_path && path && *path &&
-                    strstr(path, banned_path)) {
-                    response = DYNSEC_RESPONSE_EPERM;
-                }
-                if (quiet) goto dispatch;
-
-                printf("EXEC: tid:%u ino:%llu dev:%#x mnt_ns:%u magic:%#lx uid:%u '%s'\n",
-                       exec_msg->msg.task.tid, exec_msg->msg.ino, exec_msg->msg.dev,
-                       exec_msg->msg.task.mnt_ns, exec_msg->msg.sb_magic, exec_msg->msg.task.uid, path
-                );
-            }
-        }
-        break;
-
-        case DYNSEC_EVENT_TYPE_UNLINK:
-        case DYNSEC_EVENT_TYPE_RMDIR: {
-            char *path = "";
-
-            struct dynsec_unlink_umsg *unlink_msg = (struct dynsec_unlink_umsg *)hdr;
-
-            if (hdr->payload != unlink_msg->hdr.payload ||
-                hdr->req_id != unlink_msg->hdr.req_id || 
-                hdr->event_type != unlink_msg->hdr.event_type) {
-                printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
-                       hdr->payload, hdr->req_id, hdr->event_type);
-                printf("payload:%u req_id:%llu event_type:%#x\n", unlink_msg->hdr.payload,
-                       unlink_msg->hdr.req_id, unlink_msg->hdr.event_type);
-            } else {
-                if (quiet) goto dispatch;
-                if (unlink_msg->msg.path_offset) {
-                    path = buf + unlink_msg->msg.path_offset;
-                }
-                printf("UNLINK: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#04x magic:%#lx uid:%u "
-                       "parent_ino:%llu '%s'\n",
-                       unlink_msg->hdr.tid, unlink_msg->msg.ino, unlink_msg->msg.dev,
-                       unlink_msg->msg.task.mnt_ns, unlink_msg->msg.mode, unlink_msg->msg.sb_magic,
-                       unlink_msg->msg.task.uid, unlink_msg->msg.parent_ino, path);
-            }
-        }
-        break;
-
-        case DYNSEC_EVENT_TYPE_RENAME: {
-            char *old_path = "";
-            char *new_path = "";
-
-            struct dynsec_rename_umsg *rename_msg = (struct dynsec_rename_umsg *)hdr;
-
-            if (hdr->payload != rename_msg->hdr.payload ||
-                hdr->req_id != rename_msg->hdr.req_id || 
-                hdr->event_type != rename_msg->hdr.event_type) {
-                printf("hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
-                       hdr->payload, hdr->req_id, hdr->event_type);
-                printf("payload:%u req_id:%llu event_type:%#x\n", rename_msg->hdr.payload,
-                       rename_msg->hdr.req_id, rename_msg->hdr.event_type);
-            } else {
-                if (quiet) goto dispatch;
-                if (rename_msg->msg.old_path_offset) {
-                    old_path = buf + rename_msg->msg.old_path_offset;
-                }
-                if (rename_msg->msg.new_path_offset) {
-                    new_path = buf + rename_msg->msg.new_path_offset;
-                }
-
-                printf("RENAME: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
-                       "'%s'[%llu %#04x %llu]->'%s'[%llu %#04x %llu]\n",
-                       rename_msg->hdr.tid, rename_msg->msg.dev, rename_msg->msg.task.mnt_ns,
-                       rename_msg->msg.sb_magic,
-                       rename_msg->msg.task.uid,
-                       old_path, rename_msg->msg.old_ino, rename_msg->msg.old_mode,
-                       rename_msg->msg.old_parent_ino,
-
-                       new_path, rename_msg->msg.new_ino, rename_msg->msg.new_mode,
-                       rename_msg->msg.new_parent_ino
-                );
-            }
-        }
-        break;
-
-        default:
-            if (quiet) goto dispatch;
-            printf("UNKNOWN: hdr->tid:%u hdr->payload:%u hdr->req_id:%llu hdr->event_type:%#x\n",
-                   hdr->tid, hdr->payload, hdr->req_id, hdr->event_type);
-        }
-
-dispatch:
-        if (hdr->report_flags & DYNSEC_REPORT_STALL) {
-            ret = respond_to_access_request(fd, hdr->req_id, hdr->event_type,
-                                            hdr->tid, response);
-            if (ret) {
-                fprintf(stderr, "Unable to response to:%llu %#x resp:%d err:%d\n",
-                        hdr->req_id, hdr->event_type, response, ret);
-            }
-        }
+        print_event(fd, hdr, banned_path);
 
         // Observe bytes committed to
         memset(buf, 'A', sizeof(buf));
