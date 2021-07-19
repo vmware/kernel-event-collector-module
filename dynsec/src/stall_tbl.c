@@ -16,7 +16,7 @@
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
-#include "stall.h"
+#include "factory.h"
 
 
 #define STALL_BUCKET_BITS 14

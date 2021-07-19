@@ -4,7 +4,7 @@
 #pragma once
 
 // Call within LSM hook
-#include "stall.h"
+#include "factory.h"
 #include "stall_tbl.h"
 extern struct stall_tbl *stall_tbl;
 

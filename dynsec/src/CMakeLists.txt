@@ -133,8 +133,8 @@ set(SOURCE_FILES
     logging.h
     symbols.c
     symbols.h
-    stall.c
-    stall.h
+    factory.c
+    factory.h
     stall_reqs.c
     stall_reqs.h
     stall_tbl.c

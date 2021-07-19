@@ -12,7 +12,7 @@
 
 #include "dynsec.h"
 #include "stall_tbl.h"
-#include "stall.h"
+#include "factory.h"
 #include "version.h"
 
 static dev_t g_maj_t;

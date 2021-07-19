@@ -13,7 +13,7 @@
 #include <linux/dcache.h>
 
 #include "dynsec.h"
-#include "stall.h"
+#include "factory.h"
 #include "path_utils.h"
 
 // Set hook types to disable DYNSEC_REPORT_STALL aka observe timeouts

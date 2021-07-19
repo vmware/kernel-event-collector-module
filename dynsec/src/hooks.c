@@ -6,7 +6,7 @@
 #include <linux/fs.h>
 #include <linux/dcache.h>
 #include "dynsec.h"
-#include "stall.h"
+#include "factory.h"
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 
