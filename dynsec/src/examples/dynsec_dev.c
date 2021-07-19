@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/sysmacros.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include "dynsec.h"
 
@@ -219,12 +220,31 @@ dispatch:
     }
 }
 
+// The reported events from these file operations
+// will tell if they need a response aka are stalled.
+static void *defer_rename(void *arg)
+{
+    int fd;
+    unsigned int sleep_time = 1;
+
+    sleep(sleep_time);
+    fd = open(".rename_test1", O_CREAT);
+    if (fd < 0) {
+        return NULL;
+    }
+    close(fd);
+    rename(".rename_test1", ".rename_test2");
+    unlink(".rename_test1");
+    unlink(".rename_test2");
+    return NULL;
+}
 
 int main(int argc, const char *argv[])
 {
     int fd;
     const char *devpath;
     unsigned long major;
+    pthread_t rename_tid;
 
     if (argc < 3) {
         fprintf(stderr, "Usage: %s <desired dev filename> <major dev num>\n", argv[0]);
@@ -245,6 +265,10 @@ int main(int argc, const char *argv[])
     if (fd < 0) {
         return 255;
     }
+
+    // Example shows we report our own rename events but not stall
+    pthread_create(&rename_tid, NULL, defer_rename, NULL);
+    pthread_detach(rename_tid);
 
     // Bans filepaths containing "/foo.sh"
     read_events(fd, "/foo.sh");
