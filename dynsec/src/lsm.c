@@ -2,6 +2,7 @@
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 
 // Adapted from kernel-event-collector-module
+// kver 4.2 appears to be the kernel with the hook lists
 
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{

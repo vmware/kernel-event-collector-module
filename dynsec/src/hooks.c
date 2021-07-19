@@ -269,3 +269,180 @@ out:
 
     return ret;
 }
+
+int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->inode_setattr(dentry, attr);
+    }
+#endif
+
+    return 0;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry,
+                              umode_t mode)
+#else
+int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry,
+                              int mode)
+#endif
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->inode_mkdir(dir, dentry, mode);
+    }
+#endif
+
+    return 0;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
+                        umode_t mode)
+#else
+int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
+                        int mode)
+#endif
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->inode_create(dir, dentry, mode);
+    }
+#endif
+
+    return 0;
+}
+
+int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
+                      struct dentry *new_dentry)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->inode_link(old_dentry, dir, new_dentry);
+    }
+#endif
+
+    return 0;
+}
+
+int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
+                const char *old_name)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->inode_symlink(dir, dentry, old_name);
+    }
+#endif
+
+    return 0;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
+int dynsec_file_open(struct file *file)
+#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+int dynsec_file_open(struct file *file, const struct cred *cred)
+#else
+int dynsec_dentry_open(struct file *file, const struct cred *cred)
+#endif
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->dentry_open(file, cred);
+    }
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->file_open(file, cred);
+    }
+#endif
+
+    return 0;
+}
+
+// Cannot Stall - Enable only for open events
+void dynsec_file_free(struct file *file)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+    if (g_original_ops_ptr) {
+        g_original_ops_ptr->file_free_security(file);
+    }
+#endif
+}
+
+int dynsec_ptrace_traceme(struct task_struct *parent)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->ptrace_traceme(parent);
+    }
+#endif
+
+    return 0;
+}
+
+int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->ptrace_access_check(child, mode);
+    }
+#endif
+
+    return 0;
+}
+
+// Cannot Stall
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
+#if RHEL_MAJOR == 8 && RHEL_MINOR == 0
+int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
+                     int sig, const struct cred *cred)
+#else
+int dynsec_task_kill(struct task_struct *p, struct kernel_siginfo *info,
+                     int sig, const struct cred *cred)
+#endif
+#else
+int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
+                     int sig, u32 secid)
+#endif
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+    if (g_original_ops_ptr) {
+        return g_original_ops_ptr->task_kill(p, info, sig, secid);
+    }
+#endif
+
+    return 0;
+}
+
+// #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+// int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
+//                      unsigned long flags)
+// #else
+// int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long prot,
+//                      unsigned long flags, unsigned long addr, unsigned long addr_only)
+// #endif
+// {
+// #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
+//     if (g_original_ops_ptr) {
+//         return g_original_ops_ptr->file_mmap(file, reqprot, prot, flags, addr, addr_only);
+//     }
+// #elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+//     if (g_original_ops_ptr) {
+//         return g_original_ops_ptr->mmap_file(file, reqprot, prot, flags);
+//     }
+// #endif
+
+//     return 0;
+// }
+
+// int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int flags)
+// {
+// #if LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+//     if (g_original_ops_ptr) {
+//         return g_original_ops_ptr->task_fix_setuid(new, old, flags);
+//     }
+// #endif
+
+//     return 0;
+// }
