@@ -6,6 +6,7 @@
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/version.h>
+#include <linux/limits.h>
 
 #include "symbols.h"
 #include "path_utils.h"
@@ -92,7 +93,6 @@ char *dynsec_path_safeish(const struct path *path, char *buf, int buflen)
     return dynsec_d_path(path, buf, buflen);
 }
 
-#define PATH_SZ 4096
 static bool has_gfp_atomic(gfp_t mode)
 {
 #ifdef __GFP_ATOMIC
@@ -119,14 +119,14 @@ char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode)
     //     return dynsec_build_dentry(path->dentry, size, mode);
     // }
 
-    buf = kmalloc(PATH_SZ, mode);
+    buf = kmalloc(PATH_MAX, mode);
     if (!buf) {
         goto out;
     }
 
     if (!has_gfp_atomic(mode))
         path_get(path);
-    p = dynsec_d_path(path, buf, PATH_SZ);
+    p = dynsec_d_path(path, buf, PATH_MAX);
     if (!has_gfp_atomic(mode))
         path_put(path);
 
@@ -164,14 +164,14 @@ char *dynsec_build_dentry(struct dentry *dentry, uint16_t *size, gfp_t mode)
         goto out;
     }
 
-    buf = kmalloc(PATH_SZ, mode);
+    buf = kmalloc(PATH_MAX, mode);
     if (!buf) {
         goto out;
     }
 
     if (!has_gfp_atomic(mode))
         dget(dentry);
-    p = dynsec_dentry_path(dentry, buf, PATH_SZ);
+    p = dynsec_dentry_path(dentry, buf, PATH_MAX);
     if (!has_gfp_atomic(mode))
         dput(dentry);
 
