@@ -75,6 +75,8 @@ extern void stall_tbl_enable(struct stall_tbl *tbl);
 extern struct stall_entry *
 stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode);
 
+extern u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event);
+
 extern int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry);
 
 extern u32 stall_queue_size(struct stall_tbl *tbl);

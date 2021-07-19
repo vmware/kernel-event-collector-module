@@ -26,7 +26,31 @@ static uint64_t dynsec_next_req_id(void)
     return atomic64_inc_return(&req_id);
 }
 
-static struct dynsec_event *alloc_exec_event(uint16_t report_flags, uint32_t hook_type,
+static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_event *event)
+{
+    if (event) {
+        event->tid = current->pid;
+        event->req_id = dynsec_next_req_id();
+        event->event_type = event_type;
+        INIT_LIST_HEAD(&event->list);
+    }
+}
+
+#define init_event_data(EVENT_TYPE, EVENT, REPORT_FLAGS, HOOK) \
+    do { \
+        init_dynsec_event(EVENT_TYPE, &EVENT->event);\
+        EVENT->kmsg.hdr.report_flags = REPORT_FLAGS;\
+        EVENT->kmsg.hdr.hook_type = HOOK;\
+        EVENT->kmsg.hdr.req_id = EVENT->event.req_id;\
+        EVENT->kmsg.hdr.event_type = EVENT->event.event_type;\
+        EVENT->kmsg.hdr.tid = EVENT->event.tid;\
+        if (EVENT->kmsg.hdr.hook_type & debug_disable_stall_mask)\
+            EVENT->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);\
+    } while (0)
+
+
+static struct dynsec_event *alloc_exec_event(enum dynsec_event_type event_type,
+                                             uint32_t hook_type, uint16_t report_flags,
                                              gfp_t mode)
 {
     struct dynsec_exec_event *exec_event = kzalloc(sizeof(*exec_event), mode);
@@ -35,26 +59,13 @@ static struct dynsec_event *alloc_exec_event(uint16_t report_flags, uint32_t hoo
         return NULL;
     }
 
-    // Set key core data
-    exec_event->event.req_id = dynsec_next_req_id();
-    exec_event->event.event_type = DYNSEC_EVENT_TYPE_EXEC;
-    exec_event->event.tid = current->pid;
-
-    // Set msg hdr data
-    exec_event->kmsg.hdr.report_flags = report_flags;
-    exec_event->kmsg.hdr.hook_type = hook_type;
-    exec_event->kmsg.hdr.req_id = exec_event->event.req_id;
-    exec_event->kmsg.hdr.event_type = exec_event->event.event_type;
-    exec_event->kmsg.hdr.tid = exec_event->event.tid;
-
-    if (exec_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
-        exec_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
-    }
+    init_event_data(event_type, exec_event, report_flags, hook_type);
 
     return &exec_event->event;
 }
 
-static struct dynsec_event *alloc_unlink_event(uint16_t report_flags, uint32_t hook_type,
+static struct dynsec_event *alloc_unlink_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
                                                gfp_t mode)
 {
     struct dynsec_unlink_event *unlink_event = kzalloc(sizeof(*unlink_event), mode);
@@ -63,26 +74,14 @@ static struct dynsec_event *alloc_unlink_event(uint16_t report_flags, uint32_t h
         return NULL;
     }
 
-    // Set key core data
-    unlink_event->event.req_id = dynsec_next_req_id();
-    unlink_event->event.event_type = DYNSEC_EVENT_TYPE_UNLINK;
-    unlink_event->event.tid = current->pid;
-
-    // Set msg hdr data
-    unlink_event->kmsg.hdr.report_flags = report_flags;
-    unlink_event->kmsg.hdr.hook_type = hook_type;
-    unlink_event->kmsg.hdr.req_id = unlink_event->event.req_id;
-    unlink_event->kmsg.hdr.event_type = unlink_event->event.event_type;
-    unlink_event->kmsg.hdr.tid = unlink_event->event.tid;
-
-    if (unlink_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
-        unlink_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
-    }
+    init_event_data(event_type, unlink_event, report_flags, hook_type);
 
     return &unlink_event->event;
 }
 
-static struct dynsec_event *alloc_rmdir_event(uint16_t report_flags, uint32_t hook_type, gfp_t mode)
+static struct dynsec_event *alloc_rmdir_event(enum dynsec_event_type event_type,
+                                              uint32_t hook_type, uint16_t report_flags,
+                                              gfp_t mode)
 {
     struct dynsec_unlink_event *rmdir_event = kzalloc(sizeof(*rmdir_event), mode);
 
@@ -90,27 +89,13 @@ static struct dynsec_event *alloc_rmdir_event(uint16_t report_flags, uint32_t ho
         return NULL;
     }
 
-    // Set key core data
-    rmdir_event->event.req_id = dynsec_next_req_id();
-    rmdir_event->event.event_type = DYNSEC_EVENT_TYPE_RMDIR;
-    rmdir_event->event.tid = current->pid;
-
-    // Set msg hdr data
-    rmdir_event->kmsg.hdr.report_flags = report_flags;
-    rmdir_event->kmsg.hdr.hook_type = hook_type;
-    rmdir_event->kmsg.hdr.req_id = rmdir_event->event.req_id;
-    rmdir_event->kmsg.hdr.event_type = rmdir_event->event.event_type;
-    rmdir_event->kmsg.hdr.tid = rmdir_event->event.tid;
-
-    if (rmdir_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
-        rmdir_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
-    }
+    init_event_data(event_type, rmdir_event, report_flags, hook_type);
 
     return &rmdir_event->event;
 }
 
-
-static struct dynsec_event *alloc_rename_event(uint16_t report_flags, uint32_t hook_type,
+static struct dynsec_event *alloc_rename_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
                                                gfp_t mode)
 {
     struct dynsec_rename_event *rename_event = kzalloc(sizeof(*rename_event), mode);
@@ -119,21 +104,7 @@ static struct dynsec_event *alloc_rename_event(uint16_t report_flags, uint32_t h
         return NULL;
     }
 
-    // Set key core data
-    rename_event->event.req_id = dynsec_next_req_id();
-    rename_event->event.event_type = DYNSEC_EVENT_TYPE_RENAME;
-    rename_event->event.tid = current->pid;
-
-    // Set msg hdr data
-    rename_event->kmsg.hdr.report_flags = report_flags;
-    rename_event->kmsg.hdr.hook_type = hook_type;
-    rename_event->kmsg.hdr.req_id = rename_event->event.req_id;
-    rename_event->kmsg.hdr.event_type = rename_event->event.event_type;
-    rename_event->kmsg.hdr.tid = rename_event->event.tid;
-
-    if (rename_event->kmsg.hdr.hook_type & debug_disable_stall_mask) {
-        rename_event->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);
-    }
+    init_event_data(event_type, rename_event, report_flags, hook_type);
 
     return &rename_event->event;
 }
@@ -147,16 +118,16 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
     switch (event_type)
     {
     case DYNSEC_EVENT_TYPE_EXEC:
-        return alloc_exec_event(report_flags, hook_type, mode);
+        return alloc_exec_event(event_type, hook_type, report_flags, mode);
 
     case DYNSEC_EVENT_TYPE_UNLINK:
-        return alloc_unlink_event(report_flags, hook_type, mode);
+        return alloc_unlink_event(event_type, hook_type, report_flags, mode);
 
     case DYNSEC_EVENT_TYPE_RMDIR:
-        return alloc_rmdir_event(report_flags, hook_type, mode);
+        return alloc_rmdir_event(event_type, hook_type, report_flags, mode);
 
     case DYNSEC_EVENT_TYPE_RENAME:
-        return alloc_rename_event(report_flags, hook_type, mode);
+        return alloc_rename_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;

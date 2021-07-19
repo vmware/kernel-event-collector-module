@@ -126,6 +126,8 @@ configure_file(${INCLUDE_DIR}/version.h.in ${CONFIGURED_VERSION_FILE})
 
 set(SOURCE_FILES
     dynsec.c
+    hooks.c
+    hooks.h
     lsm.c
     lsm_mask.h
     logging.h

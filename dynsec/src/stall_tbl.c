@@ -256,6 +256,27 @@ void stall_tbl_shutdown(struct stall_tbl *tbl)
     }
 }
 
+static u32 stall_tbl_enqueue_event(struct stall_tbl *tbl, struct dynsec_event *event)
+{
+    u32 size = 0;
+
+    if (stall_tbl_enabled(tbl) && event) {
+        unsigned long flags = 0;
+
+        flags = lock_stall_queue(&tbl->queue, flags);
+        list_add_tail(&event->list, &tbl->queue.list);
+        tbl->queue.size += 1;
+        size = tbl->queue.size;
+        unlock_stall_queue(&tbl->queue, flags);
+    }
+    return size;
+}
+
+u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
+{
+    return stall_tbl_enqueue_event(tbl, event);
+}
+
 struct stall_entry *
 stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
 {
@@ -295,10 +316,7 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     tbl->bkt[index].size += 1;
     unlock_stall_bkt(&stall_tbl->bkt[index], flags);
 
-    flags = lock_stall_queue(&tbl->queue, flags);
-    list_add_tail(&event->list, &tbl->queue.list);
-    tbl->queue.size += 1;
-    unlock_stall_queue(&tbl->queue, flags);
+    stall_tbl_enqueue_event(tbl, event);
 
     if (waitqueue_active(&tbl->queue.wq)) {
         // One of the more costly operations

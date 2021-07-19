@@ -19,10 +19,11 @@
 
 
 // Event Message Flags aka Report
-#define DYNSEC_REPORT_STALL     0x0001
-#define DYNSEC_REPORT_INTENT    0x0002
-#define DYNSEC_REPORT_AUDIT     0x0004
-#define DYNSEC_REPORT_EXITING   0x0008
+#define DYNSEC_REPORT_STALL      0x0001
+#define DYNSEC_REPORT_INTENT     0x0002
+#define DYNSEC_REPORT_AUDIT      0x0004
+#define DYNSEC_REPORT_EXITING    0x0008
+#define DYNSEC_REPORT_STALL_FAIL 0x0010
 
 
 // Response Type For Stalls

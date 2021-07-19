@@ -11,6 +11,7 @@
 #include "symbols.h"
 #include "lsm_mask.h"
 #include "dynsec.h"
+#include "hooks.h"
 
 // checkpatch-ignore: AVOID_EXTERNS
 #define DEBUGGING_SANITY 0
@@ -50,12 +51,6 @@ static bool g_lsmRegistered;
 struct        security_operations  *g_original_ops_ptr;   // Any LSM which we are layered on top of
 static struct security_operations   g_combined_ops;       // Original LSM plus our hooks combined
 #endif //}
-
-extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
-extern int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry);
-extern int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry);
-extern int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
-                               struct inode *new_dir, struct dentry *new_dentry);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
 static unsigned int cblsm_hooks_count;
