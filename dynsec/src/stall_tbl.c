@@ -268,9 +268,6 @@ static u32 stall_tbl_enqueue_event(struct stall_tbl *tbl, struct dynsec_event *e
         tbl->queue.size += 1;
         size = tbl->queue.size;
         unlock_stall_queue(&tbl->queue, flags);
-        if (waitqueue_active(&tbl->queue.wq)) {
-            wake_up(&tbl->queue.wq);
-        }
     }
 
     return size;
@@ -278,7 +275,16 @@ static u32 stall_tbl_enqueue_event(struct stall_tbl *tbl, struct dynsec_event *e
 
 u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
 {
-    return stall_tbl_enqueue_event(tbl, event);
+    u32 size = 0;
+
+    size = stall_tbl_enqueue_event(tbl, event);
+    if (size) {
+        if (waitqueue_active(&tbl->queue.wq)) {
+            wake_up(&tbl->queue.wq);
+        }
+    }
+
+    return size;
 }
 
 struct stall_entry *
