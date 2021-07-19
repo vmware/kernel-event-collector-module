@@ -21,6 +21,12 @@ static struct cdev dynsec_cdev;
 
 struct stall_tbl *stall_tbl;
 
+
+bool task_in_connected_tgid(const struct task_struct *task)
+{
+    return (task && stall_tbl && stall_tbl->tgid == task->tgid);
+}
+
 int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
                               unsigned int ms, gfp_t mode)
 {

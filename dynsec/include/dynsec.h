@@ -24,6 +24,7 @@
 #define DYNSEC_REPORT_AUDIT      0x0004
 #define DYNSEC_REPORT_EXITING    0x0008
 #define DYNSEC_REPORT_STALL_FAIL 0x0010
+#define DYNSEC_REPORT_SELF       0x0020
 
 
 // Response Type For Stalls
