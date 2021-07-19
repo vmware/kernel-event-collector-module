@@ -232,6 +232,10 @@ void stall_tbl_disable(struct stall_tbl *tbl)
         stall_tbl_wake_entries(tbl);
 
         stall_queue_clear(tbl);
+
+        if (waitqueue_active(&tbl->queue.wq)) {
+            wake_up(&tbl->queue.wq);
+        }
     }
 }
 
