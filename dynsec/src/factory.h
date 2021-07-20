@@ -35,6 +35,7 @@ struct dynsec_event {
     uint64_t req_id;
     enum dynsec_event_type event_type;
     struct list_head list;
+    uint16_t report_flags;
 };
 
 // Child event structs

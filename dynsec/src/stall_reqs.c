@@ -102,6 +102,9 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
 {
     ssize_t ret;
     struct dynsec_event *event;
+#ifndef SINGLE_READ_ONLY
+    char __user *start = ubuf;
+#endif /* ! SINGLE_READ_ONLY */
 
     event = stall_queue_shift(stall_tbl, count);
     if (!event) {
@@ -121,9 +124,60 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
 
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
-        stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW);
+        if (event->report_flags & DYNSEC_REPORT_STALL) {
+            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW);
+        }
+        free_dynsec_event(event);
+        event = NULL;
+        goto out;
     }
     free_dynsec_event(event);
+    event = NULL;
+    count -= ret;
+    ubuf += ret;
+
+#ifndef SINGLE_READ_ONLY
+    while (1)
+    {
+        event = stall_queue_shift(stall_tbl, count);
+        if (!event) {
+            ret = ubuf - start;
+            goto out;
+        }
+
+        ret = copy_dynsec_event_to_user(event, ubuf, count);
+        if (ret < 0) {
+            struct stall_key key;
+            pr_info("%s:%d size:%u failed copy:%ld\n", __func__, __LINE__,
+                    stall_queue_size(stall_tbl), ret);
+
+            memset(&key, 0, sizeof(key));
+            key.req_id = event->req_id;
+            key.event_type = event->event_type;
+            key.tid = event->tid;
+
+            // Place it back into queue OR resume task if we
+            // don't have a timeout during the stall.
+            if (event->report_flags & DYNSEC_REPORT_STALL) {
+                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW);
+            }
+            free_dynsec_event(event);
+            event = NULL;
+
+            // Propagate faults
+            if (ret != -EFAULT) {
+                ret = ubuf - start;
+            }
+            goto out;
+        }
+        free_dynsec_event(event);
+        event = NULL;
+        count -= ret;
+        ubuf += ret;
+    }
+#endif /* ! SINGLE_READ_ONLY */
+
+out:
 
     return ret;
 }
@@ -150,6 +204,11 @@ static unsigned dynsec_stall_poll(struct file *file, struct poll_table_struct *p
     size = stall_queue_size(stall_tbl);
     if (!size) {
         poll_wait(file, &stall_tbl->queue.wq, pts);
+
+        if (!stall_tbl_enabled(stall_tbl)) {
+            return POLLERR;
+        }
+
         size = stall_queue_size(stall_tbl);
         if (size) {
             return POLLIN | POLLRDNORM;

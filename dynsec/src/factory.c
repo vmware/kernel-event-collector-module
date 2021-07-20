@@ -36,16 +36,35 @@ static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_e
     }
 }
 
+// Helpers to set and unset report_flags as needed
+#define init_event_report_flags(SUBEVENT, REPORT_FLAGS) \
+    do { \
+        SUBEVENT->kmsg.hdr.report_flags = (REPORT_FLAGS);\
+        SUBEVENT->event.report_flags = SUBEVENT->kmsg.hdr.report_flags;\
+    } while (0)
+
+#define set_event_report_flags(SUBEVENT, REPORT_MASK) \
+    do { \
+        SUBEVENT->kmsg.hdr.report_flags |= (REPORT_MASK);\
+        SUBEVENT->event.report_flags |= SUBEVENT->kmsg.hdr.report_flags;\
+    } while (0)
+
+#define unset_event_report_flags(SUBEVENT, REPORT_MASK) \
+    do { \
+        SUBEVENT->kmsg.hdr.report_flags &= (REPORT_MASK);\
+        SUBEVENT->event.report_flags = SUBEVENT->kmsg.hdr.report_flags;\
+    } while (0)
+
 #define init_event_data(EVENT_TYPE, EVENT, REPORT_FLAGS, HOOK) \
     do { \
         init_dynsec_event(EVENT_TYPE, &EVENT->event);\
-        EVENT->kmsg.hdr.report_flags = REPORT_FLAGS;\
+        init_event_report_flags(EVENT, REPORT_FLAGS);\
         EVENT->kmsg.hdr.hook_type = HOOK;\
         EVENT->kmsg.hdr.req_id = EVENT->event.req_id;\
         EVENT->kmsg.hdr.event_type = EVENT->event.event_type;\
         EVENT->kmsg.hdr.tid = EVENT->event.tid;\
         if (EVENT->kmsg.hdr.hook_type & debug_disable_stall_mask)\
-            EVENT->kmsg.hdr.report_flags &= ~(DYNSEC_REPORT_STALL);\
+            unset_event_report_flags(EVENT, ~(DYNSEC_REPORT_STALL));\
     } while (0)
 
 
@@ -505,7 +524,7 @@ static void fill_in_sb_data(struct dynsec_file *dynsec_file, const struct super_
 static void fill_in_inode_data(struct dynsec_file *dynsec_file,
                                  const struct inode *inode)
 {
-    if (inode) {
+    if (dynsec_file && inode) {
         dynsec_file->ino = inode->i_ino;
         dynsec_file->umode = inode->i_mode;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -522,7 +541,7 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
 static void fill_in_parent_data(struct dynsec_file *dynsec_file,
                                 struct inode *parent_dir)
 {
-    if (parent_dir) {
+    if (dynsec_file && parent_dir) {
         dynsec_file->parent_ino = parent_dir->i_ino;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         dynsec_file->parent_uid = from_kuid(&init_user_ns, parent_dir->i_uid);
@@ -537,10 +556,10 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
 static void fill_in_dentry_data(struct dynsec_file *dynsec_file,
                                   const struct dentry *dentry)
 {
-    if (dentry) {
+    if (dynsec_file && dentry) {
         fill_in_inode_data(dynsec_file, dentry->d_inode);
         fill_in_sb_data(dynsec_file, dentry->d_sb);
-        if (dentry->d_parent && dentry != dentry->d_parent) {
+        if (dentry && dentry->d_parent && dentry != dentry->d_parent) {
             fill_in_parent_data(dynsec_file, dentry->d_parent->d_inode);
         }
     }
@@ -549,6 +568,7 @@ static void fill_in_dentry_data(struct dynsec_file *dynsec_file,
 static void fill_in_file_data(struct dynsec_file *dynsec_file,
                               const struct path *path)
 {
+    // TODO: handle cross mountpoint parents?
     if (path->dentry) {
         fill_in_dentry_data(dynsec_file, path->dentry);
     }

@@ -207,20 +207,41 @@ void read_events(int fd, const char *banned_path)
     {
         struct dynsec_msg_hdr *hdr = (struct dynsec_msg_hdr *)buf;
         ssize_t bytes_read = 0;
+        ssize_t bytes_parsed = 0;
         struct pollfd pollfd = {
              .fd = fd,
              .events = POLLIN | POLLOUT,
              .revents = 0,
         };
+        int count = 0;
         int ret = poll(&pollfd, 1, -1);
 
-        bytes_read = read(fd, buf, sizeof(buf));
-        if (bytes_read <= 0) {
-            // TODO: handle non-blocking more safely
+        if (ret < 0) {
+            fprintf(stderr, "poll(%m)\n");
+            break;
+        }
+        if (ret != 1 || !(pollfd.revents & POLLIN)) {
+            fprintf(stderr, "poll ret:%d revents:%lx\n",
+                    ret, pollfd.revents);
             break;
         }
 
-        print_event(fd, hdr, banned_path);
+        bytes_read = read(fd, buf, sizeof(buf));
+        if (bytes_read <= 0) {
+            break;
+        }
+
+        while (bytes_parsed < bytes_read)
+        {
+            count++;
+            hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
+            print_event(fd, hdr, banned_path);
+
+            bytes_parsed += hdr->payload;
+        }
+        if (!quiet && count > 1) {
+            printf("multiread count: %d\n", count);
+        }
 
         // Observe bytes committed to
         memset(buf, 'A', sizeof(buf));

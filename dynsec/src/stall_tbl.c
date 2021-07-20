@@ -13,13 +13,15 @@
 #include <linux/sched.h>
 #include <linux/cred.h>
 #include <linux/wait.h>
+#include <linux/poll.h>
+#include <linux/version.h>
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "factory.h"
 
 
-#define STALL_BUCKET_BITS 14
+#define STALL_BUCKET_BITS 12
 #define STALL_BUCKETS BIT(STALL_BUCKET_BITS)
 
 static u32 stall_hash(u32 secret, struct stall_key *key)
@@ -56,6 +58,22 @@ static inline unsigned long lock_stall_queue(struct stall_q *queue, unsigned lon
 static inline void unlock_stall_queue(struct stall_q *queue, unsigned long flags)
 {
     spin_unlock_irq(&queue->lock);
+}
+
+static void stall_queue_defer_wakeup(struct irq_work *work)
+{
+    struct stall_q *queue;
+
+    queue = container_of(work, struct stall_q, defer_wakeup);
+    wake_up_interruptible(&queue->wq);
+}
+
+static void stall_queue_wakeup(struct stall_q *queue)
+{
+    if (waitqueue_active(&queue->wq)) {
+        // wake_up(&queue->wq);
+        irq_work_queue(&queue->defer_wakeup);
+    }
 }
 
 static void stall_queue_clear(struct stall_tbl *tbl)
@@ -211,6 +229,7 @@ struct stall_tbl *stall_tbl_alloc(gfp_t mode)
     INIT_LIST_HEAD(&tbl->queue.list);
     init_waitqueue_head(&tbl->queue.wq);
     init_waitqueue_head(&tbl->queue.pre_wq);
+    init_irq_work(&tbl->queue.defer_wakeup, stall_queue_defer_wakeup);
 
     return tbl;
 }
@@ -234,7 +253,7 @@ void stall_tbl_disable(struct stall_tbl *tbl)
         stall_queue_clear(tbl);
 
         if (waitqueue_active(&tbl->queue.wq)) {
-            wake_up(&tbl->queue.wq);
+            irq_work_sync(&tbl->queue.defer_wakeup);
         }
     }
 }
@@ -282,9 +301,7 @@ u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
     u32 size = stall_tbl_enqueue_event(tbl, event);
 
     if (size) {
-        if (waitqueue_active(&tbl->queue.wq)) {
-            wake_up(&tbl->queue.wq);
-        }
+        stall_queue_wakeup(&tbl->queue);
     }
 
     return size;
@@ -329,12 +346,9 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     tbl->bkt[index].size += 1;
     unlock_stall_bkt(&stall_tbl->bkt[index], flags);
 
-    stall_tbl_enqueue_event(tbl, event);
+    (void)stall_tbl_enqueue_event(tbl, event);
 
-    if (waitqueue_active(&tbl->queue.wq)) {
-        // One of the more costly operations
-        wake_up(&tbl->queue.wq);
-    }
+    stall_queue_wakeup(&tbl->queue);
 
     return entry;
 }

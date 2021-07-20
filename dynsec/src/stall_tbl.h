@@ -3,6 +3,7 @@
 #pragma once
 
 #include "dynsec.h"
+#include <linux/irq_work.h>
 
 struct stall_bkt {
     spinlock_t lock;
@@ -42,6 +43,7 @@ struct stall_q {
     struct list_head list;
     wait_queue_head_t wq;
     wait_queue_head_t pre_wq;
+    struct irq_work defer_wakeup;
 };
 
 struct stall_tbl {
