@@ -47,7 +47,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
     }
     if (fill_in_bprm_set_creds(dynsec_event_to_exec(event), bprm,
                                GFP_KERNEL)) {
-        if (report_flags & DYNSEC_REPORT_STALL) {
+        if (event->report_flags & DYNSEC_REPORT_STALL) {
             rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
             if (!rc) {
@@ -113,7 +113,7 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
 
     if (fill_in_inode_unlink(dynsec_event_to_unlink(event), dir, dentry,
                                GFP_KERNEL)) {
-        if (report_flags & DYNSEC_REPORT_STALL) {
+        if (event->report_flags & DYNSEC_REPORT_STALL) {
             rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
             if (!rc) {
@@ -179,7 +179,7 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
 
     if (fill_in_inode_unlink(dynsec_event_to_unlink(event), dir, dentry,
                                GFP_KERNEL)) {
-        if (report_flags & DYNSEC_REPORT_STALL) {
+        if (event->report_flags & DYNSEC_REPORT_STALL) {
             rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
             if (!rc) {
@@ -248,7 +248,7 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
                              old_dir, old_dentry,
                              new_dir, new_dentry,
                              GFP_KERNEL)) {
-        if (report_flags & DYNSEC_REPORT_STALL) {
+        if (event->report_flags & DYNSEC_REPORT_STALL) {
             rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
             if (!rc) {
