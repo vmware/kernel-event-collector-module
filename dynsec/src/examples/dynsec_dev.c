@@ -229,6 +229,34 @@ void print_create_event(int fd, struct dynsec_create_umsg *create)
         create->msg.task.uid, create->msg.file.parent_ino, path);
 }
 
+void print_open_event(int fd, struct dynsec_file_umsg *file)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *ev_str = "OPEN";
+    const char *start = (const char *)file;
+
+    if (file->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &file->hdr, response);
+
+    if (quiet) return;
+
+    if (file->hdr.event_type == DYNSEC_EVENT_TYPE_CLOSE)
+        ev_str = "CLOSE";
+
+    if (file->msg.file.path_offset) {
+        path = start + file->msg.file.path_offset;
+    }
+
+    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u f_mode:%#010x f_flags:%#010x magic:%#lx uid:%u"
+        " '%s'\n", ev_str,
+        file->hdr.tid, file->msg.file.ino, file->msg.file.dev,
+        file->msg.task.mnt_ns, file->msg.f_mode, file->msg.f_flags,
+        file->msg.file.sb_magic,
+        file->msg.task.uid, path);
+}
+
+
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -254,6 +282,11 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
     case DYNSEC_EVENT_TYPE_CREATE:
     case DYNSEC_EVENT_TYPE_MKDIR:
         print_create_event(fd, (struct dynsec_create_umsg *)hdr);
+    break;
+
+    case DYNSEC_EVENT_TYPE_OPEN:
+    case DYNSEC_EVENT_TYPE_CLOSE:
+        print_open_event(fd, (struct dynsec_file_umsg *)hdr);
     break;
 
     default:

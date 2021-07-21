@@ -16,6 +16,7 @@
 #define DYNSEC_HOOK_TYPE_SIGNAL    0x00000400
 #define DYNSEC_HOOK_TYPE_PTRACE    0x00000800
 #define DYNSEC_HOOK_TYPE_MMAP      0x00001000
+#define DYNSEC_HOOK_TYPE_CLOSE     0x00002000
 
 
 // Event Message Flags aka Report
@@ -167,6 +168,18 @@ struct dynsec_create_msg {
 struct dynsec_create_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_create_msg msg;
+};
+
+struct dynsec_file_msg {
+    struct dynsec_task_ctx task;
+    uint32_t f_mode;
+    uint32_t f_flags;
+    struct dynsec_file file;
+};
+
+struct dynsec_file_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_file_msg msg;
 };
 #pragma pack(pop)
 

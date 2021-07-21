@@ -44,7 +44,7 @@ extern int dynsec_file_open(struct file *file, const struct cred *cred);
 extern int dynsec_dentry_open(struct file *file, const struct cred *cred);
 #endif
 
-extern void dynsec_file_free(struct file *file);
+extern void dynsec_file_free_security(struct file *file);
 
 extern int dynsec_ptrace_traceme(struct task_struct *parent);
 extern int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode);

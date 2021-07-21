@@ -30,6 +30,10 @@ struct dynsec_create_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_create_msg msg;
 };
+struct dynsec_file_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_file_msg msg;
+};
 
 // Base struct in queue
 struct dynsec_event {
@@ -71,6 +75,12 @@ struct dynsec_create_event {
     struct dynsec_create_kmsg kmsg;
     char *path;
 };
+
+struct dynsec_file_event {
+    struct dynsec_event event;
+    struct dynsec_file_kmsg kmsg;
+    char *path;
+};
 #pragma pack(pop)
 
 // Exec Event container_of helper
@@ -102,6 +112,12 @@ static inline struct dynsec_create_event *
 dynsec_event_to_create(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_create_event, event);
+}
+
+static inline struct dynsec_file_event *
+dynsec_event_to_file(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_file_event, event);
 }
 
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
@@ -152,3 +168,9 @@ extern bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
                                 struct inode *dir, struct dentry *dentry,
                                 int umode, gfp_t mode);
 #endif
+
+extern bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
+                              gfp_t mode);
+
+extern bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
+                              gfp_t mode);

@@ -545,22 +545,56 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
     }
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
     if (g_original_ops_ptr) {
-        ret =  g_original_ops_ptr->file_open(file, cred);
+        ret = g_original_ops_ptr->file_open(file, cred);
     }
 #endif
+
+#ifdef FMODE_STREAM
+    if (file->f_mode & FMODE_STREAM) {
+        report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
+#endif
+#ifdef FMODE_NONOTIFY
+    if ((file->f_mode & FMODE_NONOTIFY) && !(file->f_mode & FMODE_WRITE)) {
+        report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
+#endif
+
+    // Some file systems and file types may not be
+    // worth stalling or reporting against.
+    // Below is a poorman's implementation.
+    if (file->f_path.dentry && file->f_path.dentry->d_inode &&
+        S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
+        report_flags = DYNSEC_REPORT_STALL;
+    } else {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
-    } else {
-        report_flags |= DYNSEC_REPORT_STALL;
+        report_flags &= ~(DYNSEC_REPORT_STALL);
     }
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLOSE, DYNSEC_HOOK_TYPE_OPEN,
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_OPEN, DYNSEC_HOOK_TYPE_OPEN,
                                report_flags, GFP_KERNEL);
-    free_dynsec_event(event);
+    if (!fill_in_file_open(event, file, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        (void)enqueue_nonstall_event(stall_tbl, event);
+    }
 
 out:
 
@@ -568,7 +602,7 @@ out:
 }
 
 // Must Not Stall - Enable only for open events
-void dynsec_file_free(struct file *file)
+void dynsec_file_free_security(struct file *file)
 {
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT;
@@ -579,6 +613,22 @@ void dynsec_file_free(struct file *file)
     }
 #endif
 
+#ifdef FMODE_STREAM
+    if (file->f_mode & FMODE_STREAM) {
+        return;
+    }
+#endif
+#ifdef FMODE_NONOTIFY
+    if ((file->f_mode & FMODE_NONOTIFY) && !(file->f_mode & FMODE_WRITE)) {
+        return;
+    }
+#endif
+
+    // Only report close events on
+    if (!file->f_path.dentry || !file->f_path.dentry->d_inode ||
+        !S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
+        return;
+    }
     if (!stall_tbl_enabled(stall_tbl)) {
         return;
     }
@@ -586,10 +636,14 @@ void dynsec_file_free(struct file *file)
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLOSE, DYNSEC_HOOK_TYPE_OPEN,
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLOSE, DYNSEC_HOOK_TYPE_CLOSE,
                                report_flags, GFP_ATOMIC);
 
-    free_dynsec_event(event);
+    if (!fill_in_file_free(event, file, GFP_ATOMIC)) {
+        free_dynsec_event(event);
+        return;
+    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
 }
 
 int dynsec_ptrace_traceme(struct task_struct *parent)

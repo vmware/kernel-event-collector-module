@@ -40,6 +40,7 @@
 // depends on kver
 #define DYNSEC_LSM_dentry_open          DYNSEC_HOOK_TYPE_OPEN
 #define DYNSEC_LSM_file_open            DYNSEC_HOOK_TYPE_OPEN
+#define DYNSEC_LSM_file_free_security   DYNSEC_HOOK_TYPE_CLOSE
 
 // Ptrace hook type maps to two hooks
 #define DYNSEC_LSM_ptrace_traceme       DYNSEC_HOOK_TYPE_PTRACE
@@ -84,7 +85,18 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     BUILD_BUG_ON(DYNSEC_LSM_inode_rmdir    != DYNSEC_HOOK_TYPE_RMDIR);
     BUILD_BUG_ON(DYNSEC_LSM_inode_setattr  != DYNSEC_HOOK_TYPE_SETATTR);
     BUILD_BUG_ON(DYNSEC_LSM_inode_mkdir    != DYNSEC_HOOK_TYPE_MKDIR);
-    BUILD_BUG_ON(DYNSEC_LSM_inode_create   != DYNSEC_HOOK_TYPE_CREATE);
+    BUILD_BUG_ON(DYNSEC_LSM_dentry_open    != DYNSEC_HOOK_TYPE_OPEN);
+    BUILD_BUG_ON(DYNSEC_LSM_file_open      != DYNSEC_HOOK_TYPE_OPEN);
+    BUILD_BUG_ON(DYNSEC_LSM_file_free_security 
+                                           != DYNSEC_HOOK_TYPE_CLOSE);
+
+    // Enforce security_file_free
+    if ((enableHooks & DYNSEC_HOOK_TYPE_OPEN) &&
+        !(enableHooks & DYNSEC_HOOK_TYPE_CLOSE)) {
+        pr_info("%s: CLOSE hook must be enabled  with "
+                "OPEN hook. enabled:%#016llx\n", __func__, enableHooks);
+        return false;
+    }
 
     memset(&lsm_syms, 0, sizeof(lsm_syms));
 
@@ -147,6 +159,14 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     CB_LSM_SETUP_HOOK(inode_setattr);   // security_inode_setattr
     CB_LSM_SETUP_HOOK(inode_create);   // security_inode_create
     CB_LSM_SETUP_HOOK(inode_mkdir);   // security_inode_mkdir
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+    CB_LSM_SETUP_HOOK(dentry_open); // security_dentry_open
+#else
+    CB_LSM_SETUP_HOOK(file_open);   // security_file_open
+#endif
+
+    CB_LSM_SETUP_HOOK(file_free_security);
+
 
 #undef CB_LSM_SETUP_HOOK
 

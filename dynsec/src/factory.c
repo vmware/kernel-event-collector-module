@@ -158,6 +158,21 @@ static struct dynsec_event *alloc_create_event(enum dynsec_event_type event_type
     return &create->event;
 }
 
+static struct dynsec_event *alloc_file_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
+{
+    struct dynsec_file_event *file = kzalloc(sizeof(*file), mode);
+
+    if (!file) {
+        return NULL;
+    }
+
+    init_event_data(event_type, file, report_flags, hook_type);
+
+    return &file->event;
+}
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint32_t hook_type,
@@ -184,6 +199,10 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
     case DYNSEC_EVENT_TYPE_CREATE:
     case DYNSEC_EVENT_TYPE_MKDIR:
         return alloc_create_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_OPEN:
+    case DYNSEC_EVENT_TYPE_CLOSE:
+        return alloc_file_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -259,6 +278,18 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_OPEN:
+    case DYNSEC_EVENT_TYPE_CLOSE:
+        {
+            struct dynsec_file_event *file =
+                    dynsec_event_to_file(dynsec_event);
+
+            kfree(file->path);
+            file->path = NULL;
+            kfree(file);
+        }
+        break;
+
     default:
         break;
     }
@@ -313,6 +344,15 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_create_event *create =
                     dynsec_event_to_create(dynsec_event);
             return create->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_OPEN:
+    case DYNSEC_EVENT_TYPE_CLOSE:
+        {
+            struct dynsec_file_event *file =
+                    dynsec_event_to_file(dynsec_event);
+            return file->kmsg.hdr.payload;
         }
         break;
 
@@ -587,6 +627,56 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_file_event(const struct dynsec_file_event *file,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < file->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &file->kmsg, sizeof(file->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(file->kmsg);
+        p += sizeof(file->kmsg);
+    }
+
+    // TODO: Install fd If Desirable Feature
+
+    // Copy Path Being Created
+    if (file->path && file->kmsg.msg.file.path_offset &&
+        file->kmsg.msg.file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    file->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, file->path, file->kmsg.msg.file.path_size)) {
+            goto out_fail;
+        } else {
+            copied += file->kmsg.msg.file.path_size;
+            p += file->kmsg.msg.file.path_size;
+        }
+    }
+
+    if (file->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                file->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 // Copy to userspace
 ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
                                   char *__user p, size_t count)
@@ -640,6 +730,15 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_CLOSE:
+    case DYNSEC_EVENT_TYPE_OPEN:
+        {
+            const struct dynsec_file_event *file =
+                                    dynsec_event_to_file(dynsec_event);
+            return copy_file_event(file, p, count);
+        }
+        break;
+
     default:
         break;
     }
@@ -650,6 +749,7 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
 
 static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
 {
+    task_ctx->mnt_ns = get_mnt_ns_id(current);
     task_ctx->tid = current->pid;
     task_ctx->pid = current->tgid;
     if (current->real_parent) {
@@ -669,7 +769,6 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
     task_ctx->egid = current_egid();
 #endif
 
-    task_ctx->mnt_ns = get_mnt_ns_id(current);
     task_ctx->flags = current->flags;
 }
 
@@ -963,4 +1062,62 @@ bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
 #endif
 {
     return fill_in_inode_create(dynsec_event, dir, dentry, umode, mode);
+}
+
+
+extern bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
+                              gfp_t mode)
+{
+    struct dynsec_file_event *open = NULL;
+
+    if (dynsec_event &&
+        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_OPEN)) {
+        return false;
+    }
+
+    open = dynsec_event_to_file(dynsec_event);
+    open->kmsg.hdr.payload = sizeof(open->kmsg);
+
+    fill_in_task_ctx(&open->kmsg.msg.task);
+    open->kmsg.msg.f_mode = file->f_mode;
+    open->kmsg.msg.f_flags = file->f_flags;
+    fill_in_file_data(&open->kmsg.msg.file, &file->f_path);
+
+    open->path = dynsec_build_path(&file->f_path, &open->kmsg.msg.file.path_size, mode);
+
+    if (open->path && open->kmsg.msg.file.path_size) {
+        open->kmsg.msg.file.path_offset = open->kmsg.hdr.payload;
+        open->kmsg.hdr.payload += open->kmsg.msg.file.path_size;
+    }
+
+    return true;
+}
+
+extern bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
+                              gfp_t mode)
+{
+    struct dynsec_file_event *close = NULL;
+
+    if (dynsec_event &&
+        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_CLOSE)) {
+        return false;
+    }
+
+    close = dynsec_event_to_file(dynsec_event);
+    close->kmsg.hdr.payload = sizeof(close->kmsg);
+
+    fill_in_task_ctx(&close->kmsg.msg.task);
+    close->kmsg.msg.f_mode = file->f_mode;
+    close->kmsg.msg.f_flags = file->f_flags;
+    fill_in_file_data(&close->kmsg.msg.file, &file->f_path);
+
+    // May want to provide dentry path
+    close->path = dynsec_build_path(&file->f_path, &close->kmsg.msg.file.path_size, mode);
+
+    if (close->path && close->kmsg.msg.file.path_size) {
+        close->kmsg.msg.file.path_offset = close->kmsg.hdr.payload;
+        close->kmsg.hdr.payload += close->kmsg.msg.file.path_size;
+    }
+
+    return true;
 }

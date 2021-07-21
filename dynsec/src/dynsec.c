@@ -22,7 +22,9 @@
     DYNSEC_HOOK_TYPE_RENAME    |\
     DYNSEC_HOOK_TYPE_SETATTR   |\
     DYNSEC_HOOK_TYPE_CREATE    |\
-    DYNSEC_HOOK_TYPE_MKDIR)
+    DYNSEC_HOOK_TYPE_MKDIR     |\
+    DYNSEC_HOOK_TYPE_OPEN      |\
+    DYNSEC_HOOK_TYPE_CLOSE)
 
 
 static int __init dynsec_init(void)
