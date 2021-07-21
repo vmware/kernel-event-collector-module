@@ -149,7 +149,7 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
         return alloc_rename_event(event_type, hook_type, report_flags, mode);
 
     case DYNSEC_EVENT_TYPE_SETATTR:
-        return alloc_rename_event(event_type, hook_type, report_flags, mode);
+        return alloc_setattr_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
