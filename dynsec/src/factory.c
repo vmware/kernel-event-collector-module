@@ -128,6 +128,21 @@ static struct dynsec_event *alloc_rename_event(enum dynsec_event_type event_type
     return &rename->event;
 }
 
+static struct dynsec_event *alloc_setattr_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
+{
+    struct dynsec_setattr_event *setattr = kzalloc(sizeof(*setattr), mode);
+
+    if (!setattr) {
+        return NULL;
+    }
+
+    init_event_data(event_type, setattr, report_flags, hook_type);
+
+    return &setattr->event;
+}
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint32_t hook_type,

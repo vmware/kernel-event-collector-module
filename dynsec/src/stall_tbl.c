@@ -302,6 +302,8 @@ u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
 
     if (size) {
         stall_queue_wakeup(&tbl->queue);
+    } else {
+        free_dynsec_event(event);
     }
 
     return size;

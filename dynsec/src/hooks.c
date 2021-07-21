@@ -43,24 +43,20 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
     if (!event) {
         goto out;
     }
-    if (fill_in_bprm_set_creds(event, bprm,
-                               GFP_KERNEL)) {
-        if (event->report_flags & DYNSEC_REPORT_STALL) {
-            int response = 0;
-            int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+    if (!fill_in_bprm_set_creds(event, bprm, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
 
-            if (!rc) {
-                ret = response;
-            }
-        } else {
-            u32 size = enqueue_nonstall_event(stall_tbl, event);
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
-            if (!size) {
-                free_dynsec_event(event);
-            }
+        if (!rc) {
+            ret = response;
         }
     } else {
-        free_dynsec_event(event);
+        (void)enqueue_nonstall_event(stall_tbl, event);
     }
 
 out:
@@ -108,24 +104,20 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
         goto out;
     }
 
-    if (fill_in_inode_unlink(event, dir, dentry,
-                               GFP_KERNEL)) {
-        if (event->report_flags & DYNSEC_REPORT_STALL) {
-            int response = 0;
-            int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+    if (!fill_in_inode_unlink(event, dir, dentry, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
 
-            if (!rc) {
-                ret = response;
-            }
-        } else {
-            u32 size = enqueue_nonstall_event(stall_tbl, event);
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
-            if (!size) {
-                free_dynsec_event(event);
-            }
+        if (!rc) {
+            ret = response;
         }
     } else {
-        free_dynsec_event(event);
+        (void)enqueue_nonstall_event(stall_tbl, event);
     }
 
 out:
@@ -173,24 +165,20 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
         goto out;
     }
 
-    if (fill_in_inode_unlink(event, dir, dentry,
-                               GFP_KERNEL)) {
-        if (event->report_flags & DYNSEC_REPORT_STALL) {
-            int response = 0;
-            int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+    if (!fill_in_inode_unlink(event, dir, dentry, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
 
-            if (!rc) {
-                ret = response;
-            }
-        } else {
-            u32 size = enqueue_nonstall_event(stall_tbl, event);
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
-            if (!size) {
-                free_dynsec_event(event);
-            }
+        if (!rc) {
+            ret = response;
         }
     } else {
-        free_dynsec_event(event);
+        (void)enqueue_nonstall_event(stall_tbl, event);
     }
 
 out:
@@ -239,26 +227,23 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
         goto out;
     }
 
-    if (fill_in_inode_rename(event,
-                             old_dir, old_dentry,
-                             new_dir, new_dentry,
-                             GFP_KERNEL)) {
-        if (event->report_flags & DYNSEC_REPORT_STALL) {
-            int response = 0;
-            int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+    if (!fill_in_inode_rename(event,
+                              old_dir, old_dentry,
+                              new_dir, new_dentry,
+                              GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
 
-            if (!rc) {
-                ret = response;
-            }
-        } else {
-            u32 size = enqueue_nonstall_event(stall_tbl, event);
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
-            if (!size) {
-                free_dynsec_event(event);
-            }
+        if (!rc) {
+            ret = response;
         }
     } else {
-        free_dynsec_event(event);
+        (void)enqueue_nonstall_event(stall_tbl, event);
     }
 
 out:
@@ -354,24 +339,21 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SETATTR, DYNSEC_HOOK_TYPE_SETATTR,
                                report_flags, GFP_KERNEL);
 
-    if (fill_in_inode_setattr(event, attr_mask,
-                             dentry, attr, GFP_KERNEL)) {
-        if (event->report_flags & DYNSEC_REPORT_STALL) {
-            int response = 0;
-            int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+    if (!fill_in_inode_setattr(event, attr_mask,
+                               dentry, attr, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
 
-            if (!rc) {
-                ret = response;
-            }
-        } else {
-            u32 size = enqueue_nonstall_event(stall_tbl, event);
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
 
-            if (!size) {
-                free_dynsec_event(event);
-            }
+        if (!rc) {
+            ret = response;
         }
     } else {
-        free_dynsec_event(event);
+        (void)enqueue_nonstall_event(stall_tbl, event);
     }
 
 out:
@@ -409,7 +391,7 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry,
         report_flags |= DYNSEC_REPORT_STALL;
     }
 
-    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_EXEC, DYNSEC_HOOK_TYPE_EXEC,
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MKDIR, DYNSEC_HOOK_TYPE_MKDIR,
                                report_flags, GFP_KERNEL);
     free_dynsec_event(event);
 
@@ -559,7 +541,7 @@ out:
     return ret;
 }
 
-// Cannot Stall - Enable only for open events
+// Must Not Stall - Enable only for open events
 void dynsec_file_free(struct file *file)
 {
     struct dynsec_event *event = NULL;
@@ -644,7 +626,7 @@ out:
     return ret;
 }
 
-// Cannot Stall
+// Must Not Stall
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
 #if RHEL_MAJOR == 8 && RHEL_MINOR == 0
 int dynsec_task_kill(struct task_struct *p, struct siginfo *info,

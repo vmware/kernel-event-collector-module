@@ -175,15 +175,15 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
     printf("SETATTR: tid:%u mask:%08x mnt_ns:%u", setattr->hdr.tid,
            setattr->msg.attr_mask, setattr->msg.task.mnt_ns);
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_MODE) {
-        printf("chmod umode[%#04x -> %#04x", setattr->msg.file.umode,
+        printf(" chmod umode[%#04x -> %#04x", setattr->msg.file.umode,
                setattr->msg.attr_umode);
     }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_UID) {
-        printf("chown uid[%u -> %u", setattr->msg.file.uid,
+        printf(" chown uid[%u -> %u", setattr->msg.file.uid,
                setattr->msg.attr_uid);
     }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_GID) {
-        printf("chown gid[%u -> %u", setattr->msg.file.gid,
+        printf(" chown gid[%u -> %u", setattr->msg.file.gid,
                setattr->msg.attr_gid);
     }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_SIZE) {
