@@ -307,12 +307,22 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
         }
     }
     if (attr_mask & ATTR_UID) {
-        if (uid_eq(attr->ia_uid, dentry->d_inode->i_uid)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+        if (uid_eq(attr->ia_uid, dentry->d_inode->i_uid))
+#else
+        if (attr->ia_uid == dentry->d_inode->i_uid)
+#endif
+        {
             attr_mask &= ~(ATTR_UID);
         }
     }
     if (attr_mask & ATTR_GID) {
-        if (gid_eq(attr->ia_gid, dentry->d_inode->i_gid)) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+        if (gid_eq(attr->ia_gid, dentry->d_inode->i_gid))
+#else
+        if (attr->ia_gid == dentry->d_inode->i_gid)
+#endif
+        {
             attr_mask &= ~(ATTR_GID);
         }
     }

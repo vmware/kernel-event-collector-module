@@ -11,7 +11,6 @@
 #include <linux/cred.h>
 #include <linux/fs.h>
 #include <linux/dcache.h>
-#include <linux/uidgid.h>
 
 #include "dynsec.h"
 #include "factory.h"
