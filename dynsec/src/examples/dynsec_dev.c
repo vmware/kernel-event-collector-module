@@ -161,6 +161,47 @@ void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
     );
 }
 
+void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *start = (const char *)setattr;
+
+    if (setattr->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &setattr->hdr, response);
+
+    if (quiet) return;
+
+    printf("SETATTR: tid:%u mask:%08x mnt_ns:%u", setattr->hdr.tid,
+           setattr->msg.attr_mask, setattr->msg.task.mnt_ns);
+    if (setattr->msg.attr_mask & DYNSEC_SETATTR_MODE) {
+        printf("chmod umode[%#04x -> %#04x", setattr->msg.file.umode,
+               setattr->msg.attr_umode);
+    }
+    if (setattr->msg.attr_mask & DYNSEC_SETATTR_UID) {
+        printf("chown uid[%u -> %u", setattr->msg.file.uid,
+               setattr->msg.attr_uid);
+    }
+    if (setattr->msg.attr_mask & DYNSEC_SETATTR_GID) {
+        printf("chown gid[%u -> %u", setattr->msg.file.gid,
+               setattr->msg.attr_gid);
+    }
+    if (setattr->msg.attr_mask & DYNSEC_SETATTR_SIZE) {
+        const char *size_chg = "trunc";
+        if (setattr->msg.attr_size > setattr->msg.file.size)
+            size_chg = "falloc";
+        printf(" %s[%llu -> %llu how:%s]", size_chg,
+               setattr->msg.file.size, setattr->msg.attr_size,
+               (setattr->msg.attr_mask & DYNSEC_SETATTR_OPEN) ?
+                    "open(O_CREATE)" : "truncate()");
+    }
+    if (setattr->msg.file.path_offset) {
+        path = start + setattr->msg.file.path_offset;
+    }
+    printf(" ino:%llu dev:%#x %s\n", setattr->msg.file.ino,
+           setattr->msg.file.dev, path);
+}
+
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -177,6 +218,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
     case DYNSEC_EVENT_TYPE_RENAME:
         print_rename_event(fd, (struct dynsec_rename_umsg *)hdr);
+    break;
+
+    case DYNSEC_EVENT_TYPE_SETATTR:
+        print_setattr_event(fd, (struct dynsec_setattr_umsg *)hdr);
     break;
 
     default:

@@ -19,7 +19,8 @@
     DYNSEC_HOOK_TYPE_EXEC      |\
     DYNSEC_HOOK_TYPE_UNLINK    |\
     DYNSEC_HOOK_TYPE_RMDIR     |\
-    DYNSEC_HOOK_TYPE_RENAME)
+    DYNSEC_HOOK_TYPE_RENAME    |\
+    DYNSEC_HOOK_TYPE_SETATTR)
 
 
 static int __init dynsec_init(void)

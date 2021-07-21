@@ -31,6 +31,13 @@
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
 #define DYNSEC_RESPONSE_EPERM 0x00000001
 
+// For Setattr Event
+#define DYNSEC_SETATTR_MODE     (1 << 0)
+#define DYNSEC_SETATTR_UID      (1 << 1)
+#define DYNSEC_SETATTR_GID      (1 << 2)
+#define DYNSEC_SETATTR_SIZE     (1 << 3)
+#define DYNSEC_SETATTR_FILE     (1 << 13)
+#define DYNSEC_SETATTR_OPEN     (1 << 15)
 
 #pragma pack(push, 1)
 // Event Message Types
@@ -43,6 +50,7 @@ enum dynsec_event_type {
     DYNSEC_EVENT_TYPE_CREATE,
     DYNSEC_EVENT_TYPE_SETATTR,
     DYNSEC_EVENT_TYPE_OPEN,
+    DYNSEC_EVENT_TYPE_CLOSE,
     DYNSEC_EVENT_TYPE_LINK,
     DYNSEC_EVENT_TYPE_SYMLINK,
     DYNSEC_EVENT_TYPE_SIGNAL,
@@ -90,6 +98,7 @@ struct dynsec_file {
     uint16_t umode;
     uint32_t uid;
     uint32_t gid;
+    uint64_t size;
     uint64_t sb_magic;
     uint64_t parent_ino;
     uint32_t parent_dev;
@@ -132,5 +141,22 @@ struct dynsec_rename_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_rename_msg msg;
 };
+
+// Core Setattr Content
+struct dynsec_setattr_msg {
+    struct dynsec_task_ctx task;
+    uint32_t attr_mask;
+    uint16_t attr_umode;
+    uint32_t attr_uid;
+    uint32_t attr_gid;
+    uint64_t attr_size;
+    struct dynsec_file file;
+};
+
+struct dynsec_setattr_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_setattr_msg msg;
+};
+
 #pragma pack(pop)
 

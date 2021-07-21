@@ -82,6 +82,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     BUILD_BUG_ON(DYNSEC_LSM_inode_rename   != DYNSEC_HOOK_TYPE_RENAME);
     BUILD_BUG_ON(DYNSEC_LSM_inode_unlink   != DYNSEC_HOOK_TYPE_UNLINK);
     BUILD_BUG_ON(DYNSEC_LSM_inode_rmdir    != DYNSEC_HOOK_TYPE_RMDIR);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_setattr  != DYNSEC_HOOK_TYPE_SETATTR);
 
     memset(&lsm_syms, 0, sizeof(lsm_syms));
 
@@ -141,6 +142,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     CB_LSM_SETUP_HOOK(inode_unlink);   // security_inode_unlink
     CB_LSM_SETUP_HOOK(inode_rmdir);   // security_inode_rmdir
     CB_LSM_SETUP_HOOK(inode_rename);   // security_inode_rename
+    CB_LSM_SETUP_HOOK(inode_setattr);   // security_inode_setattr
 
 #undef CB_LSM_SETUP_HOOK
 

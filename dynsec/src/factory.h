@@ -12,22 +12,19 @@ extern uint32_t debug_disable_stall_mask;
 struct dynsec_exec_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_exec_msg msg;
-    char *path;
 };
-
 struct dynsec_unlink_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_unlink_msg msg;
-    char *path;
 };
-
 struct dynsec_rename_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_rename_msg msg;
-    char *old_path;
-    char *new_path;
 };
-
+struct dynsec_setattr_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_setattr_msg msg;
+};
 
 // Base struct in queue
 struct dynsec_event {
@@ -42,16 +39,26 @@ struct dynsec_event {
 struct dynsec_exec_event {
     struct dynsec_event event;
     struct dynsec_exec_kmsg kmsg;
+    char *path;
 };
 
 struct dynsec_unlink_event {
     struct dynsec_event event;
     struct dynsec_unlink_kmsg kmsg;
+    char *path;
 };
 
 struct dynsec_rename_event {
     struct dynsec_event event;
     struct dynsec_rename_kmsg kmsg;
+    char *old_path;
+    char *new_path;
+};
+
+struct dynsec_setattr_event {
+    struct dynsec_event event;
+    struct dynsec_setattr_kmsg kmsg;
+    char *path;
 };
 #pragma pack(pop)
 
@@ -74,6 +81,12 @@ dynsec_event_to_rename(const struct dynsec_event *dynsec_event)
     return container_of(dynsec_event, struct dynsec_rename_event, event);
 }
 
+static inline struct dynsec_setattr_event *
+dynsec_event_to_setattr(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_setattr_event, event);
+}
+
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
 
 extern struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
@@ -88,13 +101,17 @@ extern ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event
 
 // Event fillers
 #include <linux/binfmts.h>
-extern bool fill_in_bprm_set_creds(struct dynsec_exec_event *exec_event,
+extern bool fill_in_bprm_set_creds(struct dynsec_event *dynsec_event,
                                    const struct linux_binprm *bprm, gfp_t mode);
 
-extern bool fill_in_inode_unlink(struct dynsec_unlink_event *unlink_event,
+extern bool fill_in_inode_unlink(struct dynsec_event *dynsec_event,
                                  struct inode *dir, struct dentry *dentry, gfp_t mode);
 
-extern bool fill_in_inode_rename(struct dynsec_rename_event *rename_event,
+extern bool fill_in_inode_rename(struct dynsec_event *dynsec_event,
                                  struct inode *old_dir, struct dentry *old_dentry,
                                  struct inode *new_dir, struct dentry *new_dentry,
                                  gfp_t mode);
+
+extern bool fill_in_inode_setattr(struct dynsec_event *dynsec_event,
+                           unsigned int attr_mask, struct dentry *dentry,
+                           struct iattr *attr, gfp_t mode);
