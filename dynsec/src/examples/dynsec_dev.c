@@ -122,7 +122,7 @@ void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
 
     if (quiet) return;
 
-    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#04x magic:%#lx uid:%u "
+    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#o magic:%#lx uid:%u "
         "parent_ino:%llu '%s'\n", ev_str,
         unlink_msg->hdr.tid, unlink_msg->msg.file.ino, unlink_msg->msg.file.dev,
         unlink_msg->msg.task.mnt_ns, unlink_msg->msg.file.umode, unlink_msg->msg.file.sb_magic,
@@ -149,7 +149,7 @@ void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
     if (quiet) return;
 
     printf("RENAME: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
-        "'%s'[%llu %#04x %llu]->'%s'[%llu %#04x %llu]\n",
+        "'%s'[%llu %#o %llu]->'%s'[%llu %#o %llu]\n",
         rename_msg->hdr.tid, rename_msg->msg.old_file.dev, rename_msg->msg.task.mnt_ns,
         rename_msg->msg.old_file.sb_magic,
         rename_msg->msg.task.uid,
@@ -202,6 +202,33 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
            setattr->msg.file.dev, path);
 }
 
+void print_create_event(int fd, struct dynsec_create_umsg *create)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *ev_str = "CREATE";
+    const char *start = (const char *)create;
+
+    if (create->hdr.event_type == DYNSEC_EVENT_TYPE_MKDIR)
+        ev_str = "MDKIR";
+
+    if (create->msg.file.path_offset) {
+        path = start + create->msg.file.path_offset;
+    }
+
+    if (create->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &create->hdr, response);
+
+    if (quiet) return;
+
+    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#o magic:%#lx uid:%u "
+        "parent_ino:%llu '%s'\n", ev_str,
+        create->hdr.tid, create->msg.file.ino, create->msg.file.dev,
+        create->msg.task.mnt_ns, create->msg.file.umode,
+        create->msg.file.sb_magic,
+        create->msg.task.uid, create->msg.file.parent_ino, path);
+}
+
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -222,6 +249,11 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
     case DYNSEC_EVENT_TYPE_SETATTR:
         print_setattr_event(fd, (struct dynsec_setattr_umsg *)hdr);
+    break;
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        print_create_event(fd, (struct dynsec_create_umsg *)hdr);
     break;
 
     default:

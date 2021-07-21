@@ -20,7 +20,9 @@
     DYNSEC_HOOK_TYPE_UNLINK    |\
     DYNSEC_HOOK_TYPE_RMDIR     |\
     DYNSEC_HOOK_TYPE_RENAME    |\
-    DYNSEC_HOOK_TYPE_SETATTR)
+    DYNSEC_HOOK_TYPE_SETATTR   |\
+    DYNSEC_HOOK_TYPE_CREATE    |\
+    DYNSEC_HOOK_TYPE_MKDIR)
 
 
 static int __init dynsec_init(void)

@@ -158,5 +158,15 @@ struct dynsec_setattr_umsg {
     struct dynsec_setattr_msg msg;
 };
 
+// Core Create/Mkdir Content
+struct dynsec_create_msg {
+    struct dynsec_task_ctx task;
+    struct dynsec_file file;
+};
+
+struct dynsec_create_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_create_msg msg;
+};
 #pragma pack(pop)
 

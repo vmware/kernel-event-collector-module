@@ -143,6 +143,21 @@ static struct dynsec_event *alloc_setattr_event(enum dynsec_event_type event_typ
     return &setattr->event;
 }
 
+static struct dynsec_event *alloc_create_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
+{
+    struct dynsec_create_event *create = kzalloc(sizeof(*create), mode);
+
+    if (!create) {
+        return NULL;
+    }
+
+    init_event_data(event_type, create, report_flags, hook_type);
+
+    return &create->event;
+}
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint32_t hook_type,
@@ -165,6 +180,10 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
 
     case DYNSEC_EVENT_TYPE_SETATTR:
         return alloc_setattr_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        return alloc_create_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -218,14 +237,27 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         break;
 
     case DYNSEC_EVENT_TYPE_SETATTR:
-    {
-        struct dynsec_setattr_event *setattr =
-                dynsec_event_to_setattr(dynsec_event);
+        {
+            struct dynsec_setattr_event *setattr =
+                    dynsec_event_to_setattr(dynsec_event);
 
-        kfree(setattr->path);
-        setattr->path = NULL;
-        kfree(setattr);
-    }
+            kfree(setattr->path);
+            setattr->path = NULL;
+            kfree(setattr);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        {
+            struct dynsec_create_event *create =
+                    dynsec_event_to_create(dynsec_event);
+
+            kfree(create->path);
+            create->path = NULL;
+            kfree(create);
+        }
+        break;
 
     default:
         break;
@@ -272,6 +304,15 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_setattr_event *setattr =
                     dynsec_event_to_setattr(dynsec_event);
             return setattr->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        {
+            struct dynsec_create_event *create =
+                    dynsec_event_to_create(dynsec_event);
+            return create->kmsg.hdr.payload;
         }
         break;
 
@@ -366,6 +407,7 @@ static ssize_t copy_unlink_event(const struct dynsec_unlink_event *unlink,
             goto out_fail;
         }  else {
             copied += unlink->kmsg.msg.file.path_size;
+            p += unlink->kmsg.msg.file.path_size;
         }
     }
 
@@ -447,6 +489,55 @@ static ssize_t copy_rename_event(const struct dynsec_rename_event *rename,
 out_fail:
     return -EFAULT;
 }
+
+static ssize_t copy_create_event(const struct dynsec_create_event *create,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < create->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &create->kmsg, sizeof(create->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(create->kmsg);
+        p += sizeof(create->kmsg);
+    }
+
+    // Copy Path Being Created
+    if (create->path && create->kmsg.msg.file.path_offset &&
+        create->kmsg.msg.file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    create->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, create->path, create->kmsg.msg.file.path_size)) {
+            goto out_fail;
+        }  else {
+            copied += create->kmsg.msg.file.path_size;
+            p += create->kmsg.msg.file.path_size;
+        }
+    }
+
+    if (create->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                create->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 
 static ssize_t copy_setattr_event(const struct dynsec_setattr_event *setattr,
                                  char *__user buf, size_t count)
@@ -537,6 +628,15 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
             const struct dynsec_setattr_event *setattr =
                                     dynsec_event_to_setattr(dynsec_event);
             return copy_setattr_event(setattr, p, count);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        {
+            const struct dynsec_create_event *create =
+                                    dynsec_event_to_create(dynsec_event);
+            return copy_create_event(create, p, count);
         }
         break;
 
@@ -807,4 +907,60 @@ bool fill_in_inode_setattr(struct dynsec_event *dynsec_event,
     setattr->kmsg.msg.attr_mask = attr_mask;
 
     return true;
+}
+
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+bool fill_in_inode_create(struct dynsec_event *dynsec_event,
+                          struct inode *dir, struct dentry *dentry,
+                          umode_t umode, gfp_t mode)
+#else
+bool fill_in_inode_create(struct dynsec_event *dynsec_event,
+                          struct inode *dir, struct dentry *dentry,
+                          int umode, gfp_t mode)
+#endif
+{
+    struct dynsec_create_event *create = NULL;
+
+    if (dynsec_event &&
+        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE ||
+          dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR)) {
+        return false;
+    }
+
+    create = dynsec_event_to_create(dynsec_event);
+
+    create->kmsg.hdr.payload = sizeof(create->kmsg);
+    fill_in_task_ctx(&create->kmsg.msg.task);
+
+    fill_in_dentry_data(&create->kmsg.msg.file, dentry);
+    fill_in_parent_data(&create->kmsg.msg.file, dir);
+
+    create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
+    if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
+        create->kmsg.msg.file.umode |= S_IFDIR;
+    }
+
+    create->path = dynsec_build_dentry(dentry,
+                                &create->kmsg.msg.file.path_size,
+                                mode);
+    if (create->path && create->kmsg.msg.file.path_size) {
+        create->kmsg.msg.file.path_offset = create->kmsg.hdr.payload;
+        create->kmsg.hdr.payload += create->kmsg.msg.file.path_size;
+    }
+
+    return true;
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
+                         struct inode *dir, struct dentry *dentry,
+                         umode_t umode, gfp_t mode)
+#else
+bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
+                         struct inode *dir, struct dentry *dentry,
+                         int umode, gfp_t mode)
+#endif
+{
+    return fill_in_inode_create(dynsec_event, dir, dentry, umode, mode);
 }

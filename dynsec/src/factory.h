@@ -4,6 +4,7 @@
 #pragma once
 
 #include "dynsec.h"
+#include <linux/version.h>
 
 extern uint32_t debug_disable_stall_mask;
 
@@ -24,6 +25,10 @@ struct dynsec_rename_kmsg {
 struct dynsec_setattr_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_setattr_msg msg;
+};
+struct dynsec_create_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_create_msg msg;
 };
 
 // Base struct in queue
@@ -60,6 +65,12 @@ struct dynsec_setattr_event {
     struct dynsec_setattr_kmsg kmsg;
     char *path;
 };
+
+struct dynsec_create_event {
+    struct dynsec_event event;
+    struct dynsec_create_kmsg kmsg;
+    char *path;
+};
 #pragma pack(pop)
 
 // Exec Event container_of helper
@@ -85,6 +96,12 @@ static inline struct dynsec_setattr_event *
 dynsec_event_to_setattr(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_setattr_event, event);
+}
+
+static inline struct dynsec_create_event *
+dynsec_event_to_create(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_create_event, event);
 }
 
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
@@ -115,3 +132,23 @@ extern bool fill_in_inode_rename(struct dynsec_event *dynsec_event,
 extern bool fill_in_inode_setattr(struct dynsec_event *dynsec_event,
                            unsigned int attr_mask, struct dentry *dentry,
                            struct iattr *attr, gfp_t mode);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+extern bool fill_in_inode_create(struct dynsec_event *dynsec_event,
+                                 struct inode *dir, struct dentry *dentry,
+                                 umode_t umode, gfp_t mode);
+#else
+extern bool fill_in_inode_create(struct dynsec_event *dynsec_event,
+                                 struct inode *dir, struct dentry *dentry,
+                                 int umode, gfp_t mode);
+#endif
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+extern bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
+                                struct inode *dir, struct dentry *dentry,
+                                umode_t umode, gfp_t mode);
+#else
+extern bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
+                                struct inode *dir, struct dentry *dentry,
+                                int umode, gfp_t mode);
+#endif
