@@ -44,9 +44,11 @@ struct mnt_namespace {
 static inline unsigned int get_mnt_ns_id(const struct task_struct *task)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-    return task->nsproxy->mnt_ns ? task->nsproxy->mnt_ns->ns.inum : 0;
+    return (task->nsproxy && task->nsproxy->mnt_ns) ? 
+            task->nsproxy->mnt_ns->ns.inum : 0;
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    return task->nsproxy->mnt_ns ? task->nsproxy->mnt_ns->proc_inum : 0;
+    return (task->nsproxy && task->nsproxy->mnt_ns) ?
+            task->nsproxy->mnt_ns->proc_inum : 0;
 #else
     return 0;
 #endif
@@ -56,6 +58,8 @@ static inline bool is_init_mnt_ns(const struct task_struct *task)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     return &init_task == task ||
+           !init_task.nsproxy ||
+           !task->nsproxy ||
            !task->nsproxy->mnt_ns ||
            init_task.nsproxy->mnt_ns == task->nsproxy->mnt_ns;
 #else
