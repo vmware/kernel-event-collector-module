@@ -123,8 +123,7 @@ enum event_type {
 	EVENT_NET_CONNECT_DNS_RESPONSE,
 	EVENT_NET_CONNECT_WEB_PROXY,
 	EVENT_FILE_DELETE,
-	EVENT_FILE_CLOSE,
-	EVENT_FILE_OPEN
+	EVENT_FILE_CLOSE
 };
 
 #define DNS_RESP_PORT_NUM 53
@@ -720,7 +719,49 @@ static void __file_tracking_delete(u64 pid, u64 device, u64 inode)
 
 // Older kernels do not support the struct fields so allow for fallback
 BPF_LRU(file_write_cache, u64, FALLBACK_FIELD_TYPE(struct file_data_cache, u32));
-BPF_LRU(file_creat_cache, u64, u32);
+
+static inline void __track_write_entry(
+    struct file      *file,
+    struct file_data *data)
+{
+	if (!file || !data) {
+		return;
+	}
+
+	u64 file_cache_key = (u64)file;
+
+	void *cachep = file_write_cache.lookup(&file_cache_key);
+	if (cachep) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+		struct file_data_cache cache_data = *((struct file_data_cache *)cachep);
+		pid_t pid = cache_data.pid;
+		cache_data.pid = data->header.pid;
+#else
+		u32 cache_data = *(u32 *)cachep;
+		pid_t pid = cache_data;
+		cache_data = data->header.pid;
+#endif
+
+		// if we really care about that multiple tasks
+		// these are likely threads or less likely inherited from a fork
+		if (pid == data->header.pid) {
+			return;
+		}
+
+		file_write_cache.update(&file_cache_key, &cache_data);
+	} else {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+		struct file_data_cache cache_data = {
+			.pid = data->header.pid,
+			.device = data->device,
+			.inode = data->inode
+		};
+#else
+		u32 cache_data = data->header.pid;
+#endif
+		file_write_cache.insert(&file_cache_key, &cache_data);
+	}
+}
 
 // Only need this hook for kernels without lru_hash
 int on_security_file_free(struct pt_regs *ctx, struct file *file)
@@ -750,7 +791,6 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 	}
 
 	file_write_cache.delete(&file_cache_key);
-	file_creat_cache.delete(&file_cache_key);
 	return 0;
 }
 
@@ -789,94 +829,10 @@ out:
 	return 0;
 }
 
-static inline int __trace_write_entry(struct pt_regs *ctx, struct file *file,
-					  char __user *buf, size_t count)
-{
-	DECLARE_FILE_EVENT(data);
-	struct super_block *sb = NULL;
-	struct inode *inode = NULL;
-	int mode;
-
-	if (!file) {
-		goto out;
-	}
-
-	sb = _sb_from_file(file);
-	if (!sb) {
-		goto out;
-	}
-
-	if (__is_special_filesystem(sb)) {
-		goto out;
-	}
-
-	bpf_probe_read(&inode, sizeof(inode), &(file->f_inode));
-	if (!inode) {
-		goto out;
-	}
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-	bpf_probe_read(&mode, sizeof(mode), &(inode->i_mode));
-	if (!S_ISREG(mode)) {
-		goto out;
-	}
+// This is not available on older kernels.  So it will mean that we can not detect file creates
+#ifndef FMODE_CREATED
+#define FMODE_CREATED 0
 #endif
-	__init_header(EVENT_FILE_WRITE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-	FILE_DATA(&data)->device = __get_device_from_file(file);
-	FILE_DATA(&data)->inode = __get_inode_from_file(file);
-
-	u64 file_cache_key = (u64)file;
-
-	void *cachep = file_write_cache.lookup(&file_cache_key);
-	if (cachep) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-		struct file_data_cache cache_data = *((struct file_data_cache *)cachep);
-		pid_t pid = cache_data.pid;
-		cache_data.pid = GENERIC_DATA(&data)->header.pid;
-#else
-		u32 cache_data = *(u32 *)cachep;
-		pid_t pid = cache_data;
-		cache_data = GENERIC_DATA(&data)->header.pid;
-#endif
-
-		// if we really care about that multiple tasks
-		// these are likely threads or less likely inherited from a fork
-		if (pid == GENERIC_DATA(&data)->header.pid) {
-			goto out;
-		}
-
-		file_write_cache.update(&file_cache_key, &cache_data);
-		goto out;
-	} else {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-		struct file_data_cache cache_data = { .pid = GENERIC_DATA(&data)->header.pid,
-						.device = FILE_DATA(&data)->device,
-						.inode = FILE_DATA(&data)->inode };
-#else
-		u32 cache_data = data->header.pid;
-#endif
-		file_write_cache.insert(&file_cache_key, &cache_data);
-	}
-
-	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
-
-	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(&data));
-	send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
-out:
-	return 0;
-}
-
-int trace_write_entry(struct pt_regs *ctx, struct file *file, char __user *buf,
-			  size_t count)
-{
-	return (__trace_write_entry(ctx, file, buf, count));
-}
-
-// This is mainly for kernel > 5.8.0
-int trace_write_kentry(struct pt_regs *ctx, struct file *file, const void *buf,
-			   size_t count)
-{
-	return (__trace_write_entry(ctx, file, (char *)buf, count));
-}
 
 // This hook may not be very accurate but at least tells us the intent
 // to create the file if needed. So this will likely be written to next.
@@ -891,17 +847,6 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 		goto out;
 	}
 
-	u8 type;
-	if ((file->f_flags & (O_CREAT | O_TRUNC))) {
-		type = EVENT_FILE_CREATE;
-	} else if (file->f_flags & FMODE_EXEC) {
-		type = EVENT_PROCESS_EXEC_PATH;
-	} else if (!(file->f_flags & (O_RDWR | O_WRONLY))) {
-		type = EVENT_FILE_OPEN;
-	} else {
-		goto out;
-	}
-
 	sb = _sb_from_file(file);
 	if (!sb) {
 		goto out;
@@ -922,37 +867,29 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	}
 #endif
 
+	u8 type;
+	if (file->f_flags & FMODE_EXEC) {
+		type = EVENT_PROCESS_EXEC_PATH;
+	} else if ((file->f_mode & FMODE_CREATED)) {
+		type = EVENT_FILE_CREATE;
+	} else if (file->f_flags & (O_RDWR | O_WRONLY)) {
+		type = EVENT_FILE_WRITE;
+	} else {
+        type = EVENT_FILE_READ;
+	}
+
 	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 	FILE_DATA(&data)->device = __get_device_from_file(file);
 	FILE_DATA(&data)->inode = __get_inode_from_file(file);
+	FILE_DATA(&data)->flags = file->f_flags;
+	FILE_DATA(&data)->prot = file->f_mode;
 
-	u32 *cachep;
-	u64 file_cache_key = (u64)file;
-
-	struct file_data_cache key = { .device = FILE_DATA(&data)->device, .inode = FILE_DATA(&data)->inode };
-
-	// If this is a create event and is already tracked, skip the event.
-	// Otherwise add it to the tracking table.
-	// Skip this behavior if this is an open event.
-	u32 *file_exists = file_map.lookup(&key);
-	if (type == EVENT_FILE_CREATE) {
-		if (file_exists) {
-			goto out;
-		}
-
-		file_map.update(&key, &GENERIC_DATA(&data)->header.pid);
-		cachep = file_creat_cache.lookup(&file_cache_key);
-		if (cachep) {
-			if (*cachep == GENERIC_DATA(&data)->header.pid) {
-				goto out;
-			}
-			file_creat_cache.update(&file_cache_key, &GENERIC_DATA(&data)->header.pid);
-			goto out;
-		} else {
-			file_creat_cache.insert(&file_cache_key, &GENERIC_DATA(&data)->header.pid);
-		}
+	if (type == EVENT_FILE_WRITE)
+	{
+		// This allows us to send the last-write event on file close
+		__track_write_entry(file, FILE_DATA(&data));
 	}
- 
+
 	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
 
 	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(&data));
