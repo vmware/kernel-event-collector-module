@@ -434,6 +434,10 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 
 static u8 __write_fname(struct path_data *data, const void *ptr)
 {
+    if (!ptr)
+    {
+        return 0;
+    }
 	// Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
 	//  substituted by bpf_probe_read.  The return value for these two cases mean something
 	//  different, but that is OK for our logic.
@@ -1179,9 +1183,11 @@ static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 }
 #endif /* CACHE_UDP */
 
-int on_security_task_free(struct pt_regs *ctx, struct task_struct *task)
+int on_do_exit(struct pt_regs *ctx, long code)
 {
 	struct data data = {};
+	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+
 	if (!task) {
 		goto out;
 	}
@@ -1698,59 +1704,4 @@ int trace_tcp_sendmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg)
 //	}
 //
 //	return 0;
-}
-
-struct sched_process_exit_args {
-	__u64 pad;
-	char comm[16];
-	pid_t pid;
-	int prio;
-};
-
-int on_sched_process_exit(struct sched_process_exit_args *arg)
-{
-	struct data data = {};
-
-	if (!arg) {
-		goto out;
-	}
-
-	__init_header(EVENT_PROCESS_EXIT, PP_NO_EXTRA_DATA, &data.header);
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-	// only works on newer kernels
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-	unsigned int flags = 0;
-
-	bpf_probe_read(&flags, sizeof(flags), &task->flags);
-	if (flags & PF_KTHREAD)
-		goto out;
-#else
-	// only used in older versions
-	data.header.pid = arg->pid;
-	data.header.tid = arg->pid;
-#endif
-
-	if (arg->pid != data.header.pid) {
-		data.header.pid = arg->pid;
-		data.header.tid = arg->pid;
-	} else if (data.header.pid != data.header.tid) {
-		goto out;
-	}
-
-	send_event((struct pt_regs *)arg, &data, sizeof(struct data));
-
-
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
-	last_parent.delete(&data.header.pid);
-#ifdef CACHE_UDP
-	// Remove burst cache entries
-	//  We only need to do this for older kernels that do not have an LRU
-	ip_cache.delete(&data.header.pid);
-	ip6_cache.delete(&data.header.pid);
-#endif /* CACHE_UDP */
-#endif
-out:
-	return 0;
 }

@@ -97,14 +97,7 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
     // Process Event Hooks
     BPF_ENTRY_HOOK("wake_up_new_task",   "on_wake_up_new_task"),
 
-    // we have 2 exit hooks because depending on how a process
-    // exits it might not call one or the other. it's also possible
-    // it dosent call either. we remove duplicates in userspace
-    BPF_ENTRY_HOOK("security_task_free", "on_security_task_free"),
-    BPF_OPTIONAL_TRACEPOINT("sched:sched_process_exit", "on_sched_process_exit"),
-
-    // we have one more exit hook because older kernels dont do tracepoints
-    BPF_ALTERNATE_ENTRY_HOOK("sched:sched_process_exit", "profile_task_exit", "on_security_task_free"),
+    BPF_ENTRY_HOOK("do_exit", "on_do_exit"),
 
     // Exec Syscall Hooks
     BPF_LOOKUP_ENTRY_HOOK ("execve",   "syscall__on_sys_execve"),
