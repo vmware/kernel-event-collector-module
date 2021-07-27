@@ -235,21 +235,29 @@ namespace bpf_probe {
         }
 
         static Event Dns(
-            uint64_t     event_time,
-            uint32_t     pid,
-            uint32_t     parent_pid)
+            uint64_t       event_time,
+            uint32_t       pid,
+            uint32_t       parent_pid,
+            uint8_t        state,
+            std::string    &dns,
+            uint32_t       name_len)
         {
-            Event event(new char[sizeof(struct path_data)]);
+            if (dns.size() > DNS_SEGMENT_LEN)
+            {
+                return nullptr;
+            }
+
+            Event event(new char[sizeof(struct dns_data)]);
 
             if (event)
             {
                 auto data = static_cast<struct dns_data *>((void*)event.get());
                 InitHeader(
-                    data->header, EVENT_NET_CONNECT_DNS_RESPONSE, PP_NO_EXTRA_DATA,
+                    data->header, EVENT_NET_CONNECT_DNS_RESPONSE, state,
                     event_time, pid, parent_pid);
 
-                // TODO
-                data->dns[0] = 0;
+                memcpy(data->dns, dns.c_str(), dns.size());
+                data->name_len = name_len;
             }
             return event;
         }

@@ -204,7 +204,6 @@ struct net_data {
 struct dns_data {
 	struct data_header header;
 
-	u16 dns_flag;
 	char dns[DNS_SEGMENT_LEN];
 	u32 name_len;
 };
@@ -1474,7 +1473,7 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 	}
 
 	struct dns_data data = {};
-	__init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_NO_EXTRA_DATA, &data.header);
+	__init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_ENTRY_POINT, &data.header);
 
 	// Send DNS info if port is DNS
 	struct msghdr *msgp = *msgpp;
@@ -1486,29 +1485,25 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 	u16 len = ret;
 	data.name_len = ret;
 
-	if (DNS_RESP_PORT_NUM == ntohs(dport)) {
+    if (DNS_RESP_PORT_NUM == ntohs(dport)) {
 #pragma unroll
-		for (int i = 1; i <= (DNS_RESP_MAXSIZE / DNS_SEGMENT_LEN) + 1;
-			 ++i) {
-			if (len > 0 && len < DNS_RESP_MAXSIZE) {
-				data.dns_flag = 0;
-				bpf_probe_read(&data.dns, DNS_SEGMENT_LEN,
-						   dns);
-				if (i == 1)
-					data.dns_flag =
-						DNS_SEGMENT_FLAGS_START;
-				if (len <= 40)
-					data.dns_flag |=
-						DNS_SEGMENT_FLAGS_END;
+        for (int i = 1; i <= (DNS_RESP_MAXSIZE / DNS_SEGMENT_LEN) + 1;
+             ++i) {
+            if (len > 0 && len < DNS_RESP_MAXSIZE) {
+                bpf_probe_read(&data.dns, DNS_SEGMENT_LEN, dns);
 
-				send_event(ctx, &data, sizeof(struct dns_data));
-				len = len - DNS_SEGMENT_LEN;
-				dns = dns + DNS_SEGMENT_LEN;
-			} else {
-				break;
-			}
-		}
-	}
+                if (i > 1) {
+                    data.header.state = PP_APPEND;
+                }
+
+                send_event(ctx, &data, sizeof(struct dns_data));
+                len = len - DNS_SEGMENT_LEN;
+                dns = dns + DNS_SEGMENT_LEN;
+            } else {
+                break;
+            }
+        }
+    }
 
 	currsock2.delete(&id);
 	return 0;

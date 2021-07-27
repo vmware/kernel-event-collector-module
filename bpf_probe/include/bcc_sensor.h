@@ -110,8 +110,7 @@ namespace bpf_probe {
     {
         struct data_header header;
 
-        unsigned short dns_flag;
         char dns[DNS_SEGMENT_LEN];
-        unsigned int name_len;
+        uint32_t name_len;
     };
 }}
