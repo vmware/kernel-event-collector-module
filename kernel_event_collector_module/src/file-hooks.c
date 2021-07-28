@@ -256,7 +256,7 @@ file_data_t *__ec_get_file_data_from_name_at(ProcessContext *context, int dfd, c
     {
         char *pathname = NULL;
         struct path path = {};
-        int error = user_path_at(AT_FDCWD, filename, LOOKUP_FOLLOW, &path);
+        int error = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path);
 
         TRY(!error);
         __ec_file_data_init_from_path(context, file_data, &path);
@@ -796,6 +796,7 @@ asmlinkage long ec_sys_renameat(int olddirfd, char __user const *oldname, int ne
     {
         new_file_data_pre_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
     }
+    // Old path must exist but still execute syscall
 
 CATCH_DISABLED:
     ret = ec_orig_sys_renameat(olddirfd, oldname, newdirfd, newname);
@@ -849,7 +850,13 @@ asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *new
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
     old_file_data = __ec_get_file_data_from_name(&context, oldname);
-    new_file_data_pre_rename = __ec_get_file_data_from_name(&context, newname);
+
+    // Only lookup new path when old path was found
+    if (old_file_data)
+    {
+        new_file_data_pre_rename = __ec_get_file_data_from_name(&context, newname);
+    }
+    // Old path must exist but still execute syscall
 
 CATCH_DISABLED:
     ret = ec_orig_sys_rename(oldname, newname);
