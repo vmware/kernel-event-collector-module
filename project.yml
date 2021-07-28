@@ -55,5 +55,5 @@ service-env:
     #        "754,957" would build 6.9 and 7.6
     #        "3.10.0" would build all 7.x versions
     #  NOTE: It is ok to inclued kernels from only one platform.
-    KERNEL_OVERRIDE_LIST: ""
+    KERNEL_OVERRIDE_LIST:           3.10.0-1127
     BUILD_VERSION:
