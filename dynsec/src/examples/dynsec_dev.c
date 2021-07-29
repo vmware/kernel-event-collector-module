@@ -20,6 +20,7 @@
 #include "dynsec.h"
 
 static int quiet = 0;
+static int quiet_open_events = 1;
 
 // gcc -I../../include -pthread ./dynsec_dev.c -o dynsec
 
@@ -166,6 +167,7 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
     int response = DYNSEC_RESPONSE_ALLOW;
     const char *path = "";
     const char *start = (const char *)setattr;
+    const char *path_type = "";
 
     if (setattr->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &setattr->hdr, response);
@@ -193,13 +195,18 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
         printf(" %s[%llu -> %llu how:%s]", size_chg,
                setattr->msg.file.size, setattr->msg.attr_size,
                (setattr->msg.attr_mask & DYNSEC_SETATTR_OPEN) ?
-                    "open(O_CREATE)" : "truncate()");
+                    "open(O_TRUNC)" : "truncate()");
     }
     if (setattr->msg.file.path_offset) {
         path = start + setattr->msg.file.path_offset;
+        if (setattr->msg.attr_mask & DYNSEC_SETATTR_FILE) {
+            path_type = "fullpath";
+        } else {
+            path_type = "dentrypath";
+        }
     }
-    printf(" ino:%llu dev:%#x %s\n", setattr->msg.file.ino,
-           setattr->msg.file.dev, path);
+    printf(" ino:%llu dev:%#x %s:%s\n", setattr->msg.file.ino,
+           setattr->msg.file.dev, path_type, path);
 }
 
 void print_create_event(int fd, struct dynsec_create_umsg *create)
@@ -239,7 +246,7 @@ void print_open_event(int fd, struct dynsec_file_umsg *file)
     if (file->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &file->hdr, response);
 
-    if (quiet) return;
+    if (quiet || quiet_open_events) return;
 
     if (file->hdr.event_type == DYNSEC_EVENT_TYPE_CLOSE)
         ev_str = "CLOSE";
@@ -308,7 +315,7 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
 void read_events(int fd, const char *banned_path)
 {
-    char buf[8192];
+    char buf[8192 * 2];
     struct dynsec_exec_umsg *exec_msg;
 
     memset(buf, 'A', sizeof(buf));
