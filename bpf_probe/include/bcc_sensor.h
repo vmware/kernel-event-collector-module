@@ -45,8 +45,7 @@ namespace bpf_probe {
         EVENT_NET_CONNECT_DNS_RESPONSE,
         EVENT_NET_CONNECT_WEB_PROXY,
         EVENT_FILE_DELETE,
-        EVENT_FILE_CLOSE,
-        EVENT_FILE_OPEN
+        EVENT_FILE_CLOSE
     };
 
     struct data_header {
