@@ -292,6 +292,9 @@ bool ec_is_network_filesystem(struct super_block const *sb)
     case NFS_SUPER_MAGIC:
         return true;
 
+    case SMB_SUPER_MAGIC:
+        return true;
+
     default:
         return false;
     }
