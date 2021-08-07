@@ -91,12 +91,12 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
                                            != DYNSEC_HOOK_TYPE_CLOSE);
 
     // Enforce security_file_free
-    if ((enableHooks & DYNSEC_HOOK_TYPE_OPEN) &&
-        !(enableHooks & DYNSEC_HOOK_TYPE_CLOSE)) {
-        pr_info("%s: CLOSE hook must be enabled  with "
-                "OPEN hook. enabled:%#016llx\n", __func__, enableHooks);
-        return false;
-    }
+    // if ((enableHooks & DYNSEC_HOOK_TYPE_OPEN) &&
+    //     !(enableHooks & DYNSEC_HOOK_TYPE_CLOSE)) {
+    //     pr_info("%s: CLOSE hook must be enabled  with "
+    //             "OPEN hook. enabled:%#016llx\n", __func__, enableHooks);
+    //     return false;
+    // }
 
     memset(&lsm_syms, 0, sizeof(lsm_syms));
 

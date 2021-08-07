@@ -13,19 +13,20 @@
 #include "logging.h"
 #include "path_utils.h"
 
-// LSM Hooks / Event Types We Want to Enable On Default
-// TODO: Make this overridable via module param
-#define DYNSEC_LSM_default (\
-    DYNSEC_HOOK_TYPE_EXEC      |\
-    DYNSEC_HOOK_TYPE_UNLINK    |\
-    DYNSEC_HOOK_TYPE_RMDIR     |\
-    DYNSEC_HOOK_TYPE_RENAME    |\
-    DYNSEC_HOOK_TYPE_SETATTR   |\
-    DYNSEC_HOOK_TYPE_CREATE    |\
-    DYNSEC_HOOK_TYPE_MKDIR     |\
-    DYNSEC_HOOK_TYPE_OPEN      |\
-    DYNSEC_HOOK_TYPE_CLOSE)
+#define DYNSEC_LSM_HOOKS (\
+        DYNSEC_HOOK_TYPE_EXEC      |\
+        DYNSEC_HOOK_TYPE_UNLINK    |\
+        DYNSEC_HOOK_TYPE_RMDIR     |\
+        DYNSEC_HOOK_TYPE_RENAME    |\
+        DYNSEC_HOOK_TYPE_SETATTR   |\
+        DYNSEC_HOOK_TYPE_CREATE    |\
+        DYNSEC_HOOK_TYPE_MKDIR     |\
+        DYNSEC_HOOK_TYPE_OPEN      |\
+        DYNSEC_HOOK_TYPE_CLOSE)
 
+uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS & 
+    ~(DYNSEC_HOOK_TYPE_OPEN |
+      DYNSEC_HOOK_TYPE_CLOSE);
 
 static int __init dynsec_init(void)
 {
@@ -40,7 +41,7 @@ static int __init dynsec_init(void)
         return -EINVAL;
     }
 
-    if (!dynsec_init_lsmhooks(DYNSEC_LSM_default)) {
+    if (!dynsec_init_lsmhooks(lsm_hooks_mask)) {
         return -EINVAL;
     }
 
