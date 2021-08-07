@@ -3,7 +3,15 @@
 
 #include "BpfApi.h"
 
+/* Building directly with cmake will expect these libraries in the default
+ * locations associated with bcc, but building with the internal CB build
+ * utility expects the packaged location of this header to be slightly different
+ */
+#ifdef LOCAL_BUILD
+#include <bcc/BPF.h>
+#else
 #include <BPF.h>
+#endif
 #include <climits>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -28,13 +36,12 @@ void BpfApi::CleanBuildDir()
 {
     // delete the contents of the directory /var/tmp/bcc
     // resolves DSEN-13711
-
-    system("rm -rf /var/tmp/bcc");
+    IGNORE_UNUSED_RETURN_VALUE(system("rm -rf /var/tmp/bcc"));
 }
 
 bool BpfApi::Init(const std::string & bpf_program)
 {
-    m_BPF = std::make_unique<ebpf::BPF>();
+    m_BPF = std::unique_ptr<ebpf::BPF>(new ebpf::BPF());
     if (!m_BPF)
     {
         return false;
@@ -226,13 +233,14 @@ void BpfApi::SetKptrRestrict(long value)
     }
     size = strlen(buffer);
 
-    auto fileHandle = open(m_kptr_restrict_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+    auto fileHandle = open(m_kptr_restrict_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
+                           S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
     if (fileHandle <= 0)
     {
         return;
     }
 
-    write(fileHandle, buffer, size);
+    IGNORE_UNUSED_RETURN_VALUE(write(fileHandle, buffer, size));
     close(fileHandle);
 }
 

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "BpfApi.h"
+#include "../BpfApi.h"
 
 #include "CppUTest/TestHarness.h"
 #include "CppUTestExt/MockSupport.h"

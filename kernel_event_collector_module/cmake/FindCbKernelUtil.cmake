@@ -1,12 +1,12 @@
-# Copyright 2018 Carbon Black Inc.  All rights reserved.
+# Copyright 2021 Carbon Black Inc.  All rights reserved.
 
-function(cb_add_kernel_module)
+function(build_kernel_module)
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
         message(FATAL_ERROR "You could only build linux kernel module on a linux system. Current system: ${CMAKE_SYSTEM_NAME}")
     endif()
 
     set(options           USE_NATIVE_COMPILER)
-    set(oneValueArgs      NAME KERNEL_NAME KERNEL_VERSION MODULE_SOURCE_DIR KERNEL_BUILD_DIR VERBOSE OUTPUT_PATH EXTRA_SYMBOLS)
+    set(oneValueArgs      NAME KERNEL_NAME KERNEL_VERSION MODULE_SOURCE_DIR MODULE_BUILD_DIR KERNEL_BUILD_DIR OUTPUT_PATH EXTRA_SYMBOLS)
     set(multiValueArgs    SOURCE_FILES FLAGS AFLAGS)
     cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -17,9 +17,15 @@ function(cb_add_kernel_module)
     endif()
 
     if(NOT ARG_MODULE_SOURCE_DIR)
-        set(MODULE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+        set(MODULE_SOURCE_DIR ${CMAKE_PROJECT_SOURCE_DIR})
     else()
         set(MODULE_SOURCE_DIR ${ARG_MODULE_SOURCE_DIR})
+    endif()
+
+    if(NOT ARG_MODULE_BUILD_DIR)
+        set(MODULE_BUILD_DIR ${CMAKE_PROJECT_BINARY_DIR})
+    else()
+        set(MODULE_BUILD_DIR ${ARG_MODULE_BUILD_DIR})
     endif()
 
     if(NOT ARG_KERNEL_NAME)
@@ -32,7 +38,7 @@ function(cb_add_kernel_module)
         set(OUTPUT_PATH ${ARG_OUTPUT_PATH})
     endif()
 
-    set(KBUILD_DIR ${MODULE_SOURCE_DIR})
+    set(KBUILD_DIR ${MODULE_BUILD_DIR})
 
     if(ARG_KERNEL_VERSION)
         set(OUTPUT_SUFFIX .${ARG_KERNEL_VERSION})
@@ -42,13 +48,14 @@ function(cb_add_kernel_module)
 
     set(KBUILD_FILE ${KBUILD_DIR}/Kbuild)
 
-    if(ARG_VERBOSE)
-        set(_VERBOSE 1)
-    else()
-        set(_VERBOSE 0)
+    if(NOT "$ENV{VERBOSE}" STREQUAL "")
+        set(_VERBOSE "V=1")
     endif()
 
     if(ARG_SOURCE_FILES)
+        # First remove all links so that we make sure we don't leave any deleted files
+        list(APPEND SRC_LINK_COMMANDS COMMAND find ${KBUILD_DIR} -type l | xargs rm -f)
+
         foreach(f ${ARG_SOURCE_FILES})
             string(REGEX MATCH "^[^ ]+\\.[cS]$" MATCHES ${f})
             if(MATCHES)
@@ -61,6 +68,9 @@ function(cb_add_kernel_module)
                 list(APPEND OUTPUT_OBJS ${fo})
                 string(REGEX MATCH "^.+/" subdir ${f})
                 list(APPEND SUBDIRS ${subdir})
+
+                # We need to create a hardlink to all source files so that the kernel build will work
+                list(APPEND SRC_LINK_COMMANDS COMMAND ln -f ${MODULE_SOURCE_DIR}/${f} ${KBUILD_DIR}/${f})
             endif()
         endforeach()
     endif()
@@ -74,7 +84,7 @@ function(cb_add_kernel_module)
     if (${SUBDIRS_LEN} GREATER 0)
         list(REMOVE_DUPLICATES SUBDIRS)
         foreach(subdir ${SUBDIRS})
-            list(APPEND MKSUBDIRS_COMMANDS COMMAND mkdir ${subdir})
+            list(APPEND MKSUBDIRS_COMMANDS COMMAND mkdir -p ${subdir})
         endforeach()
     endif()
 
@@ -142,83 +152,41 @@ function(cb_add_kernel_module)
     set(OUTPUT_BIN_NAME    ${MODULE_BIN_NAME}${OUTPUT_SUFFIX})
     set(OUTPUT_SYMVER_NAME ${MODULE_NAME}.symvers${OUTPUT_SUFFIX})
 
-    set(CLONE_KBUILD_COMMAND cp -n ${KBUILD_FILE} ${MODULE_SOURCE_DIR} &> /dev/null || true)
-    set(KBUILD_COMMAND $(MAKE) --no-print-directory -C ${KERNEL_BUILD_DIR} M=${KBUILD_DIR} src=${MODULE_SOURCE_DIR} o=${KBUILD_DIR} V=${_VERBOSE})
+    # Empty `MAKEFLAGS` erases Cmake's implied "--silent", in order to see the build output from KBUILD_COMMAND.
+    #  This causes us to "loose" parallel builds if it is configured.
+    set(KBUILD_COMMAND ${CMD_PREFIX} $(MAKE) MAKEFLAGS='' --no-print-directory -C ${KERNEL_BUILD_DIR} M=${KBUILD_DIR} ${_VERBOSE})
 
     if(OUTPUT_PATH)
-        set(OUTPUT_BIN_NAME    "${OUTPUT_PATH}/${OUTPUT_BIN_NAME}")
-        set(OUTPUT_SYMVER_NAME "${OUTPUT_PATH}/${OUTPUT_SYMVER_NAME}")
-        set(MODULE_INSTALL_COMMAND mkdir -p ${OUTPUT_PATH} && mv ${MODULE_BIN_NAME} ${OUTPUT_BIN_NAME} && mv ${MODULE_SYMVER_NAME} ${OUTPUT_SYMVER_NAME})
-        set(SYMBOLS_INSTALL_COMMAND objcopy --only-keep-debug ${OUTPUT_BIN_NAME} ${OUTPUT_BIN_NAME}.debug && ${CMAKE_STRIP} --strip-unneeded ${OUTPUT_BIN_NAME})
+        set(OUTPUT_BIN_FILE    "${OUTPUT_PATH}/${OUTPUT_BIN_NAME}")
+        set(OUTPUT_SYMVER_FILE "${OUTPUT_PATH}/${OUTPUT_SYMVER_NAME}")
+        set(MODULE_INSTALL_COMMAND cp ${MODULE_BIN_NAME} ${OUTPUT_BIN_FILE} && cp ${MODULE_SYMVER_NAME} ${OUTPUT_SYMVER_FILE})
+        file(MAKE_DIRECTORY ${OUTPUT_PATH})
+    else()
+        set(OUTPUT_BIN_FILE    ${OUTPUT_BIN_NAME})
+        set(OUTPUT_SYMVER_FILE ${OUTPUT_SYMVER_NAME})
     endif()
 
-    add_custom_command(OUTPUT ${OUTPUT_BIN_NAME} ${OUTPUT_SYMVER_NAME} ${KERNEL_BUILD_DIR}/${MODULE_BIN_NAME}
+
+    add_custom_command(OUTPUT ${OUTPUT_BIN_FILE} ${OUTPUT_SYMVER_FILE}
             ${MKSUBDIRS_COMMANDS}
-            COMMAND ${CLONE_KBUILD_COMMAND}
+            ${SRC_LINK_COMMANDS}
             COMMAND ${KBUILD_COMMAND} modules
             COMMAND ${MODULE_INSTALL_COMMAND}
-            COMMAND ${SYMBOLS_INSTALL_COMMAND}
             VERBATIM
             WORKING_DIRECTORY ${KBUILD_DIR}
-            COMMENT "Generating ${MODULE_BIN_NAME}${OUTPUT_SUFFIX}, ${MODULE_SYMVER_NAME}${OUTPUT_SUFFIX}"
-            USES_TERMINAL)
+            BYPRODUCTS ${OUTPUT_BIN_NAME} ${OUTPUT_SYMVER_NAME}
+            COMMENT "Generating ${OUTPUT_BIN_NAME}, ${OUTPUT_SYMVER_NAME}")
 
-    add_custom_target(modules-${MODULE_NAME}${TARGET_SUFFIX} ALL
-            DEPENDS ${OUTPUT_BIN_NAME} ${OUTPUT_SYMVER_NAME} ${KERNEL_BUILD_DIR}/${MODULE_BIN_NAME})
-endfunction()
+    set(TARGET_NAME modules-${MODULE_NAME}${TARGET_SUFFIX})
 
-function(cb_check_kernel_files)
-    set(options           )
-    set(oneValueArgs      SOURCE_DIR)
-    set(multiValueArgs    SOURCE_FILES IGNORE_TAGS NEW_TYPES)
-    cmake_parse_arguments(ARG "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+    # This target prints output in a way that can be colorized, and enforces the module build order
+    add_custom_target(print-${TARGET_NAME}
+            COMMAND echo "--- Building ${OUTPUT_BIN_NAME}"
+            DEPENDS ${MODULE_TARGETS})
 
-    if(ARG_IGNORE_TAGS)
-        string(REPLACE ";" "," TAGS "${ARG_IGNORE_TAGS}")
-        set(IGNORE_OPTION "--ignore=${TAGS}")
-    endif()
+    # This target is added to ALL, and triggers the print target and the module to be built
+    add_custom_target(${TARGET_NAME} ALL
+            DEPENDS print-${TARGET_NAME} ${OUTPUT_BIN_FILE} ${OUTPUT_SYMVER_FILE})
 
-    if(ARG_NEW_TYPES)
-        set(TYPEDEF_FILE "${ARG_SOURCE_DIR}/typedef_file")
-        file(WRITE ${TYPEDEF_FILE} "")
-        foreach(TYPE ${ARG_NEW_TYPES})
-            file(APPEND ${TYPEDEF_FILE} "${TYPE}\n")
-        endforeach()
-        set(NEW_TYPES_OPTION "--typedefsfile=${TYPEDEF_FILE}")
-    endif()
-
-    if(ARG_SOURCE_FILES)
-        # Loop over each input source file and construct a command to process it
-        foreach(FILE ${ARG_SOURCE_FILES})
-            # Build the command string
-            set(COMMAND perl $ENV{BUILD_UTIL_DIR}/checkpatch/checkpatch.pl
-                    ${IGNORE_OPTION}
-                    ${NEW_TYPES_OPTION}
-                    --no-summary
-                    --max-line-length=200
-                    -f
-                    --no-tree
-                    --terse
-                    ${FILE})
-            # Create a fake target output file so that a file will only be checked when changes are detected
-            string(REPLACE "/" "" TARGET "${FILE}")
-            string(PREPEND TARGET ".")
-            add_custom_command(OUTPUT ${TARGET}
-                    COMMAND export LANG=C
-                    COMMAND ${COMMAND}
-                    COMMAND touch ${TARGET}
-                    DEPENDS ${FILE}
-                    VERBATIM
-                    WORKING_DIRECTORY ${ARG_SOURCE_DIR}
-                    COMMENT "Checking ${FILE}"
-                    USES_TERMINAL)
-
-            # The list of the target names for each source file
-            list(APPEND DEPS ${TARGET})
-        endforeach()
-
-        # Top level target that will cause all files to be processed
-        add_custom_target(check-kernel-files ALL
-                DEPENDS ${DEPS})
-    endif()
+    set(MODULE_TARGETS ${MODULE_TARGETS} ${TARGET_NAME} PARENT_SCOPE)
 endfunction()

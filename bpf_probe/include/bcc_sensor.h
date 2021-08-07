@@ -29,8 +29,9 @@ namespace bpf_probe {
 
     enum event_type
     {
-        EVENT_PROCESS_ARG,
-        EVENT_PROCESS_EXEC,
+        EVENT_PROCESS_EXEC_ARG,
+        EVENT_PROCESS_EXEC_PATH,
+        EVENT_PROCESS_EXEC_RESULT,
         EVENT_PROCESS_EXIT,
         EVENT_PROCESS_CLONE,
         EVENT_FILE_READ,
@@ -50,7 +51,6 @@ namespace bpf_probe {
 
     struct data_header {
         uint64_t event_time; // Time the event collection started.  (Same across message parts.)
-        uint64_t event_submit_time; // Time we submit the event to bpf.  (Unique for each event.)
         uint8_t  type;
         uint8_t  state;
 
@@ -84,7 +84,8 @@ namespace bpf_probe {
     struct path_data {
         struct data_header header;
 
-        char fname[MAX_FNAME];
+        char size;
+        char fname[];
     };
 
     struct net_data
@@ -109,8 +110,7 @@ namespace bpf_probe {
     {
         struct data_header header;
 
-        unsigned short dns_flag;
         char dns[DNS_SEGMENT_LEN];
-        unsigned int name_len;
+        uint32_t name_len;
     };
 }}
