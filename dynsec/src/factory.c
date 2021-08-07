@@ -788,16 +788,17 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
         dynsec_file->umode = inode->i_mode;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         dynsec_file->uid = from_kuid(&init_user_ns, inode->i_uid);
-        dynsec_file->uid = from_kgid(&init_user_ns, inode->i_gid);
+        dynsec_file->gid = from_kgid(&init_user_ns, inode->i_gid);
 #else
         dynsec_file->uid = inode->i_uid;
-        dynsec_file->uid = inode->i_gid;
+        dynsec_file->gid = inode->i_gid;
 #endif
         dynsec_file->size = inode->i_size;
         fill_in_sb_data(dynsec_file, inode->i_sb);
     }
 }
 
+// dentry based callers may want to call dget_parent if sleepable
 static void fill_in_parent_data(struct dynsec_file *dynsec_file,
                                 struct inode *parent_dir)
 {
