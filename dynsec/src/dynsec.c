@@ -24,14 +24,59 @@
         DYNSEC_HOOK_TYPE_OPEN      |\
         DYNSEC_HOOK_TYPE_CLOSE)
 
-uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS & 
+uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
+uint64_t lsm_hooks_enabled = DYNSEC_LSM_HOOKS &
     ~(DYNSEC_HOOK_TYPE_OPEN |
       DYNSEC_HOOK_TYPE_CLOSE);
+
+static char lsm_hooks_str[64];
+static char lsm_hooks_disable[64];
+// Hooks to only allow for kmod instance. Superset.
+module_param_string(lsm_hooks, lsm_hooks_str,
+                    sizeof(lsm_hooks_str), 0644);
+// Hooks to allow later on but disable on load of kmod.
+// Subset of lsm_hooks_mask
+module_param_string(lsm_hooks_disable, lsm_hooks_disable,
+                    sizeof(lsm_hooks_disable), 0644);
+
+static void setup_lsm_hooks(void)
+{
+    int strto_ret;
+
+    // Set hooks kmod instance may allow.
+    if (lsm_hooks_str[0])
+    {
+        uint64_t local_lsm_hooks = 0;
+
+        lsm_hooks_str[sizeof(lsm_hooks_str) - 1] = 0;
+        strto_ret = kstrtoull(lsm_hooks_str, 16, &local_lsm_hooks);
+        if (!strto_ret)
+        {
+            lsm_hooks_mask = local_lsm_hooks;
+            lsm_hooks_enabled = lsm_hooks_mask;
+        }
+    }
+
+    // Hook to disable on load but may allow later.
+    if (lsm_hooks_disable[0])
+    {
+        uint64_t local_lsm_hooks = 0;
+
+        lsm_hooks_disable[sizeof(lsm_hooks_disable) - 1] = 0;
+        strto_ret = kstrtoull(lsm_hooks_disable, 16, &local_lsm_hooks);
+        if (!strto_ret)
+        {
+            lsm_hooks_enabled &= ~(local_lsm_hooks);
+        }
+    }
+}
 
 static int __init dynsec_init(void)
 {
     DS_LOG(DS_INFO, "Initializing Dynamic Security Module Brand(%s)",
            CB_APP_MODULE_NAME);
+
+    setup_lsm_hooks();
 
     if (!dynsec_sym_init()) {
         return -EINVAL;

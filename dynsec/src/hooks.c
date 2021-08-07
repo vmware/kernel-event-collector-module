@@ -25,6 +25,10 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_EXEC)) {
+        goto out;
+    }
+
     if (!bprm || !bprm->file) {
         goto out;
     }
@@ -79,6 +83,9 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_UNLINK)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -140,6 +147,9 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_RMDIR)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -203,6 +213,9 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_RENAME)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -273,6 +286,10 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_SETATTR)) {
+        goto out;
+    }
+
     if (!dentry || !dentry->d_inode || !attr) {
         goto out;
     }
@@ -379,6 +396,9 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry, int mode)
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_MKDIR)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -432,6 +452,9 @@ int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
         }
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_CREATE)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -477,6 +500,9 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
         ret = g_original_ops_ptr->inode_link(old_dentry, dir, new_dentry);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_LINK)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -508,6 +534,9 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
         ret =  g_original_ops_ptr->inode_symlink(dir, dentry, old_name);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_SYMLINK)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -548,6 +577,9 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
         ret = g_original_ops_ptr->file_open(file, cred);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_OPEN)) {
+        goto out;
+    }
 
 #ifdef FMODE_STREAM
     if (file->f_mode & FMODE_STREAM) {
@@ -612,6 +644,9 @@ void dynsec_file_free_security(struct file *file)
         g_original_ops_ptr->file_free_security(file);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_CLOSE)) {
+        return;
+    }
 
 #ifdef FMODE_STREAM
     if (file->f_mode & FMODE_STREAM) {
@@ -657,6 +692,9 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
         ret = g_original_ops_ptr->ptrace_traceme(parent);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_PTRACE)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -687,6 +725,9 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
         ret = g_original_ops_ptr->ptrace_access_check(child, mode);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_PTRACE)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -729,6 +770,9 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
         ret = g_original_ops_ptr->task_kill(p, info, sig, secid);
     }
 #endif
+    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_SIGNAL)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;

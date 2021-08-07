@@ -186,6 +186,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 #endif  //}
 
     g_lsmRegistered = true;
+    lsm_hooks_mask = enableHooks;
     return true;
 
 out_fail:
