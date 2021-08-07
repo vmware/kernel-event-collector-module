@@ -24,6 +24,9 @@
 #define HOOK_MASK  0xFFFFFFFFFFFFFFFF
 #endif
 
+#define HOOK_MASK_LEN 64
+static char enableHooksStr[HOOK_MASK_LEN];
+
 uint32_t g_traceLevel = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARNING | DL_ERROR);
 uint64_t g_enableHooks = HOOK_MASK;
 uid_t    g_edr_server_uid = (uid_t)-1;
@@ -52,17 +55,17 @@ module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)
 module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-
-#ifdef HOOK_SELECTOR
-module_param(g_enableHooks, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-#endif
+// Store string param to later on convert to unsigned long long
+module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
+                    S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 // checkpatch-no-ignore: SYMBOLIC_PERMS
-//MODULE_PARAM_DESC(g_traceLevel, "Debug trace level");
 
 INIT_CB_RESOLVED_SYMS();
 atomic64_t       module_used      = ATOMIC64_INIT(0);
 
 ModuleStateInfo  g_module_state_info = { 0 };
+
+void ec_set_enableHooks(void);
 
 bool ec_module_state_info_initialize(ProcessContext *context);
 
@@ -185,6 +188,9 @@ int __init ec_init(void)
     //
     memset(&g_cb_ignored_pids[0], 0, sizeof(pid_t)*CB_SENSOR_MAX_PIDS);
     memset(&g_cb_ignored_uids[0], 0xFF, sizeof(uid_t)*CB_SENSOR_MAX_PIDS);
+
+    // Allow hooks to be enabled via module param
+    ec_set_enableHooks();
 
     // Actually do the lookup
     ec_findsyms_init(&context, symbols);
@@ -636,6 +642,42 @@ void ec_proc_shutdown(ProcessContext *context)
 #endif
 }
 
+void ec_set_enableHooks(void)
+{
+    uint64_t local_enableHooks = 0;
+    int strto_ret;
+
+    if (!enableHooksStr[0])
+    {
+        return;
+    }
+
+    enableHooksStr[HOOK_MASK_LEN - 1] = 0;
+    strto_ret = kstrtoull(enableHooksStr, 16, &local_enableHooks);
+    switch (strto_ret)
+    {
+    case 0:
+        g_enableHooks = local_enableHooks;
+        break;
+
+    case -ERANGE:
+        TRACE(DL_ERROR, "param(g_enableHooks:%s) = ERANGE\n",
+              enableHooksStr);
+        return;
+
+    case -EINVAL:
+        TRACE(DL_ERROR, "param(g_enableHooks:%s) = EINVAL\n",
+              enableHooksStr);
+        return;
+
+    default:
+        TRACE(DL_ERROR, "param(g_enableHooks:%s) = %d\n", enableHooksStr,
+              strto_ret);
+        return;
+    }
+
+    TRACE(DL_INIT, "g_enableHooks: %#018llx\n", g_enableHooks);
+}
 
 module_init(ec_init);
 module_exit(ec_cleanup);

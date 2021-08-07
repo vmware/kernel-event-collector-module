@@ -4,9 +4,19 @@ cmake_minimum_required(VERSION 2.8.7)
 
 project(bpf_probe)
 
-FIND_PACKAGE(CbUtil REQUIRED)
-cb_configure_flags()
-cb_conan_setup(TARGETS)
+if(NOT DEFINED LOCAL_BUILD)
+    set(LOCAL_BUILD no)
+endif()
+
+if (NOT ${LOCAL_BUILD})
+    message("Project will be built using CB build utility")
+    FIND_PACKAGE(CbUtil REQUIRED)
+    cb_configure_flags()
+    cb_conan_setup(TARGETS)
+else()
+    message("Project will be built using local system libraries")
+    add_definitions(-DLOCAL_BUILD)
+endif()
 
 set(CMAKE_CXX_STANDARD 11)
 
@@ -38,16 +48,27 @@ add_library(bpf-probe STATIC
 add_dependencies(bpf-probe bcc_prog)
 set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
 
-target_link_libraries(bpf-probe
-        CONAN_PKG::bcc
+if (NOT ${LOCAL_BUILD})
+    target_link_libraries(bpf-probe
+            CONAN_PKG::bcc
 
-        -Wl,--whole-archive
-        CONAN_PKG::llvm
-        CONAN_LIB::elfutils_elf
-        -Wl,--no-whole-archive
+            -Wl,--whole-archive
+            CONAN_PKG::llvm
+            CONAN_LIB::elfutils_elf
+            -Wl,--no-whole-archive
 
-        z rt dl pthread m
-        )
+            z rt dl pthread m
+            )
+else()
+    target_link_libraries(bpf-probe
+        bcc
+        z
+        rt
+        dl
+        pthread
+        m
+    )
+endif()
 
 add_executable(check_probe check_probe.cpp)
 target_link_libraries(check_probe

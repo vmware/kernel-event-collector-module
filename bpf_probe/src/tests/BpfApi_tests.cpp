@@ -3,6 +3,7 @@
 
 #include "mock/BpfApi_Mock.h"
 #include "BpfProgram.h"
+#include "EventFactory.h"
 
 #include "CppUTest/TestHarness.h"
 
@@ -29,7 +30,7 @@ TEST_GROUP(BpfApi)
 
     void setup()
     {
-        bpfApi = std::make_unique<BpfApi_Mock>();
+        bpfApi = std::unique_ptr<BpfApi_Mock>(new BpfApi_Mock());
     }
 
     void teardown()
@@ -69,4 +70,9 @@ TEST(BpfApi, InstallHooks_OptionalSkipped)
 TEST(BpfApi, MockInit)
 {
     CHECK(bpfApi);
+}
+
+TEST(BpfApi, EventFactory)
+{
+    CHECK(EventFactory::Fork(0, 0, 0));
 }

@@ -30,6 +30,7 @@ extern long (*ec_orig_sys_creat)(const char __user *pathname, umode_t mode);
 extern long (*ec_orig_sys_unlink)(const char __user *pathname);
 extern long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int flag);
 extern long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
+extern long (*ec_orig_sys_renameat)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
 
 extern asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t count);
 extern asmlinkage long ec_sys_close(unsigned int fd);
@@ -39,7 +40,7 @@ extern asmlinkage long ec_sys_creat(const char __user *pathname, umode_t mode);
 extern asmlinkage long ec_sys_unlink(const char __user *pathname);
 extern asmlinkage long ec_sys_unlinkat(int dfd, const char __user *pathname, int flag);
 extern asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *newname);
-
+extern asmlinkage long ec_sys_renameat(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
 
 // Kernel module hooks
 extern long (*ec_orig_sys_delete_module)(const char __user *name_user, unsigned int flags);
@@ -62,6 +63,7 @@ void __ec_save_old_hooks(p_sys_call_table syscall_table)
     ec_orig_sys_unlink        = syscall_table[__NR_unlink];
     ec_orig_sys_unlinkat      = syscall_table[__NR_unlinkat];
     ec_orig_sys_rename        = syscall_table[__NR_rename];
+    ec_orig_sys_renameat      = syscall_table[__NR_renameat];
 }
 
 bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
@@ -86,6 +88,7 @@ bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
         if (enableHooks & CB__NR_unlink) syscall_table[__NR_unlink]    = ec_sys_unlink;
         if (enableHooks & CB__NR_unlinkat) syscall_table[__NR_unlinkat]  = ec_sys_unlinkat;
         if (enableHooks & CB__NR_rename) syscall_table[__NR_rename]    = ec_sys_rename;
+        if (enableHooks & CB__NR_renameat) syscall_table[__NR_renameat]    = ec_sys_renameat;
 
         ec_restore_page_state(syscall_table, page_rw_set);
         rval = true;
@@ -143,6 +146,7 @@ void __ec_restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
         if (enableHooks & CB__NR_unlink) syscall_table[__NR_unlink]    = ec_orig_sys_unlink;
         if (enableHooks & CB__NR_unlinkat) syscall_table[__NR_unlinkat]  = ec_orig_sys_unlinkat;
         if (enableHooks & CB__NR_rename) syscall_table[__NR_rename]    = ec_orig_sys_rename;
+        if (enableHooks & CB__NR_renameat) syscall_table[__NR_renameat]    = ec_orig_sys_renameat;
         ec_restore_page_state(syscall_table, page_rw_set);
     } else {
         TRACE(DL_ERROR, "Failed to make 64-bit call table RW!!\n");
@@ -302,6 +306,7 @@ int ec_get_sys_openat(struct seq_file *m, void *v) { return getSyscall(CB__NR_op
 int ec_get_sys_unlink(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlink,     m); }
 int ec_get_sys_unlinkat(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlinkat, m); }
 int ec_get_sys_rename(struct seq_file *m, void *v) { return getSyscall(CB__NR_rename,     m); }
+int ec_get_sys_renameat(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat, m); }
 
 ssize_t ec_set_sys_recvfrom(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
