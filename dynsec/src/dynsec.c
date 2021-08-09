@@ -12,6 +12,7 @@
 #include "stall_reqs.h"
 #include "logging.h"
 #include "path_utils.h"
+#include "tracepoints.h"
 
 #define DYNSEC_LSM_HOOKS (\
         DYNSEC_HOOK_TYPE_EXEC      |\
@@ -31,6 +32,12 @@ uint64_t lsm_hooks_enabled = DYNSEC_LSM_HOOKS &
     ~(DYNSEC_HOOK_TYPE_OPEN |
       DYNSEC_HOOK_TYPE_CLOSE);
 
+uint32_t tracepoint_hooks = (
+        DYNSEC_TP_HOOK_TYPE_CLONE |
+        DYNSEC_TP_HOOK_TYPE_EXIT |
+        DYNSEC_TP_HOOK_TYPE_TASK_FREE
+);
+
 static char lsm_hooks_str[64];
 static char lsm_hooks_disable[64];
 // Hooks to only allow for kmod instance. Superset.
@@ -40,6 +47,8 @@ module_param_string(lsm_hooks, lsm_hooks_str,
 // Subset of lsm_hooks_mask
 module_param_string(lsm_hooks_disable, lsm_hooks_disable,
                     sizeof(lsm_hooks_disable), 0644);
+
+module_param(tracepoint_hooks, uint, 0644);
 
 static void setup_lsm_hooks(void)
 {
@@ -88,11 +97,17 @@ static int __init dynsec_init(void)
         return -EINVAL;
     }
 
+    if (!dynsec_init_tp(tracepoint_hooks)) {
+        return -EINVAL;
+    }
+
     if (!dynsec_init_lsmhooks(lsm_hooks_mask)) {
+        dynsec_tp_shutdown(tracepoint_hooks);
         return -EINVAL;
     }
 
     if (!dynsec_chrdev_init()) {
+        dynsec_tp_shutdown(tracepoint_hooks);
         dynsec_lsm_shutdown();
         return -EINVAL;
     }
@@ -106,6 +121,8 @@ static void __exit dynsec_exit(void)
            CB_APP_MODULE_NAME);
 
     dynsec_chrdev_shutdown();
+
+    dynsec_tp_shutdown(tracepoint_hooks);
 
     dynsec_lsm_shutdown();
 }

@@ -75,3 +75,7 @@ extern int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned l
 extern int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int flags);
 
 extern int dynsec_task_fix_setgid(struct cred *new, const struct cred *old, int flags);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+extern void dynsec_task_free(struct task_struct *task);
+#endif

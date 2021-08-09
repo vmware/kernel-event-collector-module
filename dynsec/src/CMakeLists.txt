@@ -128,6 +128,8 @@ set(SOURCE_FILES
     dynsec.c
     hooks.c
     hooks.h
+    tracepoints.c
+    tracepoints.h
     lsm.c
     lsm_mask.h
     logging.h

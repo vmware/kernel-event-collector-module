@@ -45,6 +45,7 @@
 // Ptrace hook type maps to two hooks
 #define DYNSEC_LSM_ptrace_traceme       DYNSEC_HOOK_TYPE_PTRACE
 #define DYNSEC_LSM_ptrace_access_check  DYNSEC_HOOK_TYPE_PTRACE
+#define DYNSEC_LSM_task_free            DYNSEC_HOOK_TYPE_TASK_FREE
 
 
 static bool g_lsmRegistered;
@@ -89,6 +90,8 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     BUILD_BUG_ON(DYNSEC_LSM_file_open      != DYNSEC_HOOK_TYPE_OPEN);
     BUILD_BUG_ON(DYNSEC_LSM_file_free_security 
                                            != DYNSEC_HOOK_TYPE_CLOSE);
+    BUILD_BUG_ON(DYNSEC_LSM_task_free 
+                                           != DYNSEC_HOOK_TYPE_TASK_FREE);
 
     // Enforce security_file_free
     // if ((enableHooks & DYNSEC_HOOK_TYPE_OPEN) &&
@@ -164,6 +167,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     CB_LSM_SETUP_HOOK(dentry_open); // security_dentry_open
 #else
     CB_LSM_SETUP_HOOK(file_open);   // security_file_open
+    // CB_LSM_SETUP_HOOK(task_free);   // Prefer tracepoint instead of this
 #endif
 
     CB_LSM_SETUP_HOOK(file_free_security);

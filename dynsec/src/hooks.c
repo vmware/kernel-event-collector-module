@@ -804,6 +804,92 @@ out:
     return ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+void dynsec_sched_process_fork_tp(void *data,
+                                  struct task_struct *parent,
+                                  struct task_struct *child)
+#else
+void dynsec_sched_process_fork_tp(struct task_struct *parent,
+                                  struct task_struct *child)
+#endif
+{
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+
+    if (!child) {
+        return;
+    }
+    // Don't send thread events
+    if (child->tgid != child->pid) {
+        return;
+    }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+    if (task_in_connected_tgid(parent)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
+                               report_flags, GFP_ATOMIC);
+    if (!fill_in_clone(event, parent, child)) {
+        free_dynsec_event(event);
+        return;
+    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
+}
+
+static void __dynsec_task_exit(struct task_struct *task,
+                               uint32_t exit_hook_type,
+                               gfp_t mode)
+{
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+
+    if (!task) {
+        return;
+    }
+    // Don't send thread events
+    if (task->tgid != task->pid) {
+        return;
+    }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_EXIT, exit_hook_type,
+                               report_flags, mode);
+    if (!fill_task_free(event, task)) {
+        free_dynsec_event(event);
+        return;
+    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
+}
+void dynsec_task_free(struct task_struct *task, uint32_t exit_hook_type)
+{
+    __dynsec_task_exit(task, DYNSEC_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+void dynsec_sched_process_exit_tp(void *data, struct task_struct *task)
+#else
+void dynsec_sched_process_exit_tp(struct task_struct *task)
+#endif
+{
+    __dynsec_task_exit(task, DYNSEC_TP_HOOK_TYPE_EXIT, GFP_ATOMIC);
+}
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+void dynsec_sched_process_free_tp(void *data, struct task_struct *task)
+#else
+void dynsec_sched_process_free_tp(struct task_struct *task)
+#endif
+{
+    __dynsec_task_exit(task, DYNSEC_TP_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
+}
+
 // #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
 // int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
 //                      unsigned long flags)

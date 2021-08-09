@@ -188,6 +188,21 @@ static struct dynsec_event *alloc_link_event(enum dynsec_event_type event_type,
     return &link->event;
 }
 
+static struct dynsec_event *alloc_task_event(enum dynsec_event_type event_type,
+                                             uint32_t hook_type, uint16_t report_flags,
+                                             gfp_t mode)
+{
+    struct dynsec_task_event *task = kzalloc(sizeof(*task), mode);
+
+    if (!task) {
+        return NULL;
+    }
+
+    init_event_data(event_type, task, report_flags, hook_type);
+
+    return &task->event;
+}
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint32_t hook_type,
@@ -221,6 +236,10 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
 
     case DYNSEC_EVENT_TYPE_LINK:
         return alloc_link_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_CLONE:
+    case DYNSEC_EVENT_TYPE_EXIT:
+        return alloc_task_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -321,6 +340,16 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_CLONE:
+    case DYNSEC_EVENT_TYPE_EXIT:
+        {
+            struct dynsec_task_event *task =
+                    dynsec_event_to_task(dynsec_event);
+
+            kfree(task);
+        }
+        break;
+
     default:
         break;
     }
@@ -392,6 +421,15 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_link_event *link =
                     dynsec_event_to_link(dynsec_event);
             return link->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_CLONE:
+    case DYNSEC_EVENT_TYPE_EXIT:
+        {
+            struct dynsec_task_event *task =
+                    dynsec_event_to_task(dynsec_event);
+            return task->kmsg.hdr.payload;
         }
         break;
 
@@ -782,6 +820,36 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_task_event(const struct dynsec_task_event *task,
+                               char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < task->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &task->kmsg, sizeof(task->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(task->kmsg);
+        p += sizeof(task->kmsg);
+    }
+
+    if (task->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                task->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 // Copy to userspace
 ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
                                   char *__user p, size_t count)
@@ -852,6 +920,15 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_CLONE:
+    case DYNSEC_EVENT_TYPE_EXIT:
+        {
+            const struct dynsec_task_event *task =
+                                    dynsec_event_to_task(dynsec_event);
+            return copy_task_event(task, p, count);
+        }
+        break;
+
     default:
         break;
     }
@@ -860,29 +937,38 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
     return -EINVAL;
 }
 
-static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
+static void __fill_in_task_ctx(const struct task_struct *task,
+                               bool check_parent,
+                               struct dynsec_task_ctx *task_ctx)
 {
-    task_ctx->mnt_ns = get_mnt_ns_id(current);
-    task_ctx->tid = current->pid;
-    task_ctx->pid = current->tgid;
-    if (current->real_parent) {
-        task_ctx->ppid = current->real_parent->tgid;
+    task_ctx->mnt_ns = get_mnt_ns_id(task);
+    task_ctx->tid = task->pid;
+    task_ctx->pid = task->tgid;
+    if (check_parent && task->real_parent) {
+        task_ctx->ppid = task->real_parent->tgid;
     }
 
     // user DAC context
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    task_ctx->uid = from_kuid(&init_user_ns, current_uid());
-    task_ctx->euid = from_kuid(&init_user_ns, current_euid());
-    task_ctx->gid = from_kgid(&init_user_ns, current_gid());
-    task_ctx->egid = from_kgid(&init_user_ns, current_egid());
+    task_ctx->uid = from_kuid(&init_user_ns, task_cred_xxx(task, uid));
+    task_ctx->euid = from_kuid(&init_user_ns, task_cred_xxx(task, euid));
+    task_ctx->gid = from_kgid(&init_user_ns, task_cred_xxx(task, gid));
+    task_ctx->egid = from_kgid(&init_user_ns, task_cred_xxx(task, egid));
 #else
-    task_ctx->uid = current_uid();
-    task_ctx->euid = current_euid();
-    task_ctx->gid = current_gid();
-    task_ctx->egid = current_egid();
+    task_ctx->uid = task_cred_xxx(task, uid);
+    task_ctx->euid = task_cred_xxx(task, euid);
+    task_ctx->gid = task_cred_xxx(task, gid);
+    task_ctx->egid = task_cred_xxx(task, egid);
 #endif
 
-    task_ctx->flags = current->flags;
+    task_ctx->flags = task->flags;
+}
+
+static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
+{
+    if (task_ctx) {
+        __fill_in_task_ctx(current, true, task_ctx);
+    }
 }
 
 static void fill_in_sb_data(struct dynsec_file *dynsec_file, const struct super_block *sb)
@@ -1273,6 +1359,47 @@ extern bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *fi
     if (close->path && close->kmsg.msg.file.path_size) {
         close->kmsg.msg.file.path_offset = close->kmsg.hdr.payload;
         close->kmsg.hdr.payload += close->kmsg.msg.file.path_size;
+    }
+
+    return true;
+}
+
+bool fill_task_free(struct dynsec_event *dynsec_event,
+                    const struct task_struct *task)
+{
+    struct dynsec_task_event *exit = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_EXIT) {
+        return false;
+    }
+    exit = dynsec_event_to_task(dynsec_event);
+
+    exit->kmsg.hdr.payload = sizeof(exit->kmsg);
+
+    __fill_in_task_ctx(task, true, &exit->kmsg.msg.task);
+
+    return true;
+}
+
+bool fill_in_clone(struct dynsec_event *dynsec_event,
+                   const struct task_struct *parent,
+                   const struct task_struct *child)
+{
+    struct dynsec_task_event *clone = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_CLONE) {
+        return false;
+    }
+    clone = dynsec_event_to_task(dynsec_event);
+    clone->kmsg.hdr.payload = sizeof(clone->kmsg);
+
+    if (parent) {
+        __fill_in_task_ctx(child, false, &clone->kmsg.msg.task);
+        clone->kmsg.msg.task.ppid = parent->tgid;
+    } else {
+        __fill_in_task_ctx(child, true, &clone->kmsg.msg.task);
     }
 
     return true;

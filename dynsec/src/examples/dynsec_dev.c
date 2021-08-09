@@ -295,6 +295,33 @@ void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
     );
 }
 
+void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *ev_str = "EXIT";
+    const char *start = (const char *)task_msg;
+
+
+    if (task_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &task_msg->hdr, response);
+
+    if (quiet) return;
+
+    if (task_msg->hdr.hook_type == DYNSEC_TP_HOOK_TYPE_TASK_FREE ||
+        task_msg->hdr.hook_type == DYNSEC_HOOK_TYPE_TASK_FREE) {
+        ev_str = "TASK_FREE";
+    }
+    else if (task_msg->hdr.event_type == DYNSEC_EVENT_TYPE_CLONE)
+        ev_str = "FORK";
+
+    printf("%s: pid:%u ppid:%u mnt_ns:%u uid:%u\n", ev_str,
+        task_msg->msg.task.pid,
+        task_msg->msg.task.ppid,
+        task_msg->msg.task.mnt_ns,
+        task_msg->msg.task.uid
+    );
+}
+
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -329,6 +356,11 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
     case DYNSEC_EVENT_TYPE_LINK:
         print_link_event(fd, (struct dynsec_link_umsg *)hdr);
+    break;
+
+    case DYNSEC_EVENT_TYPE_CLONE:
+    case DYNSEC_EVENT_TYPE_EXIT:
+        print_task_event(fd, (struct dynsec_task_umsg *)hdr);
     break;
 
     default:
@@ -380,6 +412,9 @@ void read_events(int fd, const char *banned_path)
 
         bytes_read = read(fd, buf, sizeof(buf));
         if (bytes_read <= 0) {
+            if (bytes_read == -1 && errno == EAGAIN) {
+                continue;
+            }
             break;
         }
 

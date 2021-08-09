@@ -17,14 +17,19 @@
 #define DYNSEC_HOOK_TYPE_PTRACE    0x00000800
 #define DYNSEC_HOOK_TYPE_MMAP      0x00001000
 #define DYNSEC_HOOK_TYPE_CLOSE     0x00002000
+#define DYNSEC_HOOK_TYPE_TASK_FREE 0x00004000
 
+// Tracepoints
+#define DYNSEC_TP_HOOK_TYPE_CLONE       0x00000001
+#define DYNSEC_TP_HOOK_TYPE_EXIT        0x00000002
+#define DYNSEC_TP_HOOK_TYPE_TASK_FREE   0x00000004
 
 // Event Message Flags aka Report
 #define DYNSEC_REPORT_STALL      0x0001
 #define DYNSEC_REPORT_INTENT     0x0002
 #define DYNSEC_REPORT_AUDIT      0x0004
 #define DYNSEC_REPORT_EXITING    0x0008
-#define DYNSEC_REPORT_STALL_FAIL 0x0010
+#define DYNSEC_REPORT_TP         0x0010
 #define DYNSEC_REPORT_SELF       0x0020
 
 
@@ -57,6 +62,8 @@ enum dynsec_event_type {
     DYNSEC_EVENT_TYPE_SIGNAL,
     DYNSEC_EVENT_TYPE_PTRACE,
     DYNSEC_EVENT_TYPE_MMAP,
+    DYNSEC_EVENT_TYPE_CLONE,
+    DYNSEC_EVENT_TYPE_EXIT,
     DYNSEC_EVENT_TYPE_HEALTH,
     DYNSEC_EVENT_TYPE_GENERIC_AUDIT,
     DYNSEC_EVENT_TYPE_GENERIC_DEBUG,
@@ -244,6 +251,16 @@ struct dynsec_signal_msg {
 struct dynsec_signal_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_signal_msg msg;
+};
+
+// Core Task Event
+struct dynsec_task_msg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_task_ctx task;
+};
+struct dynsec_task_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_task_msg msg;
 };
 
 #pragma pack(pop)
