@@ -159,6 +159,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     CB_LSM_SETUP_HOOK(inode_setattr);   // security_inode_setattr
     CB_LSM_SETUP_HOOK(inode_create);   // security_inode_create
     CB_LSM_SETUP_HOOK(inode_mkdir);   // security_inode_mkdir
+    CB_LSM_SETUP_HOOK(inode_link);    //security_inode_link
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     CB_LSM_SETUP_HOOK(dentry_open); // security_dentry_open
 #else

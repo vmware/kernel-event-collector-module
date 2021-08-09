@@ -263,6 +263,37 @@ void print_open_event(int fd, struct dynsec_file_umsg *file)
         file->msg.task.uid, path);
 }
 
+void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *old_path = "";
+    const char *new_path = "";
+    const char *start = (const char *)link_msg;
+
+    if (link_msg->msg.old_file.path_offset) {
+        old_path = start + link_msg->msg.old_file.path_offset;
+    }
+    if (link_msg->msg.new_file.path_offset) {
+        new_path = start + link_msg->msg.new_file.path_offset;
+    }
+
+    if (link_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &link_msg->hdr, response);
+
+    if (quiet) return;
+
+    printf("LINK: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
+        "'%s'[%llu %#o %llu]->'%s'[%llu %#o %llu]\n",
+        link_msg->hdr.tid, link_msg->msg.old_file.dev, link_msg->msg.task.mnt_ns,
+        link_msg->msg.old_file.sb_magic,
+        link_msg->msg.task.uid,
+        old_path, link_msg->msg.old_file.ino, link_msg->msg.old_file.umode,
+        link_msg->msg.old_file.parent_ino,
+
+        new_path, link_msg->msg.new_file.ino, link_msg->msg.new_file.umode,
+        link_msg->msg.new_file.parent_ino
+    );
+}
 
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
@@ -294,6 +325,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
     case DYNSEC_EVENT_TYPE_OPEN:
     case DYNSEC_EVENT_TYPE_CLOSE:
         print_open_event(fd, (struct dynsec_file_umsg *)hdr);
+    break;
+
+    case DYNSEC_EVENT_TYPE_LINK:
+        print_link_event(fd, (struct dynsec_link_umsg *)hdr);
     break;
 
     default:

@@ -170,6 +170,7 @@ struct dynsec_create_umsg {
     struct dynsec_create_msg msg;
 };
 
+// Core Generic File Content
 struct dynsec_file_msg {
     struct dynsec_task_ctx task;
     uint32_t f_mode;
@@ -181,5 +182,69 @@ struct dynsec_file_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_file_msg msg;
 };
+
+// Core Link Content
+struct dynsec_link_msg {
+    struct dynsec_task_ctx task;
+    struct dynsec_file old_file;
+    struct dynsec_file new_file;
+};
+
+struct dynsec_link_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_link_msg msg;
+};
+
+// Core Symlink Content
+struct dynsec_symlink_msg {
+    struct dynsec_task_ctx task;
+    struct dynsec_file file;
+    uint16_t oldname_offset;
+    uint16_t oldname_size;
+};
+
+struct dynsec_symlink_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_symlink_msg msg;
+};
+
+// Core Mmap Content
+struct dynsec_mmap_msg {
+    struct dynsec_task_ctx task;
+    uint64_t mmap_prot;
+    uint64_t mmap_flags;
+    uint32_t f_mode;
+    uint32_t f_flags;
+    struct dynsec_file file;
+};
+
+struct dynsec_mmap_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_mmap_msg msg;
+};
+
+// Core Ptrace Content
+struct dynsec_ptrace_msg {
+    struct dynsec_task_ctx source;
+    struct dynsec_task_ctx target;
+};
+
+struct dynsec_ptrace_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_ptrace_msg msg;
+};
+
+// Core Signal Content
+struct dynsec_signal_msg {
+    struct dynsec_task_ctx source;
+    int32_t signal;
+    struct dynsec_task_ctx target;
+};
+
+struct dynsec_signal_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_signal_msg msg;
+};
+
 #pragma pack(pop)
 

@@ -173,6 +173,21 @@ static struct dynsec_event *alloc_file_event(enum dynsec_event_type event_type,
     return &file->event;
 }
 
+static struct dynsec_event *alloc_link_event(enum dynsec_event_type event_type,
+                                             uint32_t hook_type, uint16_t report_flags,
+                                             gfp_t mode)
+{
+    struct dynsec_link_event *link = kzalloc(sizeof(*link), mode);
+
+    if (!link) {
+        return NULL;
+    }
+
+    init_event_data(event_type, link, report_flags, hook_type);
+
+    return &link->event;
+}
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint32_t hook_type,
@@ -203,6 +218,9 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
     case DYNSEC_EVENT_TYPE_OPEN:
     case DYNSEC_EVENT_TYPE_CLOSE:
         return alloc_file_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_LINK:
+        return alloc_link_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -290,6 +308,19 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_LINK:
+        {
+            struct dynsec_link_event *link =
+                    dynsec_event_to_link(dynsec_event);
+
+            kfree(link->old_path);
+            link->old_path = NULL;
+            kfree(link->new_path);
+            link->new_path = NULL;
+            kfree(link);
+        }
+        break;
+
     default:
         break;
     }
@@ -353,6 +384,14 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_file_event *file =
                     dynsec_event_to_file(dynsec_event);
             return file->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_LINK:
+        {
+            struct dynsec_link_event *link =
+                    dynsec_event_to_link(dynsec_event);
+            return link->kmsg.hdr.payload;
         }
         break;
 
@@ -677,6 +716,72 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_link_event(const struct dynsec_link_event *link,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < link->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &link->kmsg, sizeof(link->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(link->kmsg);
+        p += sizeof(link->kmsg);
+    }
+
+    // Copy Old Path
+    if (link->old_path && link->kmsg.msg.old_file.path_offset &&
+        link->kmsg.msg.old_file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    link->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, link->old_path, link->kmsg.msg.old_file.path_size)) {
+            goto out_fail;
+        }  else {
+            copied += link->kmsg.msg.old_file.path_size;
+            p += link->kmsg.msg.old_file.path_size;
+        }
+    }
+
+    // Copy New Path
+    if (link->new_path && link->kmsg.msg.new_file.path_offset &&
+        link->kmsg.msg.new_file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    link->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, link->new_path, link->kmsg.msg.new_file.path_size)) {
+            goto out_fail;
+        }  else {
+            copied += link->kmsg.msg.new_file.path_size;
+            p += link->kmsg.msg.new_file.path_size;
+        }
+    }
+
+    if (link->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                link->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 // Copy to userspace
 ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
                                   char *__user p, size_t count)
@@ -736,6 +841,14 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
             const struct dynsec_file_event *file =
                                     dynsec_event_to_file(dynsec_event);
             return copy_file_event(file, p, count);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_LINK:
+        {
+            const struct dynsec_link_event *link =
+                                    dynsec_event_to_link(dynsec_event);
+            return copy_link_event(link, p, count);
         }
         break;
 
@@ -843,7 +956,7 @@ bool fill_in_bprm_set_creds(struct dynsec_event *dynsec_event,
                             const struct linux_binprm *bprm, gfp_t mode)
 {
     struct dynsec_exec_event *exec = NULL;
-    if (dynsec_event &&
+    if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_EXEC) {
         return false;
     }
@@ -871,7 +984,7 @@ bool fill_in_inode_unlink(struct dynsec_event *dynsec_event,
 {
     struct dynsec_unlink_event *unlink = NULL;
 
-    if (dynsec_event &&
+    if (!dynsec_event ||
         !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_UNLINK ||
           dynsec_event->event_type == DYNSEC_EVENT_TYPE_RMDIR)) {
         return false;
@@ -902,7 +1015,7 @@ bool fill_in_inode_rename(struct dynsec_event *dynsec_event,
 {
     struct dynsec_rename_event *rename = NULL;
 
-    if (dynsec_event &&
+    if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_RENAME) {
         return false;
     }
@@ -942,7 +1055,7 @@ bool fill_in_inode_setattr(struct dynsec_event *dynsec_event,
 {
     struct dynsec_setattr_event *setattr = NULL;
 
-    if (dynsec_event &&
+    if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_SETATTR) {
         return false;
     }
@@ -1022,7 +1135,7 @@ bool fill_in_inode_create(struct dynsec_event *dynsec_event,
 {
     struct dynsec_create_event *create = NULL;
 
-    if (dynsec_event &&
+    if (!dynsec_event ||
         !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE ||
           dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR)) {
         return false;
@@ -1065,14 +1178,56 @@ bool fill_in_inode_mkdir(struct dynsec_event *dynsec_event,
     return fill_in_inode_create(dynsec_event, dir, dentry, umode, mode);
 }
 
+bool fill_in_inode_link(struct dynsec_event *dynsec_event,
+                        struct dentry *old_dentry,
+                        struct inode *dir, struct dentry *new_dentry,
+                        gfp_t mode)
+{
+    struct dynsec_link_event *link = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_LINK) {
+        return false;
+    }
+
+    link = dynsec_event_to_link(dynsec_event);
+    link->kmsg.hdr.payload = sizeof(link->kmsg);
+
+    fill_in_task_ctx(&link->kmsg.msg.task);
+
+    // Should be complete info
+    fill_in_dentry_data(&link->kmsg.msg.old_file, old_dentry);
+
+    // For new_file we may want to copy over old_dentry metadata
+    fill_in_dentry_data(&link->kmsg.msg.new_file, new_dentry);
+    fill_in_parent_data(&link->kmsg.msg.new_file, dir);
+
+    link->old_path = dynsec_build_dentry(old_dentry,
+                                &link->kmsg.msg.old_file.path_size,
+                                mode);
+    if (link->old_path && link->kmsg.msg.old_file.path_size) {
+        link->kmsg.msg.old_file.path_offset = link->kmsg.hdr.payload;
+        link->kmsg.hdr.payload += link->kmsg.msg.old_file.path_size;
+    }
+
+    link->new_path = dynsec_build_dentry(new_dentry,
+                                &link->kmsg.msg.new_file.path_size,
+                                mode);
+    if (link->new_path && link->kmsg.msg.new_file.path_size) {
+        link->kmsg.msg.new_file.path_offset = link->kmsg.hdr.payload;
+        link->kmsg.hdr.payload += link->kmsg.msg.new_file.path_size;
+    }
+
+    return true;
+}
 
 extern bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
                               gfp_t mode)
 {
     struct dynsec_file_event *open = NULL;
 
-    if (dynsec_event &&
-        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_OPEN)) {
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_OPEN) {
         return false;
     }
 
@@ -1099,8 +1254,8 @@ extern bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *fi
 {
     struct dynsec_file_event *close = NULL;
 
-    if (dynsec_event &&
-        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_CLOSE)) {
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_CLOSE) {
         return false;
     }
 
