@@ -1464,8 +1464,8 @@ bool fill_in_inode_symlink(struct dynsec_event *dynsec_event,
     return true;
 }
 
-extern bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
-                              gfp_t mode)
+bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
+                       gfp_t mode)
 {
     struct dynsec_file_event *open = NULL;
 
@@ -1492,8 +1492,8 @@ extern bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *fi
     return true;
 }
 
-extern bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
-                              gfp_t mode)
+bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
+                       gfp_t mode)
 {
     struct dynsec_file_event *close = NULL;
 
