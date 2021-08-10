@@ -198,6 +198,7 @@ void ec_event_send_block(ProcessTracking *procp,
 void ec_event_send_file(
     ProcessTracking *procp,
     CB_EVENT_TYPE    event_type,
+    CB_INTENT_TYPE   intent,
     uint64_t         device,
     uint64_t         inode,
     const char *path,
@@ -222,7 +223,7 @@ void ec_event_send_file(
 
     event = ec_factory_alloc_event(
         procp,
-	INTENT_REPORT,
+        intent,
         event_type,
         DL_FILE,
         ec_event_type_to_str(event_type),

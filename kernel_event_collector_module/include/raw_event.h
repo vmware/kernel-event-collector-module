@@ -34,7 +34,7 @@ typedef enum CB_CONFIG_OPTION {
     ALL_FORKS_AND_EXITS       = 3,
     EXECS_ONLY                = 4,
     COLLAPSED_EXITS_ALL_FORKS = 5,
-    COLLAPSED_EXITS_NO_FORKS  = 6
+    COLLAPSED_EXITS_NO_FORKS  = 6,
 } CB_CONFIG_OPTION;
 
 typedef struct CB_DRIVER_CONFIG {
@@ -43,6 +43,7 @@ typedef struct CB_DRIVER_CONFIG {
     CB_CONFIG_OPTION file_mods;
     CB_CONFIG_OPTION net_conns;
     CB_CONFIG_OPTION report_process_user;
+    CB_CONFIG_OPTION report_file_intent;
 
     #ifdef __cplusplus
         bool operator == (struct CB_DRIVER_CONFIG & other)
@@ -387,7 +388,8 @@ typedef struct _CB_EVENT_GENERIC_DATA {
 // intention of the event
 typedef enum CB_INTENT_TYPE {
     INTENT_ACCESS_CHECK = 0, // we are requesting permission for this operation
-    INTENT_REPORT = 1        // we are reporting that an operation happened
+    INTENT_REPORT = 1,       // we are reporting that an operation happened
+    INTENT_PREACTION = 2,    // we are reporting an operation before it happened
 } CB_INTENT_TYPE;
 
 typedef struct CB_EVENT {

@@ -340,6 +340,7 @@ void __ec_put_file_data(ProcessContext *context, file_data_t *file_data)
 
 void __ec_do_generic_file_event(ProcessContext *context,
                                 file_data_t *file_data,
+                                enum CB_INTENT_TYPE intent,
                                 CB_EVENT_TYPE   eventType)
 {
     pid_t pid              = ec_getpid(current);
@@ -349,8 +350,9 @@ void __ec_do_generic_file_event(ProcessContext *context,
 
     TRY(!ec_banning_IgnoreProcess(context, pid));
 
+    TRY(ec_logger_should_log(intent, eventType));
 
-    if (eventType == CB_EVENT_TYPE_FILE_DELETE)
+    if (eventType == CB_EVENT_TYPE_FILE_DELETE && intent == INTENT_REPORT)
     {
         TRACE(DL_VERBOSE, "Checking if deleted inode [%llu:%llu] was banned.", file_data->device, file_data->inode);
         if (ec_banning_ClearBannedProcessInode(context, file_data->device, file_data->inode))
@@ -370,6 +372,7 @@ void __ec_do_generic_file_event(ProcessContext *context,
     ec_event_send_file(
         procp,
         eventType,
+        intent,
         file_data->device,
         file_data->inode,
         file_data->name,
@@ -491,6 +494,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                 ec_event_send_file(
                     procp,
                     eventType,
+                    INTENT_REPORT,
                     device,
                     inode,
                     pathname,
@@ -506,6 +510,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             ec_event_send_file(
                 procp,
                 eventType,
+                INTENT_REPORT,
                 device,
                 inode,
                 pathname,
@@ -627,7 +632,7 @@ CATCH_DISABLED:
     {
         file_data_t *file_data = __ec_get_file_data_from_fd(&context, filename, ret);
 
-        __ec_do_generic_file_event(&context, file_data, eventType);
+        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, eventType);
         __ec_put_file_data(&context, file_data);
     }
 
@@ -664,7 +669,7 @@ CATCH_DISABLED:
     {
         file_data_t *file_data = __ec_get_file_data_from_fd(&context, filename, ret);
 
-        __ec_do_generic_file_event(&context, file_data, eventType);
+        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, eventType);
         __ec_put_file_data(&context, file_data);
     }
 
@@ -695,7 +700,7 @@ CATCH_DISABLED:
     {
         file_data_t *file_data = __ec_get_file_data_from_fd(&context, filename, ret);
 
-        __ec_do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
         __ec_put_file_data(&context, file_data);
     }
 
@@ -718,6 +723,11 @@ asmlinkage long ec_sys_unlink(const char __user *filename)
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
     file_data = __ec_get_file_data_from_name(&context, filename);
+    if (file_data)
+    {
+        __ec_do_generic_file_event(&context, file_data, INTENT_PREACTION,
+                                   CB_EVENT_TYPE_FILE_DELETE);
+    }
 
 CATCH_DISABLED:
     ret = ec_orig_sys_unlink(filename);
@@ -728,7 +738,7 @@ CATCH_DISABLED:
 
     if (!IS_ERR_VALUE(ret) && file_data)
     {
-        __ec_do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_DELETE);
+        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
     }
 
 CATCH_DEFAULT:
@@ -753,6 +763,11 @@ asmlinkage long ec_sys_unlinkat(int dfd, const char __user *filename, int flag)
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
     file_data = __ec_get_file_data_from_name_at(&context, dfd, filename);
+    if (file_data)
+    {
+        __ec_do_generic_file_event(&context, file_data, INTENT_PREACTION,
+                                   CB_EVENT_TYPE_FILE_DELETE);
+    }
 
 CATCH_DISABLED:
     ret = ec_orig_sys_unlinkat(dfd, filename, flag);
@@ -763,7 +778,7 @@ CATCH_DISABLED:
 
     if (!IS_ERR_VALUE(ret) && file_data)
     {
-        __ec_do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_DELETE);
+        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
     }
 
 CATCH_DEFAULT:
@@ -807,12 +822,12 @@ CATCH_DISABLED:
 
     if (!IS_ERR_VALUE(ret) && old_file_data)
     {
-        __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
+        __ec_do_generic_file_event(&context, old_file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
 
         // Send a delete for the destination if the renameat will overwrite an existing file
         if (new_file_data_pre_rename)
         {
-            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
+            __ec_do_generic_file_event(&context, new_file_data_pre_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
         }
 
         FINISH_MODULE_DISABLE_CHECK(&context);
@@ -822,7 +837,7 @@ CATCH_DISABLED:
 
         BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
     }
 
 CATCH_DEFAULT:
@@ -867,12 +882,12 @@ CATCH_DISABLED:
 
     if (!IS_ERR_VALUE(ret) && old_file_data)
     {
-        __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
+        __ec_do_generic_file_event(&context, old_file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
 
         // Send a delete for the destination if the rename will overwrite an existing file
         if (new_file_data_pre_rename)
         {
-            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
+            __ec_do_generic_file_event(&context, new_file_data_pre_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
         }
 
         FINISH_MODULE_DISABLE_CHECK(&context);
@@ -882,7 +897,7 @@ CATCH_DISABLED:
 
         BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
     }
 
 CATCH_DEFAULT:
