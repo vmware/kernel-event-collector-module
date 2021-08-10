@@ -172,8 +172,6 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 #endif
 
     CB_LSM_SETUP_HOOK(file_free_security);
-    CB_LSM_SETUP_HOOK(ptrace_traceme);
-    CB_LSM_SETUP_HOOK(ptrace_access_check);
 
 #undef CB_LSM_SETUP_HOOK
 
