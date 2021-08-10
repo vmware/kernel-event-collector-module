@@ -100,6 +100,11 @@ struct dynsec_task_ctx {
     uint32_t flags;
 };
 
+struct dynsec_blob {
+    uint16_t offset;
+    uint16_t size;
+};
+
 struct dynsec_file {
     uint64_t ino;
     uint32_t dev;
@@ -206,8 +211,7 @@ struct dynsec_link_umsg {
 struct dynsec_symlink_msg {
     struct dynsec_task_ctx task;
     struct dynsec_file file;
-    uint16_t oldname_offset;
-    uint16_t oldname_size;
+    struct dynsec_blob target;
 };
 
 struct dynsec_symlink_umsg {

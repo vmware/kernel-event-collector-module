@@ -295,6 +295,36 @@ void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
     );
 }
 
+void print_symlink_event(int fd, struct dynsec_symlink_umsg *symlink)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *target_path = "";
+    const char *start = (const char *)symlink;
+
+    if (symlink->msg.file.path_offset) {
+        path = start + symlink->msg.file.path_offset;
+    }
+    if (symlink->msg.target.offset) {
+        target_path = start + symlink->msg.target.offset;
+    }
+
+    if (symlink->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &symlink->hdr, response);
+
+    if (quiet) return;
+
+    printf("SYMLINK: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
+        "'%s'[%llu %#o %llu]->'%s'\n",
+        symlink->hdr.tid, symlink->msg.file.dev, symlink->msg.task.mnt_ns,
+        symlink->msg.file.sb_magic,
+        symlink->msg.task.uid,
+        path, symlink->msg.file.ino, symlink->msg.file.umode,
+        symlink->msg.file.parent_ino,
+        target_path
+    );
+}
+
 void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -329,39 +359,43 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
     switch (hdr->event_type) {
     case DYNSEC_EVENT_TYPE_EXEC:
         print_exec_event(fd, (struct dynsec_exec_umsg *)hdr, banned_path);
-    break;
+        break;
 
     case DYNSEC_EVENT_TYPE_UNLINK:
     case DYNSEC_EVENT_TYPE_RMDIR:
         print_unlink_event(fd, (struct dynsec_unlink_umsg *)hdr);
-    break;
+        break;
 
     case DYNSEC_EVENT_TYPE_RENAME:
         print_rename_event(fd, (struct dynsec_rename_umsg *)hdr);
-    break;
+        break;
 
     case DYNSEC_EVENT_TYPE_SETATTR:
         print_setattr_event(fd, (struct dynsec_setattr_umsg *)hdr);
-    break;
+        break;
 
     case DYNSEC_EVENT_TYPE_CREATE:
     case DYNSEC_EVENT_TYPE_MKDIR:
         print_create_event(fd, (struct dynsec_create_umsg *)hdr);
-    break;
+        break;
 
     case DYNSEC_EVENT_TYPE_OPEN:
     case DYNSEC_EVENT_TYPE_CLOSE:
         print_open_event(fd, (struct dynsec_file_umsg *)hdr);
-    break;
+        break;
 
     case DYNSEC_EVENT_TYPE_LINK:
         print_link_event(fd, (struct dynsec_link_umsg *)hdr);
-    break;
+        break;
+
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        print_symlink_event(fd, (struct dynsec_symlink_umsg *)hdr);
+        break;
 
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
         print_task_event(fd, (struct dynsec_task_umsg *)hdr);
-    break;
+        break;
 
     default:
         if (hdr->report_flags & DYNSEC_REPORT_STALL) {

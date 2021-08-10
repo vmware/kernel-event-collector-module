@@ -563,7 +563,21 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SYMLINK, DYNSEC_HOOK_TYPE_SYMLINK,
                                report_flags, GFP_KERNEL);
-    free_dynsec_event(event);
+    if (!fill_in_inode_symlink(event, dir, dentry, old_name, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        (void)enqueue_nonstall_event(stall_tbl, event);
+    }
 
 out:
 

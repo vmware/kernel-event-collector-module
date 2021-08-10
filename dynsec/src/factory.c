@@ -188,6 +188,21 @@ static struct dynsec_event *alloc_link_event(enum dynsec_event_type event_type,
     return &link->event;
 }
 
+static struct dynsec_event *alloc_symlink_event(enum dynsec_event_type event_type,
+                                             uint32_t hook_type, uint16_t report_flags,
+                                             gfp_t mode)
+{
+    struct dynsec_symlink_event *symlink = kzalloc(sizeof(*symlink), mode);
+
+    if (!symlink) {
+        return NULL;
+    }
+
+    init_event_data(event_type, symlink, report_flags, hook_type);
+
+    return &symlink->event;
+}
+
 static struct dynsec_event *alloc_task_event(enum dynsec_event_type event_type,
                                              uint32_t hook_type, uint16_t report_flags,
                                              gfp_t mode)
@@ -236,6 +251,9 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
 
     case DYNSEC_EVENT_TYPE_LINK:
         return alloc_link_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        return alloc_symlink_event(event_type, hook_type, report_flags, mode);
 
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
@@ -340,6 +358,19 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        {
+            struct dynsec_symlink_event *symlink =
+                    dynsec_event_to_symlink(dynsec_event);
+
+            kfree(symlink->path);
+            symlink->path = NULL;
+            kfree(symlink->target_path);
+            symlink->target_path = NULL;
+            kfree(symlink);
+        }
+        break;
+
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
         {
@@ -423,6 +454,15 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             return link->kmsg.hdr.payload;
         }
         break;
+
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        {
+            struct dynsec_symlink_event *symlink =
+                    dynsec_event_to_symlink(dynsec_event);
+            return symlink->kmsg.hdr.payload;
+        }
+        break;
+
 
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
@@ -820,6 +860,72 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_symlink_event(const struct dynsec_symlink_event *symlink,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < symlink->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &symlink->kmsg, sizeof(symlink->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(symlink->kmsg);
+        p += sizeof(symlink->kmsg);
+    }
+
+    // Copy Actual Symlink File Path
+    if (symlink->path && symlink->kmsg.msg.file.path_offset &&
+        symlink->kmsg.msg.file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    symlink->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, symlink->path, symlink->kmsg.msg.file.path_size)) {
+            goto out_fail;
+        }  else {
+            copied += symlink->kmsg.msg.file.path_size;
+            p += symlink->kmsg.msg.file.path_size;
+        }
+    }
+
+    // Target Path
+    if (symlink->target_path && symlink->kmsg.msg.target.offset &&
+        symlink->kmsg.msg.target.size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    symlink->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, symlink->target_path, symlink->kmsg.msg.target.size)) {
+            goto out_fail;
+        }  else {
+            copied += symlink->kmsg.msg.target.size;
+            p += symlink->kmsg.msg.target.size;
+        }
+    }
+
+    if (symlink->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                symlink->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 static ssize_t copy_task_event(const struct dynsec_task_event *task,
                                char *__user buf, size_t count)
 {
@@ -917,6 +1023,14 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
             const struct dynsec_link_event *link =
                                     dynsec_event_to_link(dynsec_event);
             return copy_link_event(link, p, count);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        {
+            const struct dynsec_symlink_event *symlink =
+                                    dynsec_event_to_symlink(dynsec_event);
+            return copy_symlink_event(symlink, p, count);
         }
         break;
 
@@ -1302,6 +1416,49 @@ bool fill_in_inode_link(struct dynsec_event *dynsec_event,
     if (link->new_path && link->kmsg.msg.new_file.path_size) {
         link->kmsg.msg.new_file.path_offset = link->kmsg.hdr.payload;
         link->kmsg.hdr.payload += link->kmsg.msg.new_file.path_size;
+    }
+
+    return true;
+}
+
+bool fill_in_inode_symlink(struct dynsec_event *dynsec_event,
+                           struct inode *dir, struct dentry *dentry,
+                           const char *old_name, gfp_t mode)
+{
+    struct dynsec_symlink_event *symlink = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_SYMLINK) {
+        return false;
+    }
+
+    symlink = dynsec_event_to_symlink(dynsec_event);
+    symlink->kmsg.hdr.payload = sizeof(symlink->kmsg);
+
+    fill_in_task_ctx(&symlink->kmsg.msg.task);
+
+    fill_in_dentry_data(&symlink->kmsg.msg.file, dentry);
+    fill_in_parent_data(&symlink->kmsg.msg.file, dir);
+
+    symlink->kmsg.msg.file.umode |= S_IFLNK;
+
+    symlink->path = dynsec_build_dentry(dentry, &symlink->kmsg.msg.file.path_size, mode);
+
+    if (symlink->path && symlink->kmsg.msg.file.path_size) {
+        symlink->kmsg.msg.file.path_offset = symlink->kmsg.hdr.payload;
+        symlink->kmsg.hdr.payload += symlink->kmsg.msg.file.path_size;
+    }
+    if (old_name && *old_name) {
+        size_t size = strlen(old_name) + 1;
+
+        symlink->target_path = kmalloc(size, mode);
+        if (symlink->target_path) {
+            memcpy(symlink->target_path, old_name, size);
+            symlink->target_path[size - 1] = 0;
+            symlink->kmsg.msg.target.size = (uint16_t)size;
+            symlink->kmsg.msg.target.offset = symlink->kmsg.hdr.payload;
+            symlink->kmsg.hdr.payload += symlink->kmsg.msg.target.size;
+        }
     }
 
     return true;
