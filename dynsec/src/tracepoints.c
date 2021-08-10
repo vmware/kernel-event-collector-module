@@ -140,7 +140,7 @@ bool dynsec_init_tp(uint64_t tp_hooks)
         register_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        register_trace_sched_process_exit(dynsec_sched_process_free_tp, NULL);
+        register_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
     }
 #else
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
@@ -150,7 +150,7 @@ bool dynsec_init_tp(uint64_t tp_hooks)
         register_trace_sched_process_exit(dynsec_sched_process_exit_tp);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        register_trace_sched_process_exit(dynsec_sched_process_free_tp);
+        register_trace_sched_process_free(dynsec_sched_process_free_tp);
     }
 #endif
 
@@ -183,7 +183,7 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
         unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        unregister_trace_sched_process_exit(dynsec_sched_process_free_tp, NULL);
+        unregister_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
     }
 #else
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
@@ -193,7 +193,7 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
         unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        unregister_trace_sched_process_exit(dynsec_sched_process_free_tp);
+        unregister_trace_sched_process_free(dynsec_sched_process_free_tp);
     }
 #endif
 }
