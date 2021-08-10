@@ -5,6 +5,7 @@
 #include <linux/version.h>
 #include <linux/fs.h>
 #include <linux/dcache.h>
+#include <linux/ptrace.h>
 #include "dynsec.h"
 #include "factory.h"
 #include "stall_tbl.h"
@@ -498,6 +499,9 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     if (g_original_ops_ptr) {
         ret = g_original_ops_ptr->inode_link(old_dentry, dir, new_dentry);
+        if (ret) {
+            goto out;
+        }
     }
 #endif
     if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_LINK)) {
@@ -546,6 +550,9 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     if (g_original_ops_ptr) {
         ret =  g_original_ops_ptr->inode_symlink(dir, dentry, old_name);
+        if (ret) {
+            goto out;
+        }
     }
 #endif
     if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_SYMLINK)) {
@@ -599,10 +606,16 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
     if (g_original_ops_ptr) {
         ret =  g_original_ops_ptr->dentry_open(file, cred);
+        if (ret) {
+            goto out;
+        }
     }
 #elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
     if (g_original_ops_ptr) {
         ret = g_original_ops_ptr->file_open(file, cred);
+        if (ret) {
+            goto out;
+        }
     }
 #endif
     if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_OPEN)) {
@@ -718,6 +731,9 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     if (g_original_ops_ptr) {
         ret = g_original_ops_ptr->ptrace_traceme(parent);
+        if (ret) {
+            goto out;
+        }
     }
 #endif
     if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_PTRACE)) {
@@ -735,7 +751,21 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_PTRACE, DYNSEC_HOOK_TYPE_PTRACE,
                                report_flags, GFP_KERNEL);
-    free_dynsec_event(event);
+    if (!fill_in_ptrace(event, parent, current)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        (void)enqueue_nonstall_event(stall_tbl, event);
+    }
 
 out:
 
@@ -751,9 +781,16 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     if (g_original_ops_ptr) {
         ret = g_original_ops_ptr->ptrace_access_check(child, mode);
+        if (ret) {
+            goto out;
+        }
     }
 #endif
     if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_PTRACE)) {
+        goto out;
+    }
+
+    if (!(mode & PTRACE_MODE_ATTACH)) {
         goto out;
     }
 
@@ -762,13 +799,30 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
     }
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
+    } else if (task_in_connected_tgid(child)) {
+        // To prevent a feedback loop. Cache this context after first event.
+        goto out;
     } else {
         report_flags |= DYNSEC_REPORT_STALL;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_PTRACE, DYNSEC_HOOK_TYPE_PTRACE,
                                report_flags, GFP_KERNEL);
-    free_dynsec_event(event);
+    if (!fill_in_ptrace(event, current, child)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        (void)enqueue_nonstall_event(stall_tbl, event);
+    }
 
 out:
 

@@ -46,6 +46,10 @@ struct dynsec_task_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_task_msg msg;
 };
+struct dynsec_ptrace_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_ptrace_msg msg;
+};
 
 // Base struct in queue
 struct dynsec_event {
@@ -112,6 +116,11 @@ struct dynsec_task_event {
     struct dynsec_event event;
     struct dynsec_task_kmsg kmsg;
 };
+
+struct dynsec_ptrace_event {
+    struct dynsec_event event;
+    struct dynsec_ptrace_kmsg kmsg;
+};
 #pragma pack(pop)
 
 // Exec Event container_of helper
@@ -167,6 +176,12 @@ static inline struct dynsec_task_event *
 dynsec_event_to_task(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_task_event, event);
+}
+
+static inline struct dynsec_ptrace_event *
+dynsec_event_to_ptrace(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_ptrace_event, event);
 }
 
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
@@ -240,3 +255,6 @@ extern bool fill_in_clone(struct dynsec_event *dynsec_event,
                           const struct task_struct *parent,
                           const struct task_struct *child);
 
+extern bool fill_in_ptrace(struct dynsec_event *dynsec_event,
+                           const struct task_struct *source,
+                           const struct task_struct *target);

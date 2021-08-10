@@ -352,6 +352,21 @@ void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
     );
 }
 
+void print_ptrace_event(int fd, struct dynsec_ptrace_umsg *ptrace)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+
+    if (ptrace->hdr.report_flags & DYNSEC_REPORT_STALL) {
+        respond_to_access_request(fd, &ptrace->hdr, response);
+    }
+
+    if (quiet) return;
+
+    printf("PTRACE: source:%u ppid:%u\n",
+        ptrace->msg.source.tid, ptrace->msg.target.tid
+    );
+}
+
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -395,6 +410,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
         print_task_event(fd, (struct dynsec_task_umsg *)hdr);
+        break;
+
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        print_ptrace_event(fd, (struct dynsec_ptrace_umsg *)hdr);
         break;
 
     default:

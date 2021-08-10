@@ -218,6 +218,22 @@ static struct dynsec_event *alloc_task_event(enum dynsec_event_type event_type,
     return &task->event;
 }
 
+static struct dynsec_event *alloc_ptrace_event(enum dynsec_event_type event_type,
+                                             uint32_t hook_type, uint16_t report_flags,
+                                             gfp_t mode)
+{
+    struct dynsec_ptrace_event *ptrace = kzalloc(sizeof(*ptrace), mode);
+
+    if (!ptrace) {
+        return NULL;
+    }
+
+    init_event_data(event_type, ptrace, report_flags, hook_type);
+
+    return &ptrace->event;
+}
+
+
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint32_t hook_type,
@@ -258,6 +274,9 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
         return alloc_task_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        return alloc_ptrace_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -381,6 +400,15 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        {
+            struct dynsec_ptrace_event *ptrace =
+                    dynsec_event_to_ptrace(dynsec_event);
+
+            kfree(ptrace);
+        }
+        break;
+
     default:
         break;
     }
@@ -470,6 +498,14 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_task_event *task =
                     dynsec_event_to_task(dynsec_event);
             return task->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        {
+            struct dynsec_ptrace_event *ptrace =
+                    dynsec_event_to_ptrace(dynsec_event);
+            return ptrace->kmsg.hdr.payload;
         }
         break;
 
@@ -956,6 +992,36 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_ptrace_event(const struct dynsec_ptrace_event *ptrace,
+                               char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < ptrace->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &ptrace->kmsg, sizeof(ptrace->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(ptrace->kmsg);
+        p += sizeof(ptrace->kmsg);
+    }
+
+    if (ptrace->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                ptrace->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 // Copy to userspace
 ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
                                   char *__user p, size_t count)
@@ -1040,6 +1106,14 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
             const struct dynsec_task_event *task =
                                     dynsec_event_to_task(dynsec_event);
             return copy_task_event(task, p, count);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        {
+            const struct dynsec_ptrace_event *ptrace =
+                                    dynsec_event_to_ptrace(dynsec_event);
+            return copy_ptrace_event(ptrace, p, count);
         }
         break;
 
@@ -1561,3 +1635,23 @@ bool fill_in_clone(struct dynsec_event *dynsec_event,
 
     return true;
 }
+
+bool fill_in_ptrace(struct dynsec_event *dynsec_event,
+                    const struct task_struct *source,
+                    const struct task_struct *target)
+{
+    struct dynsec_ptrace_event *ptrace = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_PTRACE) {
+        return false;
+    }
+    ptrace = dynsec_event_to_ptrace(dynsec_event);
+    ptrace->kmsg.hdr.payload = sizeof(ptrace->kmsg);
+
+    __fill_in_task_ctx(source, true, &ptrace->kmsg.msg.source);
+    __fill_in_task_ctx(target, true, &ptrace->kmsg.msg.target);
+
+    return true;
+}
+
