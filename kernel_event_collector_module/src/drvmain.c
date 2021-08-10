@@ -42,11 +42,12 @@ uint32_t ec_prsock_buflen;
 bool     g_run_self_tests;
 
 CB_DRIVER_CONFIG g_driver_config = {
-    ALL_FORKS_AND_EXITS,
-    ENABLE,
-    ENABLE,
-    ENABLE,
-    ENABLE
+    .processes =            ALL_FORKS_AND_EXITS,
+    .module_loads =         ENABLE,
+    .file_mods =            ENABLE,
+    .net_conns =            ENABLE,
+    .report_process_user =  ENABLE,
+    .report_file_intent =   DISABLE,
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
@@ -188,6 +189,7 @@ int __init ec_init(void)
     //
     memset(&g_cb_ignored_pids[0], 0, sizeof(pid_t)*CB_SENSOR_MAX_PIDS);
     memset(&g_cb_ignored_uids[0], 0xFF, sizeof(uid_t)*CB_SENSOR_MAX_PIDS);
+
 
     // Allow hooks to be enabled via module param
     ec_set_enableHooks();
