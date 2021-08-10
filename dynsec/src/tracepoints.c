@@ -9,15 +9,15 @@
 #endif
 #include "dynsec.h"
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-extern void dynsec_sched_process_fork_tp(void *data,
-                                         struct task_struct *parent,
-                                         struct task_struct *child);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+extern void dynsec_sched_wakeup_new_tp(void *data, struct task_struct *p);
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+extern void dynsec_sched_wakeup_new_tp(void *data, struct task_struct *p,
+                                       int success);
 #else
-extern void dynsec_sched_process_fork_tp(struct task_struct *parent,
-                                         struct task_struct *child);
+extern void dynsec_sched_wakeup_new_tp(struct rq *rq, struct task_struct *p,
+                                       int success);
 #endif
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 extern void dynsec_sched_process_exit_tp(void *data,
                                          struct task_struct *task);
@@ -50,8 +50,8 @@ struct dynsec_tracepoints dtp = {
         [0] = {
             .enabled = false,
             .tp = NULL,
-            .name = "sched_process_fork",
-            .hook = dynsec_sched_process_fork_tp,
+            .name = "sched_wakeup_new",
+            .hook = dynsec_sched_wakeup_new_tp,
         },
         [1] = {
             .enabled = false,
@@ -134,7 +134,7 @@ bool dynsec_init_tp(uint64_t tp_hooks)
     }
 #elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        register_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
+        register_trace_sched_wakeup_new(dynsec_sched_wakeup_new_tp, NULL);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
         register_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
@@ -144,7 +144,7 @@ bool dynsec_init_tp(uint64_t tp_hooks)
     }
 #else
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        register_trace_sched_process_fork(dynsec_sched_process_fork_tp);
+        register_trace_sched_wakeup_new(dynsec_sched_wakeup_new_tp);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
         register_trace_sched_process_exit(dynsec_sched_process_exit_tp);
@@ -177,7 +177,7 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
     }
 #elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
+        unregister_trace_sched_wakeup_new(dynsec_sched_wakeup_new_tp, NULL);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
         unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
@@ -187,7 +187,7 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
     }
 #else
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp);
+        unregister_trace_sched_wakeup_new(dynsec_sched_wakeup_new_tp);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
         unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp);
