@@ -362,8 +362,23 @@ void print_ptrace_event(int fd, struct dynsec_ptrace_umsg *ptrace)
 
     if (quiet) return;
 
-    printf("PTRACE: source:%u ppid:%u\n",
+    printf("PTRACE: source:%u -> target:%u\n",
         ptrace->msg.source.tid, ptrace->msg.target.tid
+    );
+}
+
+void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+
+    if (signal->hdr.report_flags & DYNSEC_REPORT_STALL) {
+        respond_to_access_request(fd, &signal->hdr, response);
+    }
+
+    if (quiet) return;
+
+    printf("SIGNAL: source:%u -> target:%u sig:%d\n",
+        signal->msg.source.tid, signal->msg.target.tid, signal->msg.signal
     );
 }
 
@@ -414,6 +429,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
     case DYNSEC_EVENT_TYPE_PTRACE:
         print_ptrace_event(fd, (struct dynsec_ptrace_umsg *)hdr);
+        break;
+
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        print_signal_event(fd, (struct dynsec_signal_umsg *)hdr);
         break;
 
     default:

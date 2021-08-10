@@ -745,27 +745,16 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
     }
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
-    } else {
-        report_flags |= DYNSEC_REPORT_STALL;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_PTRACE, DYNSEC_HOOK_TYPE_PTRACE,
-                               report_flags, GFP_KERNEL);
+                               report_flags, GFP_ATOMIC);
     if (!fill_in_ptrace(event, parent, current)) {
         free_dynsec_event(event);
         goto out;
     }
 
-    if (event->report_flags & DYNSEC_REPORT_STALL) {
-        int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
-
-        if (!rc) {
-            ret = response;
-        }
-    } else {
-        (void)enqueue_nonstall_event(stall_tbl, event);
-    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
 
 out:
 
@@ -802,27 +791,16 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
     } else if (task_in_connected_tgid(child)) {
         // To prevent a feedback loop. Cache this context after first event.
         goto out;
-    } else {
-        report_flags |= DYNSEC_REPORT_STALL;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_PTRACE, DYNSEC_HOOK_TYPE_PTRACE,
-                               report_flags, GFP_KERNEL);
+                               report_flags, GFP_ATOMIC);
     if (!fill_in_ptrace(event, current, child)) {
         free_dynsec_event(event);
         goto out;
     }
 
-    if (event->report_flags & DYNSEC_REPORT_STALL) {
-        int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
-
-        if (!rc) {
-            ret = response;
-        }
-    } else {
-        (void)enqueue_nonstall_event(stall_tbl, event);
-    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
 
 out:
 
@@ -850,9 +828,16 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
     if (g_original_ops_ptr) {
         ret = g_original_ops_ptr->task_kill(p, info, sig, secid);
+        if (ret) {
+            goto out;
+        }
     }
 #endif
     if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_SIGNAL)) {
+        goto out;
+    }
+
+    if (!sig) {
         goto out;
     }
 
@@ -865,7 +850,11 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SIGNAL, DYNSEC_HOOK_TYPE_SIGNAL,
                                report_flags, GFP_ATOMIC);
-    free_dynsec_event(event);
+    if (!fill_in_task_kill(event, p, sig)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
 
 out:
 

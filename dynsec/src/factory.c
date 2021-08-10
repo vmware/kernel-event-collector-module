@@ -219,8 +219,8 @@ static struct dynsec_event *alloc_task_event(enum dynsec_event_type event_type,
 }
 
 static struct dynsec_event *alloc_ptrace_event(enum dynsec_event_type event_type,
-                                             uint32_t hook_type, uint16_t report_flags,
-                                             gfp_t mode)
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
 {
     struct dynsec_ptrace_event *ptrace = kzalloc(sizeof(*ptrace), mode);
 
@@ -231,6 +231,21 @@ static struct dynsec_event *alloc_ptrace_event(enum dynsec_event_type event_type
     init_event_data(event_type, ptrace, report_flags, hook_type);
 
     return &ptrace->event;
+}
+
+static struct dynsec_event *alloc_signal_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
+{
+    struct dynsec_signal_event *signal = kzalloc(sizeof(*signal), mode);
+
+    if (!signal) {
+        return NULL;
+    }
+
+    init_event_data(event_type, signal, report_flags, hook_type);
+
+    return &signal->event;
 }
 
 
@@ -277,6 +292,9 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
 
     case DYNSEC_EVENT_TYPE_PTRACE:
         return alloc_ptrace_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        return alloc_signal_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -409,6 +427,15 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        {
+            struct dynsec_signal_event *signal =
+                    dynsec_event_to_signal(dynsec_event);
+
+            kfree(signal);
+        }
+        break;
+
     default:
         break;
     }
@@ -506,6 +533,14 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_ptrace_event *ptrace =
                     dynsec_event_to_ptrace(dynsec_event);
             return ptrace->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        {
+            struct dynsec_signal_event *signal =
+                    dynsec_event_to_signal(dynsec_event);
+            return signal->kmsg.hdr.payload;
         }
         break;
 
@@ -993,7 +1028,7 @@ out_fail:
 }
 
 static ssize_t copy_ptrace_event(const struct dynsec_ptrace_event *ptrace,
-                               char *__user buf, size_t count)
+                                 char *__user buf, size_t count)
 {
     int copied = 0;
     char *__user p = buf;
@@ -1013,6 +1048,36 @@ static ssize_t copy_ptrace_event(const struct dynsec_ptrace_event *ptrace,
     if (ptrace->kmsg.hdr.payload != copied) {
         pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
                 ptrace->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
+static ssize_t copy_signal_event(const struct dynsec_signal_event *signal,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < signal->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &signal->kmsg, sizeof(signal->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(signal->kmsg);
+        p += sizeof(signal->kmsg);
+    }
+
+    if (signal->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                signal->kmsg.hdr.payload, copied);
         goto out_fail;
     }
 
@@ -1114,6 +1179,14 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
             const struct dynsec_ptrace_event *ptrace =
                                     dynsec_event_to_ptrace(dynsec_event);
             return copy_ptrace_event(ptrace, p, count);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        {
+            const struct dynsec_signal_event *signal =
+                                    dynsec_event_to_signal(dynsec_event);
+            return copy_signal_event(signal, p, count);
         }
         break;
 
@@ -1655,3 +1728,22 @@ bool fill_in_ptrace(struct dynsec_event *dynsec_event,
     return true;
 }
 
+bool fill_in_task_kill(struct dynsec_event *dynsec_event,
+                       const struct task_struct *target, int sig)
+{
+    struct dynsec_signal_event *signal = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_SIGNAL) {
+        return false;
+    }
+    signal = dynsec_event_to_signal(dynsec_event);
+    signal->kmsg.hdr.payload = sizeof(signal->kmsg);
+
+    // current task may not always be source of signal
+    __fill_in_task_ctx(current, true, &signal->kmsg.msg.source);
+    signal->kmsg.msg.signal = sig;
+    __fill_in_task_ctx(target, true, &signal->kmsg.msg.target);
+
+    return true;
+}

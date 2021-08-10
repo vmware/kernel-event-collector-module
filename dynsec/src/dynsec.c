@@ -30,8 +30,10 @@
 
 uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
 uint64_t lsm_hooks_enabled = DYNSEC_LSM_HOOKS &
-    ~(DYNSEC_HOOK_TYPE_OPEN |
-      DYNSEC_HOOK_TYPE_CLOSE);
+    ~(
+        DYNSEC_HOOK_TYPE_OPEN   |
+        DYNSEC_HOOK_TYPE_CLOSE
+    );
 
 uint32_t tracepoint_hooks = (
         DYNSEC_TP_HOOK_TYPE_CLONE |
