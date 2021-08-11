@@ -861,35 +861,35 @@ out:
     return ret;
 }
 
-#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
-void dynsec_sched_wakeup_new_tp(void *data, struct task_struct *p)
-#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
-void dynsec_sched_wakeup_new_tp(void *data, struct task_struct *p, int success)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+void dynsec_sched_process_fork_tp(void *data, struct task_struct *parent,
+                                  struct task_struct *child)
 #else
-void dynsec_sched_wakeup_new_tp(struct rq *rq, struct task_struct *p, int success)
+void dynsec_sched_process_fork_tp(struct task_struct *parent,
+                                  struct task_struct *child)
 #endif
 {
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT;
 
-    if (!p) {
+    if (!child) {
         return;
     }
     // Don't send thread events
-    if (p->tgid != p->pid) {
+    if (child->tgid != child->pid) {
         return;
     }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         return;
     }
-    if (task_in_connected_tgid(p->real_parent)) {
+    if (task_in_connected_tgid(parent)) {
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
                                report_flags, GFP_ATOMIC);
-    if (!fill_in_clone(event, NULL, p)) {
+    if (!fill_in_clone(event, parent, child)) {
         free_dynsec_event(event);
         return;
     }
