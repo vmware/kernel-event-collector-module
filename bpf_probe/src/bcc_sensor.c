@@ -428,12 +428,20 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 	__init_header_with_task(type, state, header, (struct task_struct *)bpf_get_current_task());
 }
 
-#define PATH_MSG_SIZE(DATA) (sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+// The verifier on older kernels does not like us to play with the size dynamically
+// # R5 type=inv expected=imm  (from verifier)
+#define PATH_MSG_SIZE(DATA) (sizeof(struct path_data))
+#else
+#define PATH_MSG_SIZE(DATA) (size_t)(sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
+#endif
 
 static u8 __write_fname(struct path_data *data, const void *ptr)
 {
     if (!ptr)
     {
+        data->fname[0] = '\0';
+        data->size = 1;
         return 0;
     }
 	// Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
