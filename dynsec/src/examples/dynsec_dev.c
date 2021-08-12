@@ -17,6 +17,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include "dynsec.h"
 
@@ -26,6 +27,11 @@
 
 static int quiet = 0;
 static int quiet_open_events = 1;
+
+int max_parsed_per_read = 0;
+unsigned long long total_events = 0;
+unsigned long long total_bytes_read = 0;
+unsigned long long total_reads = 0;
 
 // gcc -I../../include -pthread ./dynsec_dev.c -o dynsec
 
@@ -540,6 +546,14 @@ void read_events(int fd, const char *banned_path)
 
             bytes_parsed += hdr->payload;
         }
+
+        total_reads += 1;
+        total_bytes_read += bytes_read;
+        total_events += count;
+        if (max_parsed_per_read < count) {
+            max_parsed_per_read = count;
+        }
+
         if (!quiet && count > 1) {
             printf("multiread count: %d\n", count);
         }
@@ -568,12 +582,28 @@ static void *defer_rename(void *arg)
     return NULL;
 }
 
+
+static void on_sig(int sig)
+{
+    printf("MaxEventsOnRead:%d\nTotalReads:%llu\nTotalEvents:%llu\nTotalBytesRead:%llu\n"
+           "AvgBytesPerEvent:%llu\nAvgBytesPerRead:%llu\nReadsSaved:%llu\n",
+           max_parsed_per_read,
+           total_reads, total_events, total_bytes_read,
+           total_events ? total_bytes_read / total_events: 0,
+           total_reads ? total_bytes_read / total_reads: 0,
+           total_events - total_reads
+    );
+
+    _exit(0);
+}
+
 int main(int argc, const char *argv[])
 {
     int fd;
     const char *devpath;
     unsigned long major;
     pthread_t rename_tid;
+    struct sigaction action;
 
     if (argc < 3) {
         fprintf(stderr, "Usage: %s <desired dev filename> <major dev num>\n", argv[0]);
@@ -598,6 +628,11 @@ int main(int argc, const char *argv[])
     // Example shows we report our own rename events but not stall
     pthread_create(&rename_tid, NULL, defer_rename, NULL);
     pthread_detach(rename_tid);
+
+    // Rough an Dirty Catch sigint
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = on_sig;
+    sigaction(SIGINT, &action, NULL);
 
     // Bans filepaths containing "/foo.sh"
     read_events(fd, "/foo.sh");
