@@ -40,24 +40,24 @@ static void stall_tbl_free_entries(struct stall_tbl *stall_tbl)
 
 static inline unsigned long lock_stall_bkt(struct stall_bkt *bkt, unsigned long flags)
 {
-    spin_lock_irq(&bkt->lock);
+    spin_lock_irqsave(&bkt->lock, flags);
     return flags;
 }
 
 static inline void unlock_stall_bkt(struct stall_bkt *bkt, unsigned long flags)
 {
-    spin_unlock_irq(&bkt->lock);
+    spin_unlock_irqrestore(&bkt->lock, flags);
 }
 
 static inline unsigned long lock_stall_queue(struct stall_q *queue, unsigned long flags)
 {
-    spin_lock_irq(&queue->lock);
+    spin_lock_irqsave(&queue->lock, flags);
     return flags;
 }
 
 static inline void unlock_stall_queue(struct stall_q *queue, unsigned long flags)
 {
-    spin_unlock_irq(&queue->lock);
+    spin_unlock_irqrestore(&queue->lock, flags);
 }
 
 static void stall_queue_defer_wakeup(struct irq_work *work)
@@ -304,6 +304,18 @@ u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
     if (size) {
         stall_queue_wakeup(&tbl->queue);
     } else {
+        free_dynsec_event(event);
+    }
+
+    return size;
+}
+
+// Explicitly don't wake queue for this event
+u32 enqueue_nonstall_event_low_pri(struct stall_tbl *tbl, struct dynsec_event *event)
+{
+    u32 size = stall_tbl_enqueue_event(tbl, event);
+
+    if (!size) {
         free_dynsec_event(event);
     }
 

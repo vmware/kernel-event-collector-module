@@ -98,6 +98,7 @@ struct dynsec_task_ctx {
     uint32_t egid;
     uint32_t mnt_ns;
     uint32_t flags;
+    uint64_t start_time;
 #define DYNSEC_TASK_IN_EXECVE 0x00000001
     uint16_t extra_ctx;
 };

@@ -1317,6 +1317,13 @@ static void __fill_in_task_ctx(const struct task_struct *task,
 
     task_ctx->flags = task->flags;
 
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    task_ctx->start_time = task->start_time;
+#else
+    task_ctx->start_time = (task->start_time.tv_sec * 10000000) +
+    task->start_time.tv_nsec;
+#endif
+
     if (task->in_execve) {
         task_ctx->extra_ctx |= DYNSEC_TASK_IN_EXECVE;
     }
@@ -1331,8 +1338,8 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
 
 static void fill_in_sb_data(struct dynsec_file *dynsec_file, const struct super_block *sb)
 {
-    if (sb) {
-        dynsec_file->dev = sb->s_dev;
+    if (sb) { 
+        dynsec_file->dev = new_encode_dev(sb->s_dev);
         dynsec_file->sb_magic = sb->s_magic;
     }
 }
@@ -1351,6 +1358,8 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
         dynsec_file->gid = inode->i_gid;
 #endif
         dynsec_file->size = inode->i_size;
+        // This is likely in accurate and should be over written
+        // by either dentry or vfsmount accessed super_block
         fill_in_sb_data(dynsec_file, inode->i_sb);
     }
 }

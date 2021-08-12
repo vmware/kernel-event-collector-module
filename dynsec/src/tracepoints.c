@@ -7,6 +7,7 @@
 #else
 #include <trace/events/sched.h>
 #endif
+#include <linux/kprobes.h>
 #include "dynsec.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -29,6 +30,7 @@ extern void dynsec_sched_process_free_tp(void *data, struct task_struct *task);
 extern void dynsec_sched_process_free_tp(struct task_struct *task);
 #endif
 
+extern int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs);
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
 struct tp {
@@ -92,10 +94,35 @@ static void tracepoint_itr_cb(struct tracepoint *tp, void *data)
 }
 #endif
 
+struct kprobe new_task_kprobe;
+
+static void dummy_post_handler(struct kprobe *p, struct pt_regs *regs,
+                unsigned long flags)
+{
+}
+static int dummy_fault_handler(struct kprobe *kprobe, struct pt_regs *regs, int trapnr)
+{
+    return 0;
+}
+
 bool dynsec_init_tp(uint64_t tp_hooks)
 {
-#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    // Try attaching wake_up_new_task for fork/clone events
+    // as it provides the accurate start_times.
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
+        memset(&new_task_kprobe, 0, sizeof(new_task_kprobe));
+        new_task_kprobe.symbol_name = "wake_up_new_task";
+        new_task_kprobe.pre_handler   = dynsec_wake_up_new_task;
+        new_task_kprobe.post_handler  = dummy_post_handler;
+        new_task_kprobe.fault_handler = dummy_fault_handler;
+
+        if (0 > register_kprobe(&new_task_kprobe)) {
+            memset(&new_task_kprobe, 0, sizeof(new_task_kprobe));
+        }
+    }
+
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (!new_task_kprobe.addr && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
         dtp.tp[0].enabled = true;
         dtp.count += 1;
     }
@@ -158,7 +185,7 @@ bool dynsec_init_tp(uint64_t tp_hooks)
 void dynsec_tp_shutdown(uint64_t tp_hooks)
 {
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
+    if (!new_task_kprobe.addr && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
         if (dtp.tp[0].tp) {
             tracepoint_probe_unregister(dtp.tp[0].tp, dtp.tp[0].hook, NULL);
         }
@@ -174,7 +201,7 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
         }
     }
 #elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
+    if (!new_task_kprobe.addr && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
         unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
@@ -184,7 +211,7 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
         unregister_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
     }
 #else
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
+    if (!new_task_kprobe.addr && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
         unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp);
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
@@ -194,4 +221,8 @@ void dynsec_tp_shutdown(uint64_t tp_hooks)
         unregister_trace_sched_process_free(dynsec_sched_process_free_tp);
     }
 #endif
+
+    if (new_task_kprobe.addr) {
+        unregister_kprobe(&new_task_kprobe);
+    }
 }

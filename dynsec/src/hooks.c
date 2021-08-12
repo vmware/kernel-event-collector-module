@@ -922,7 +922,14 @@ static void __dynsec_task_exit(struct task_struct *task,
         free_dynsec_event(event);
         return;
     }
-    (void)enqueue_nonstall_event(stall_tbl, event);
+
+    // The common exit event should have to be high priority
+    // as the task free event is always last.
+    if (exit_hook_type == DYNSEC_TP_HOOK_TYPE_EXIT) {
+        (void)enqueue_nonstall_event_low_pri(stall_tbl, event);
+    } else {
+        (void)enqueue_nonstall_event(stall_tbl, event);
+    }
 }
 void dynsec_task_free(struct task_struct *task, uint32_t exit_hook_type)
 {
@@ -964,6 +971,7 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
     struct dynsec_event *event = NULL;
     int ret = 0;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+    bool is_low_priority = true;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
     if (g_original_ops_ptr) {
@@ -999,6 +1007,7 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         else if (mmap_stall_on_ldso) {
             report_flags |= DYNSEC_REPORT_STALL;
         }
+        is_low_priority = false;
     }
     else {
         if (mmap_stall_misc) {
@@ -1029,12 +1038,55 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
             ret = response;
         }
     } else {
-        (void)enqueue_nonstall_event(stall_tbl, event);
+        if (is_low_priority) {
+            (void)enqueue_nonstall_event_low_pri(stall_tbl, event);
+        } else {
+            (void)enqueue_nonstall_event(stall_tbl, event);
+        }
     }
 
 out:
 
     return ret;
+}
+
+struct kprobe;
+int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
+{
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+#ifdef CONFIG_HAVE_FUNCTION_ARG_ACCESS_API
+    struct task_struct *p = regs_get_kernel_argument(regs, 0);
+#else
+    struct task_struct *p = (struct task_struct *)regs->di;
+#endif
+
+    if (!p) {
+        goto out;
+    }
+    // Don't send thread events
+    if (p->tgid != p->pid) {
+        goto out;
+    }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        goto out;
+    }
+    if (task_in_connected_tgid(p->real_parent)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
+                               report_flags, GFP_ATOMIC);
+    if (!fill_in_clone(event, NULL, p)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+
+    (void)enqueue_nonstall_event_low_pri(stall_tbl, event);
+
+out:
+    return 0;
 }
 
 // int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int flags)

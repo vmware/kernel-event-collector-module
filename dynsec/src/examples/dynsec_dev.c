@@ -388,7 +388,8 @@ void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
     else if (task_msg->hdr.event_type == DYNSEC_EVENT_TYPE_CLONE)
         ev_str = "FORK";
 
-    printf("%s: pid:%u ppid:%u mnt_ns:%u uid:%u\n", ev_str,
+    printf("%s: %llu pid:%u ppid:%u mnt_ns:%u uid:%u\n", ev_str,
+        task_msg->msg.task.start_time,
         task_msg->msg.task.pid,
         task_msg->msg.task.ppid,
         task_msg->msg.task.mnt_ns,
@@ -585,13 +586,15 @@ static void *defer_rename(void *arg)
 
 static void on_sig(int sig)
 {
-    printf("MaxEventsOnRead:%d\nTotalReads:%llu\nTotalEvents:%llu\nTotalBytesRead:%llu\n"
-           "AvgBytesPerEvent:%llu\nAvgBytesPerRead:%llu\nReadsSaved:%llu\n",
+    printf("MaxEventsOnRead: %d\nTotalReads: %llu\nTotalEvents: %llu\nTotalBytesRead: %llu\n"
+           "AvgBytesPerEvent: %llu\nAvgBytesPerRead: %llu\nReadsSaved: %llu\n"
+           "AvgEventsPerRead: %lf\n",
            max_parsed_per_read,
            total_reads, total_events, total_bytes_read,
            total_events ? total_bytes_read / total_events: 0,
            total_reads ? total_bytes_read / total_reads: 0,
-           total_events - total_reads
+           total_events - total_reads,
+           total_events / (double)total_reads
     );
 
     _exit(0);
