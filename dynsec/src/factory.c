@@ -173,6 +173,21 @@ static struct dynsec_event *alloc_file_event(enum dynsec_event_type event_type,
     return &file->event;
 }
 
+static struct dynsec_event *alloc_mmap_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
+{
+    struct dynsec_mmap_event *mmap = kzalloc(sizeof(*mmap), mode);
+
+    if (!mmap) {
+        return NULL;
+    }
+
+    init_event_data(event_type, mmap, report_flags, hook_type);
+
+    return &mmap->event;
+}
+
 static struct dynsec_event *alloc_link_event(enum dynsec_event_type event_type,
                                              uint32_t hook_type, uint16_t report_flags,
                                              gfp_t mode)
@@ -280,6 +295,9 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
     case DYNSEC_EVENT_TYPE_CLOSE:
         return alloc_file_event(event_type, hook_type, report_flags, mode);
 
+    case DYNSEC_EVENT_TYPE_MMAP:
+        return alloc_mmap_event(event_type, hook_type, report_flags, mode);
+
     case DYNSEC_EVENT_TYPE_LINK:
         return alloc_link_event(event_type, hook_type, report_flags, mode);
 
@@ -379,6 +397,17 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
             kfree(file->path);
             file->path = NULL;
             kfree(file);
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_MMAP:
+        {
+            struct dynsec_mmap_event *mmap =
+                    dynsec_event_to_mmap(dynsec_event);
+
+            kfree(mmap->path);
+            mmap->path = NULL;
+            kfree(mmap);
         }
         break;
 
@@ -499,6 +528,14 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_file_event *file =
                     dynsec_event_to_file(dynsec_event);
             return file->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_MMAP:
+        {
+            struct dynsec_mmap_event *mmap =
+                    dynsec_event_to_mmap(dynsec_event);
+            return mmap->kmsg.hdr.payload;
         }
         break;
 
@@ -865,6 +902,54 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_mmap_event(const struct dynsec_mmap_event *mmap,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < mmap->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &mmap->kmsg, sizeof(mmap->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(mmap->kmsg);
+        p += sizeof(mmap->kmsg);
+    }
+
+
+    if (mmap->path && mmap->kmsg.msg.file.path_offset &&
+        mmap->kmsg.msg.file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    mmap->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, mmap->path, mmap->kmsg.msg.file.path_size)) {
+            goto out_fail;
+        } else {
+            copied += mmap->kmsg.msg.file.path_size;
+            p += mmap->kmsg.msg.file.path_size;
+        }
+    }
+
+    if (mmap->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                mmap->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 static ssize_t copy_link_event(const struct dynsec_link_event *link,
                                  char *__user buf, size_t count)
 {
@@ -1149,6 +1234,14 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_MMAP:
+        {
+            const struct dynsec_mmap_event *mmap =
+                                    dynsec_event_to_mmap(dynsec_event);
+            return copy_mmap_event(mmap, p, count);
+        }
+        break;
+
     case DYNSEC_EVENT_TYPE_LINK:
         {
             const struct dynsec_link_event *link =
@@ -1223,6 +1316,10 @@ static void __fill_in_task_ctx(const struct task_struct *task,
 #endif
 
     task_ctx->flags = task->flags;
+
+    if (task->in_execve) {
+        task_ctx->extra_ctx |= DYNSEC_TASK_IN_EXECVE;
+    }
 }
 
 static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
@@ -1663,6 +1760,46 @@ bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
     if (close->path && close->kmsg.msg.file.path_size) {
         close->kmsg.msg.file.path_offset = close->kmsg.hdr.payload;
         close->kmsg.hdr.payload += close->kmsg.msg.file.path_size;
+    }
+
+    return true;
+}
+
+bool fill_in_file_mmap(struct dynsec_event *dynsec_event, struct file *file,
+                       unsigned long prot, unsigned long flags, gfp_t mode)
+{
+    struct dynsec_mmap_event *mmap = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_MMAP) {
+        return false;
+    }
+
+    mmap = dynsec_event_to_mmap(dynsec_event);
+    mmap->kmsg.hdr.payload = sizeof(mmap->kmsg);
+
+    fill_in_task_ctx(&mmap->kmsg.msg.task);
+
+    mmap->kmsg.msg.mmap_prot = prot;
+    mmap->kmsg.msg.mmap_flags = flags;
+
+    if (file) {
+        mmap->kmsg.msg.f_mode = file->f_mode;
+        mmap->kmsg.msg.f_flags = file->f_flags;
+        fill_in_file_data(&mmap->kmsg.msg.file, &file->f_path);
+
+        // Older kernels have had issue with chrooted paths on mmap
+        if (current->nsproxy && file->f_path.mnt) {
+            mmap->path = dynsec_build_path(&file->f_path, &mmap->kmsg.msg.file.path_size, mode);
+        } else {
+            mmap->path = dynsec_build_dentry(file->f_path.dentry,
+                                             &mmap->kmsg.msg.file.path_size, mode);
+        }
+
+        if (mmap->path && mmap->kmsg.msg.file.path_size) {
+            mmap->kmsg.msg.file.path_offset = mmap->kmsg.hdr.payload;
+            mmap->kmsg.hdr.payload += mmap->kmsg.msg.file.path_size;
+        }
     }
 
     return true;

@@ -15,9 +15,14 @@
 #include <sys/types.h>
 #include <sys/sysmacros.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <pthread.h>
 
 #include "dynsec.h"
+
+#ifndef FMODE_EXEC
+#define FMODE_EXEC 0x20
+#endif
 
 static int quiet = 0;
 static int quiet_open_events = 1;
@@ -263,6 +268,39 @@ void print_open_event(int fd, struct dynsec_file_umsg *file)
         file->msg.task.uid, path);
 }
 
+void print_mmap_event(int fd, struct dynsec_mmap_umsg *mmap)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *path = "";
+    const char *ev_str = "MMAP";
+    const char *start = (const char *)mmap;
+
+    if (mmap->hdr.report_flags & DYNSEC_REPORT_STALL)
+        respond_to_access_request(fd, &mmap->hdr, response);
+
+    if (quiet) return;
+
+    if (mmap->msg.task.extra_ctx & DYNSEC_TASK_IN_EXECVE ||
+        (mmap->msg.f_flags & FMODE_EXEC) == FMODE_EXEC) {
+
+        if (mmap->msg.mmap_flags & MAP_EXECUTABLE) {
+            ev_str = "MMAP_EXEC";
+        } else {
+            ev_str = "MMAP_LDSO";
+        }
+    } else if (mmap->msg.mmap_flags & MAP_EXECUTABLE) {
+        ev_str = "MMAP_EXEC";
+    }
+
+    if (mmap->msg.file.path_offset) {
+        path = start + mmap->msg.file.path_offset;
+    }
+
+    printf("%s: tid:%u ino:%llu dev:%#x '%s' mnt_ns:%u magic:%#lx uid:%u\n",
+           ev_str, mmap->hdr.tid, mmap->msg.file.ino, mmap->msg.file.dev, path,
+           mmap->msg.task.mnt_ns, mmap->msg.file.sb_magic, mmap->msg.task.uid);
+}
+
 void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -412,6 +450,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
     case DYNSEC_EVENT_TYPE_OPEN:
     case DYNSEC_EVENT_TYPE_CLOSE:
         print_open_event(fd, (struct dynsec_file_umsg *)hdr);
+        break;
+
+    case DYNSEC_EVENT_TYPE_MMAP:
+        print_mmap_event(fd, (struct dynsec_mmap_umsg *)hdr);
         break;
 
     case DYNSEC_EVENT_TYPE_LINK:

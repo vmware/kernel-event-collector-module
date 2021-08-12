@@ -25,7 +25,8 @@
         DYNSEC_HOOK_TYPE_LINK      |\
         DYNSEC_HOOK_TYPE_SYMLINK   |\
         DYNSEC_HOOK_TYPE_OPEN      |\
-        DYNSEC_HOOK_TYPE_CLOSE)
+        DYNSEC_HOOK_TYPE_CLOSE     |\
+        DYNSEC_HOOK_TYPE_MMAP)
 
 uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
 uint64_t lsm_hooks_enabled = DYNSEC_LSM_HOOKS &

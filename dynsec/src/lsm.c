@@ -46,6 +46,8 @@
 #define DYNSEC_LSM_ptrace_traceme       DYNSEC_HOOK_TYPE_PTRACE
 #define DYNSEC_LSM_ptrace_access_check  DYNSEC_HOOK_TYPE_PTRACE
 #define DYNSEC_LSM_task_free            DYNSEC_HOOK_TYPE_TASK_FREE
+#define DYNSEC_LSM_mmap_file            DYNSEC_HOOK_TYPE_MMAP
+#define DYNSEC_LSM_file_mmap            DYNSEC_HOOK_TYPE_MMAP
 
 
 static bool g_lsmRegistered;
@@ -166,8 +168,10 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     CB_LSM_SETUP_HOOK(inode_symlink);    //security_inode_symlink
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     CB_LSM_SETUP_HOOK(dentry_open); // security_dentry_open
+    CB_LSM_SETUP_HOOK(file_mmap);
 #else
     CB_LSM_SETUP_HOOK(file_open);   // security_file_open
+    CB_LSM_SETUP_HOOK(mmap_file);
     // CB_LSM_SETUP_HOOK(task_free);   // Prefer tracepoint instead of this
 #endif
 

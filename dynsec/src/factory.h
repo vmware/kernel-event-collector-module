@@ -34,6 +34,10 @@ struct dynsec_file_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_file_msg msg;
 };
+struct dynsec_mmap_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_mmap_msg msg;
+};
 struct dynsec_link_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_link_msg msg;
@@ -99,6 +103,12 @@ struct dynsec_create_event {
 struct dynsec_file_event {
     struct dynsec_event event;
     struct dynsec_file_kmsg kmsg;
+    char *path;
+};
+
+struct dynsec_mmap_event {
+    struct dynsec_event event;
+    struct dynsec_mmap_kmsg kmsg;
     char *path;
 };
 
@@ -179,6 +189,12 @@ static inline struct dynsec_file_event *
 dynsec_event_to_file(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_file_event, event);
+}
+
+static inline struct dynsec_mmap_event *
+dynsec_event_to_mmap(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_mmap_event, event);
 }
 
 static inline struct dynsec_task_event *
@@ -262,6 +278,9 @@ extern bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *fi
 
 extern bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
                               gfp_t mode);
+
+extern bool fill_in_file_mmap(struct dynsec_event *dynsec_event, struct file *file,
+                              unsigned long prot, unsigned long flags, gfp_t mode);
 
 extern bool fill_task_free(struct dynsec_event *dynsec_event,
                            const struct task_struct *task);

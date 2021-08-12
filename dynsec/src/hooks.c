@@ -6,6 +6,7 @@
 #include <linux/fs.h>
 #include <linux/dcache.h>
 #include <linux/ptrace.h>
+#include <linux/mman.h>
 #include "dynsec.h"
 #include "factory.h"
 #include "stall_tbl.h"
@@ -946,26 +947,95 @@ void dynsec_sched_process_free_tp(struct task_struct *task)
     __dynsec_task_exit(task, DYNSEC_TP_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
 }
 
-// #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-// int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
-//                      unsigned long flags)
-// #else
-// int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long prot,
-//                      unsigned long flags, unsigned long addr, unsigned long addr_only)
-// #endif
-// {
-// #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
-//     if (g_original_ops_ptr) {
-//         return g_original_ops_ptr->file_mmap(file, reqprot, prot, flags, addr, addr_only);
-//     }
-// #elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
-//     if (g_original_ops_ptr) {
-//         return g_original_ops_ptr->mmap_file(file, reqprot, prot, flags);
-//     }
-// #endif
+// Settings to help control mmap event performance
+int mmap_report_misc = 1;
+int mmap_stall_misc = 0;
+int mmap_stall_on_exec = 1;
+int mmap_stall_on_ldso = 1;
 
-//     return 0;
-// }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
+                     unsigned long flags)
+#else
+int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long prot,
+                     unsigned long flags, unsigned long addr, unsigned long addr_only)
+#endif
+{
+    struct dynsec_event *event = NULL;
+    int ret = 0;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
+    if (g_original_ops_ptr) {
+        ret = g_original_ops_ptr->file_mmap(file, reqprot, prot, flags, addr, addr_only);
+        if (ret) {
+            goto out;
+        }
+    }
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
+    if (g_original_ops_ptr) {
+        ret = g_original_ops_ptr->mmap_file(file, reqprot, prot, flags);
+        if (ret) {
+            goto out;
+        }
+    }
+#endif
+
+    if (!(prot & PROT_EXEC)) {
+        goto out;
+    }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        goto out;
+    }
+
+    if (current->in_execve ||
+        (file && (file->f_mode & FMODE_EXEC) == FMODE_EXEC)) {
+        unsigned long exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
+
+        if (mmap_stall_on_exec && exec_flags & MAP_EXECUTABLE) {
+            report_flags |= DYNSEC_REPORT_STALL;
+        }
+        else if (mmap_stall_on_ldso) {
+            report_flags |= DYNSEC_REPORT_STALL;
+        }
+    }
+    else {
+        if (mmap_stall_misc) {
+            report_flags |= DYNSEC_REPORT_STALL;
+        } else if (!mmap_report_misc) {
+            goto out;
+        }
+    }
+
+    // Don't stall on ourself
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+        report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MMAP, DYNSEC_HOOK_TYPE_MMAP,
+                               report_flags, GFP_KERNEL);
+    if (!fill_in_file_mmap(event, file, prot, flags, GFP_KERNEL)) {
+        free_dynsec_event(event);
+        goto out;
+    }
+
+    if (event->report_flags & DYNSEC_REPORT_STALL) {
+        int response = 0;
+        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+
+        if (!rc) {
+            ret = response;
+        }
+    } else {
+        (void)enqueue_nonstall_event(stall_tbl, event);
+    }
+
+out:
+
+    return ret;
+}
 
 // int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int flags)
 // {
