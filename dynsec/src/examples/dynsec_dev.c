@@ -32,6 +32,12 @@ int max_parsed_per_read = 0;
 unsigned long long total_events = 0;
 unsigned long long total_bytes_read = 0;
 unsigned long long total_reads = 0;
+unsigned long long *histo_reads = NULL;
+unsigned long long *histo_event_type = NULL;
+#define MAX_BUF_SZ (1 << 15)
+#define EVENT_AVG_SZ (1 << 7)
+#define MAX_HISTO_SZ (MAX_BUF_SZ / EVENT_AVG_SZ)
+char *global_buf;
 
 // gcc -I../../include -pthread ./dynsec_dev.c -o dynsec
 
@@ -188,15 +194,15 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
     printf("SETATTR: tid:%u mask:%08x mnt_ns:%u", setattr->hdr.tid,
            setattr->msg.attr_mask, setattr->msg.task.mnt_ns);
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_MODE) {
-        printf(" chmod umode[%#04x -> %#04x", setattr->msg.file.umode,
+        printf(" chmod umode[%o -> %o]", setattr->msg.file.umode,
                setattr->msg.attr_umode);
     }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_UID) {
-        printf(" chown uid[%u -> %u", setattr->msg.file.uid,
+        printf(" chown uid[%u -> %u]", setattr->msg.file.uid,
                setattr->msg.attr_uid);
     }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_GID) {
-        printf(" chown gid[%u -> %u", setattr->msg.file.gid,
+        printf(" chown gid[%u -> %u]", setattr->msg.file.gid,
                setattr->msg.attr_gid);
     }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_SIZE) {
@@ -503,10 +509,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
 void read_events(int fd, const char *banned_path)
 {
-    char buf[8192 * 2];
-    struct dynsec_exec_umsg *exec_msg;
+    int timeout_ms = -1;
+    char *buf = global_buf;
 
-    memset(buf, 'A', sizeof(buf));
+    memset(global_buf, 'A',  MAX_BUF_SZ);
 
     while (1)
     {
@@ -519,7 +525,7 @@ void read_events(int fd, const char *banned_path)
              .revents = 0,
         };
         int count = 0;
-        int ret = poll(&pollfd, 1, -1);
+        int ret = poll(&pollfd, 1, timeout_ms);
 
         if (ret < 0) {
             fprintf(stderr, "poll(%m)\n");
@@ -531,7 +537,7 @@ void read_events(int fd, const char *banned_path)
             break;
         }
 
-        bytes_read = read(fd, buf, sizeof(buf));
+        bytes_read = read(fd, buf, MAX_BUF_SZ);
         if (bytes_read <= 0) {
             if (bytes_read == -1 && errno == EAGAIN) {
                 continue;
@@ -543,24 +549,28 @@ void read_events(int fd, const char *banned_path)
         {
             count++;
             hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
+            histo_event_type[hdr->event_type] += 1;
             print_event(fd, hdr, banned_path);
 
             bytes_parsed += hdr->payload;
         }
 
+        // Increment total reads
+        if (count >= MAX_HISTO_SZ) {
+            histo_reads[MAX_HISTO_SZ] += 1;
+        } else {
+            histo_reads[count] += 1;
+        }
         total_reads += 1;
         total_bytes_read += bytes_read;
         total_events += count;
         if (max_parsed_per_read < count) {
             max_parsed_per_read = count;
         }
-
-        if (!quiet && count > 1) {
-            printf("multiread count: %d\n", count);
-        }
+        histo_reads[count] += 1;
 
         // Observe bytes committed to
-        memset(buf, 'A', sizeof(buf));
+        memset(buf, 'A', bytes_read);
     }
 }
 
@@ -586,6 +596,8 @@ static void *defer_rename(void *arg)
 
 static void on_sig(int sig)
 {
+    int i;
+
     printf("MaxEventsOnRead: %d\nTotalReads: %llu\nTotalEvents: %llu\nTotalBytesRead: %llu\n"
            "AvgBytesPerEvent: %llu\nAvgBytesPerRead: %llu\nReadsSaved: %llu\n"
            "AvgEventsPerRead: %lf\n",
@@ -597,7 +609,27 @@ static void on_sig(int sig)
            total_events / (double)total_reads
     );
 
-    _exit(0);
+    if (histo_event_type) {
+        printf("---EventType Histo---\n");
+        for (i = 0; i < DYNSEC_EVENT_TYPE_MAX; i++) {
+            if (!histo_event_type[i]) {
+                continue;
+            }
+            printf("Event:%d Total Events:%llu\n", i, histo_event_type[i]);
+        }
+    }
+
+    if (histo_reads) {
+        int min = max_parsed_per_read < MAX_HISTO_SZ ? max_parsed_per_read: MAX_HISTO_SZ;
+        printf("---EventsPerRead Histo---\n");
+
+        for (i = 0; i <= min; i++) {
+            if (!histo_reads[i]) {
+                continue;
+            }
+            printf("ReadGroup:%d Total Events:%llu\n", i, histo_reads[i]);
+        }
+    }
 }
 
 int main(int argc, const char *argv[])
@@ -627,6 +659,28 @@ int main(int argc, const char *argv[])
     if (fd < 0) {
         return 255;
     }
+
+    histo_reads = malloc(sizeof(*histo_reads) * MAX_HISTO_SZ);
+    if (!histo_reads) {
+        perror("malloc(histo_reads) ");
+        return 1;
+    }
+    memset(histo_reads, 0, sizeof(*histo_reads) * MAX_HISTO_SZ);
+
+    global_buf = malloc(sizeof(*global_buf) * MAX_BUF_SZ);
+    if (!global_buf) {
+        perror("malloc(global_buf) ");
+        return 1;
+    }
+
+    histo_event_type = malloc(sizeof(*histo_event_type) *
+                              DYNSEC_EVENT_TYPE_MAX);
+    if (!histo_event_type) {
+        perror("malloc(histo_event_type) ");
+        return 1;
+    }
+    memset(histo_event_type, 0,
+           sizeof(*histo_event_type) * DYNSEC_EVENT_TYPE_MAX);
 
     // Example shows we report our own rename events but not stall
     pthread_create(&rename_tid, NULL, defer_rename, NULL);
