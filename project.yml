@@ -8,7 +8,7 @@ builders:
     - gcc73-relwithdebinfo
 service-env:
     MAJOR_VERSION: 2
-    MINOR_VERSION: 3
+    MINOR_VERSION: 4
     PATCH_VERSION: ${BUILD_VERSION}
 
     PROJECT_VERSION:     ${SOURCE_VERSION}
