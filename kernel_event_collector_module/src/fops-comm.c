@@ -677,7 +677,7 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
         if (msg->blockResponse.path && msg->blockResponse.path_size)
         {
-            rc = copy_to_user(p, msg->fileGeneric.path, msg->blockResponse.path_size);
+            rc = copy_to_user(p, msg->blockResponse.path, msg->blockResponse.path_size);
             TRY_STEP(COPY_FAIL, !rc);
 
             p += msg->blockResponse.path_size;
@@ -1203,6 +1203,7 @@ void __ec_apply_driver_config(CB_DRIVER_CONFIG *config)
         g_driver_config.file_mods = (config->file_mods != NO_CHANGE ? config->file_mods : g_driver_config.file_mods);
         g_driver_config.net_conns = (config->net_conns != NO_CHANGE ? config->net_conns : g_driver_config.net_conns);
         g_driver_config.report_process_user = (config->report_process_user != NO_CHANGE ? config->report_process_user : g_driver_config.report_process_user);
+        g_driver_config.report_file_intent = (config->report_file_intent != NO_CHANGE ? config->report_file_intent : g_driver_config.report_file_intent);
 
         __ec_print_driver_config("New Module Config", &g_driver_config);
     }
@@ -1231,13 +1232,14 @@ void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
 {
     if (config)
     {
-        TRACE(DL_INFO, "%s: %s, %s, %s, %s, %s",
+        TRACE(DL_INFO, "%s: %s, %s, %s, %s, %s, %s",
             msg,
             __ec_driver_config_option_to_string(config->processes),
             __ec_driver_config_option_to_string(config->module_loads),
             __ec_driver_config_option_to_string(config->file_mods),
             __ec_driver_config_option_to_string(config->net_conns),
-            __ec_driver_config_option_to_string(config->report_process_user));
+            __ec_driver_config_option_to_string(config->report_process_user),
+            __ec_driver_config_option_to_string(config->report_file_intent));
     }
 }
 

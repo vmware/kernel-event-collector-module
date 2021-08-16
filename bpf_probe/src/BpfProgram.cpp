@@ -87,9 +87,6 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
     BPF_ENTRY_HOOK("security_inode_unlink", "on_security_inode_unlink"),
 
     // File Event Hooks
-    BPF_OPTIONAL_ENTRY_HOOK("__vfs_write",                    "trace_write_entry"),
-    BPF_ALTERNATE_ENTRY_HOOK("__vfs_write", "vfs_write",      "trace_write_entry"),
-    BPF_ALTERNATE_ENTRY_HOOK("__vfs_write", "__kernel_write", "trace_write_entry"),
     BPF_ENTRY_HOOK("security_mmap_file", "on_security_mmap_file"),
     BPF_ENTRY_HOOK("security_file_open", "on_security_file_open"),
     BPF_ENTRY_HOOK("security_file_free", "on_security_file_free"),
