@@ -32,6 +32,7 @@ int max_parsed_per_read = 0;
 unsigned long long total_events = 0;
 unsigned long long total_bytes_read = 0;
 unsigned long long total_reads = 0;
+unsigned long long total_nonstall_events = 0;
 unsigned long long *histo_reads = NULL;
 unsigned long long *histo_event_type = NULL;
 #define MAX_BUF_SZ (1 << 15)
@@ -550,6 +551,9 @@ void read_events(int fd, const char *banned_path)
             count++;
             hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
             histo_event_type[hdr->event_type] += 1;
+            if (!(hdr->report_flags & DYNSEC_REPORT_STALL)) {
+                total_nonstall_events += 1;
+            }
             print_event(fd, hdr, banned_path);
 
             bytes_parsed += hdr->payload;
@@ -600,13 +604,13 @@ static void on_sig(int sig)
 
     printf("MaxEventsOnRead: %d\nTotalReads: %llu\nTotalEvents: %llu\nTotalBytesRead: %llu\n"
            "AvgBytesPerEvent: %llu\nAvgBytesPerRead: %llu\nReadsSaved: %llu\n"
-           "AvgEventsPerRead: %lf\n",
+           "AvgEventsPerRead: %lf\nTotalNonStallEvents: %llu\n",
            max_parsed_per_read,
            total_reads, total_events, total_bytes_read,
            total_events ? total_bytes_read / total_events: 0,
            total_reads ? total_bytes_read / total_reads: 0,
            total_events - total_reads,
-           total_events / (double)total_reads
+           total_events / (double)total_reads, total_nonstall_events
     );
 
     if (histo_event_type) {
