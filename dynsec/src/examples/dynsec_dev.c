@@ -140,9 +140,10 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
 
     if (quiet) return;
 
-    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u magic:%#lx uid:%u '%s'\n",
+    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u magic:%#lx uid:%u '%s' filesize:%llu\n",
         ev_str, exec_msg->msg.task.tid, exec_msg->msg.file.ino, exec_msg->msg.file.dev,
-        exec_msg->msg.task.mnt_ns, exec_msg->msg.file.sb_magic, exec_msg->msg.task.uid, path
+        exec_msg->msg.task.mnt_ns, exec_msg->msg.file.sb_magic, exec_msg->msg.task.uid, path,
+        exec_msg->msg.file.size
     );
 }
 
