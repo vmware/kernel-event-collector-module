@@ -29,11 +29,13 @@ static int quiet = 0;
 static int quiet_open_events = 1;
 static uint32_t default_cache_flags = 0;
 
+unsigned int largest_read = 0;
 int max_parsed_per_read = 0;
 int max_bytes_per_event = 0;
 unsigned long long total_events = 0;
 unsigned long long total_bytes_read = 0;
 unsigned long long total_reads = 0;
+unsigned long long total_stall_events = 0;
 unsigned long long total_nonstall_events = 0;
 unsigned long long total_cached_stall_events = 0;
 unsigned long long *histo_reads = NULL;
@@ -576,6 +578,9 @@ void read_events(int fd, const char *banned_path)
             }
             break;
         }
+        if (bytes_read > largest_read) {
+            largest_read = bytes_read;
+        }
 
         while (bytes_parsed < bytes_read)
         {
@@ -584,6 +589,9 @@ void read_events(int fd, const char *banned_path)
             histo_event_type[hdr->event_type] += 1;
             if (!(hdr->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_CACHED))) {
                 total_nonstall_events += 1;
+            }
+            if (hdr->report_flags & DYNSEC_REPORT_STALL) {
+                total_stall_events += 1;
             }
             if (hdr->report_flags & DYNSEC_REPORT_CACHED) {
                 total_cached_stall_events += 1;
@@ -639,18 +647,36 @@ static void on_sig(int sig)
 {
     int i;
 
-    printf("MostEventsPerRead: %d\n LargestEventSize: %d\nTotalReads: %llu\n"
-           "TotalEvents: %llu\nTotalBytesRead: %llu\n"
-           "AvgBytesPerEvent: %llu\nAvgBytesPerRead: %llu\nReadsSaved: %llu\n"
-           "AvgEventsPerRead: %lf\nTotalNonStallEvents: %llu\n"
+    printf("\nBufferSize: %lu\n"
+           "LargestRead: %u\n"
+           "MaxReadHistoSize: %u\n"
+           "MostEventsOnRead: %d\n"
+           "LargestEventSize: %d\n"
+           "TotalBytesRead: %llu\n"
+           "AvgBytesPerEvent: %llu\n"
+           "AvgBytesPerRead: %llu\n"
+           "AvgEventsPerRead: %lf\n"
+           "ReadsSaved: %llu\n"
+           "TotalReads: %llu\n"
+           "TotalEvents: %llu\n"
+           "TotalNonStallEvents: %llu\n"
+           "TotalStallEvents: %llu\n"
            "TotalCachedStallEvents: %llu\n",
-           max_parsed_per_read, max_bytes_per_event,
-           total_reads, total_events, total_bytes_read,
-           total_events ? total_bytes_read / total_events: 0,
-           total_reads ? total_bytes_read / total_reads: 0,
-           total_events - total_reads,
-           total_events / (double)total_reads, total_nonstall_events,
-           total_cached_stall_events
+           MAX_BUF_SZ,                                          // BufferSize
+           largest_read,                                        // LargestRead
+           MAX_HISTO_SZ,                                        // MaxReadHistoSize
+           max_parsed_per_read,                                 // MostEventsOnRead
+           max_bytes_per_event,                                 // LargestEventSize
+           total_bytes_read,                                    // TotalBytesRead
+           total_events ? total_bytes_read / total_events: 0,   // AvgBytesPerEvent
+           total_reads ? total_bytes_read / total_reads: 0,     // AvgBytesPerRead
+           total_events / (double)total_reads,                  // AvgEventsPerRead
+           total_events - total_reads,                          // ReadsSaved
+           total_reads,                                         // TotalReads
+           total_events,                                        // TotalEvents
+           total_nonstall_events,                               // TotalNonStallEvents
+           total_stall_events,                                  // TotalStallEvents
+           total_cached_stall_events                            // TotalCachedEvents
     );
 
     if (histo_event_type) {
