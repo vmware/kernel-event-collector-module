@@ -9,6 +9,12 @@
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/module.h>
+#ifndef SINGLE_READ_ONLY
+#include <linux/version.h>
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+#include <linux/sched/signal.h>
+#endif
+#endif /* ! SINGLE_READ_ONLY */
 
 #include "dynsec.h"
 #include "stall_tbl.h"
@@ -140,6 +146,11 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
 #ifndef SINGLE_READ_ONLY
     while (1)
     {
+        cond_resched();
+        if (signal_pending(current)) {
+            ret = ubuf - start;
+            goto out;
+        }
         event = stall_queue_shift(stall_tbl, count);
         if (!event) {
             ret = ubuf - start;
