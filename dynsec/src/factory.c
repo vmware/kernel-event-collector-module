@@ -15,9 +15,7 @@
 #include "dynsec.h"
 #include "factory.h"
 #include "path_utils.h"
-
-// Set hook types to disable DYNSEC_REPORT_STALL aka observe timeouts
-uint32_t debug_disable_stall_mask = 0;
+#include "task_cache.h"
 
 static atomic64_t req_id = ATOMIC64_INIT(0);
 
@@ -43,30 +41,26 @@ static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_e
         SUBEVENT->event.report_flags = SUBEVENT->kmsg.hdr.report_flags;\
     } while (0)
 
-#define set_event_report_flags(SUBEVENT, REPORT_MASK) \
-    do { \
-        SUBEVENT->kmsg.hdr.report_flags |= (REPORT_MASK);\
-        SUBEVENT->event.report_flags |= SUBEVENT->kmsg.hdr.report_flags;\
-    } while (0)
-
 #define unset_event_report_flags(SUBEVENT, REPORT_MASK) \
     do { \
-        SUBEVENT->kmsg.hdr.report_flags &= (REPORT_MASK);\
+        SUBEVENT->kmsg.hdr.report_flags &= ~(REPORT_MASK);\
         SUBEVENT->event.report_flags = SUBEVENT->kmsg.hdr.report_flags;\
     } while (0)
 
-#define init_event_data(EVENT_TYPE, EVENT, REPORT_FLAGS, HOOK) \
-    do { \
-        init_dynsec_event(EVENT_TYPE, &EVENT->event);\
-        init_event_report_flags(EVENT, REPORT_FLAGS);\
-        EVENT->kmsg.hdr.hook_type = HOOK;\
-        EVENT->kmsg.hdr.req_id = EVENT->event.req_id;\
-        EVENT->kmsg.hdr.event_type = EVENT->event.event_type;\
-        EVENT->kmsg.hdr.tid = EVENT->event.tid;\
-        if (EVENT->kmsg.hdr.hook_type & debug_disable_stall_mask)\
-            unset_event_report_flags(EVENT, ~(DYNSEC_REPORT_STALL));\
+#define init_event_data(EVENT_TYPE, EVENT, REPORT_FLAGS, HOOK)  \
+    do {                                                        \
+        init_dynsec_event(EVENT_TYPE, &EVENT->event);           \
+        init_event_report_flags(EVENT, REPORT_FLAGS);           \
+        EVENT->kmsg.hdr.hook_type = HOOK;                       \
+        EVENT->kmsg.hdr.req_id = EVENT->event.req_id;           \
+        EVENT->kmsg.hdr.event_type = EVENT->event.event_type;   \
+        EVENT->kmsg.hdr.tid = EVENT->event.tid;                 \
     } while (0)
 
+#define prepare_hdr_data(subevent)                                      \
+    do {                                                                \
+        subevent->kmsg.hdr.report_flags = subevent->event.report_flags; \
+    } while (0)
 
 static struct dynsec_event *alloc_exec_event(enum dynsec_event_type event_type,
                                              uint32_t hook_type, uint16_t report_flags,
@@ -318,6 +312,80 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
         break;
     }
     return NULL;
+}
+
+void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
+{
+    if (!dynsec_event) {
+        return;
+    }
+
+    if (dynsec_event->event_type < DYNSEC_EVENT_TYPE_HEALTH) {
+        (void)task_cache_set_last_event(dynsec_event, NULL, NULL, mode);
+    }
+
+    // Set Queueing Priority When Not High Priority
+    if (!(dynsec_event->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_HI_PRI))) {
+        dynsec_event->report_flags |= DYNSEC_REPORT_LO_PRI;
+    }
+
+    switch (dynsec_event->event_type)
+    {
+    case DYNSEC_EVENT_TYPE_EXEC:
+        prepare_hdr_data(dynsec_event_to_exec(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_UNLINK:
+    case DYNSEC_EVENT_TYPE_RMDIR:
+        prepare_hdr_data(dynsec_event_to_unlink(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_RENAME:
+        prepare_hdr_data(dynsec_event_to_rename(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_SETATTR:
+        prepare_hdr_data(dynsec_event_to_setattr(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        prepare_hdr_data(dynsec_event_to_create(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_OPEN:
+    case DYNSEC_EVENT_TYPE_CLOSE:
+        prepare_hdr_data(dynsec_event_to_file(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_MMAP:
+        prepare_hdr_data(dynsec_event_to_mmap(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_LINK:
+        prepare_hdr_data(dynsec_event_to_link(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        prepare_hdr_data(dynsec_event_to_symlink(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_CLONE:
+    case DYNSEC_EVENT_TYPE_EXIT:
+        prepare_hdr_data(dynsec_event_to_task(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        prepare_hdr_data(dynsec_event_to_ptrace(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        prepare_hdr_data(dynsec_event_to_ptrace(dynsec_event));
+        break;
+
+    default:
+        break;
+    }
 }
 
 // Free events factory

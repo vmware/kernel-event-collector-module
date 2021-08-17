@@ -130,6 +130,8 @@ set(SOURCE_FILES
     hooks.h
     tracepoints.c
     tracepoints.h
+    task_cache.c
+    task_cache.h
     lsm.c
     lsm_mask.h
     logging.h

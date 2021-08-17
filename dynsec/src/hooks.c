@@ -12,6 +12,7 @@
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "lsm_mask.h"
+#include "task_cache.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {
@@ -53,6 +54,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -117,6 +119,7 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -181,6 +184,7 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -249,6 +253,7 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -363,6 +368,7 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -417,6 +423,7 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry, int mode)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -473,6 +480,7 @@ int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -524,6 +532,7 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -556,9 +565,6 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
         }
     }
 #endif
-    if (!(lsm_hooks_enabled & DYNSEC_HOOK_TYPE_SYMLINK)) {
-        goto out;
-    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -575,6 +581,7 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -658,6 +665,7 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_KERNEL);
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
@@ -754,6 +762,7 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_ATOMIC);
 
     (void)enqueue_nonstall_event(stall_tbl, event);
 
@@ -907,13 +916,23 @@ static void __dynsec_task_exit(struct task_struct *task,
     if (!task) {
         return;
     }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    // Clear Entry
+    task_cache_remove_entry(task->pid);
+
     // Don't send thread events
     if (task->tgid != task->pid) {
         return;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
-        return;
+    // The common exit event should have to be high priority
+    // as the task free event is always last.
+    if (exit_hook_type == DYNSEC_TP_HOOK_TYPE_EXIT) {
+        report_flags |= DYNSEC_REPORT_LO_PRI;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_EXIT, exit_hook_type,
@@ -923,13 +942,7 @@ static void __dynsec_task_exit(struct task_struct *task,
         return;
     }
 
-    // The common exit event should have to be high priority
-    // as the task free event is always last.
-    if (exit_hook_type == DYNSEC_TP_HOOK_TYPE_EXIT) {
-        (void)enqueue_nonstall_event_low_pri(stall_tbl, event);
-    } else {
-        (void)enqueue_nonstall_event(stall_tbl, event);
-    }
+    (void)enqueue_nonstall_event(stall_tbl, event);
 }
 void dynsec_task_free(struct task_struct *task, uint32_t exit_hook_type)
 {
@@ -971,7 +984,6 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
     struct dynsec_event *event = NULL;
     int ret = 0;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT;
-    bool is_low_priority = true;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
     if (g_original_ops_ptr) {
@@ -1007,7 +1019,9 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         else if (mmap_stall_on_ldso) {
             report_flags |= DYNSEC_REPORT_STALL;
         }
-        is_low_priority = false;
+
+        // High priority even if we're not stalling
+        report_flags |= DYNSEC_REPORT_HI_PRI;
     }
     else {
         if (mmap_stall_misc) {
@@ -1038,11 +1052,7 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
             ret = response;
         }
     } else {
-        if (is_low_priority) {
-            (void)enqueue_nonstall_event_low_pri(stall_tbl, event);
-        } else {
-            (void)enqueue_nonstall_event(stall_tbl, event);
-        }
+        (void)enqueue_nonstall_event(stall_tbl, event);
     }
 
 out:
@@ -1054,7 +1064,7 @@ struct kprobe;
 int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
 {
     struct dynsec_event *event = NULL;
-    uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_LO_PRI;
 #ifdef CONFIG_HAVE_FUNCTION_ARG_ACCESS_API
     struct task_struct *p = regs_get_kernel_argument(regs, 0);
 #else
@@ -1083,7 +1093,7 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
         goto out;
     }
 
-    (void)enqueue_nonstall_event_low_pri(stall_tbl, event);
+    (void)enqueue_nonstall_event(stall_tbl, event);
 
 out:
     return 0;

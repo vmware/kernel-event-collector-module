@@ -13,6 +13,7 @@
 #include "logging.h"
 #include "path_utils.h"
 #include "tracepoints.h"
+#include "task_cache.h"
 
 #define DYNSEC_LSM_HOOKS (\
         DYNSEC_HOOK_TYPE_EXEC      |\
@@ -115,6 +116,8 @@ static int __init dynsec_init(void)
         return -EINVAL;
     }
 
+    task_cache_register();
+
     return 0;
 }
 
@@ -128,6 +131,8 @@ static void __exit dynsec_exit(void)
     dynsec_tp_shutdown(tracepoint_hooks);
 
     dynsec_lsm_shutdown();
+
+    task_cache_shutdown();
 }
 
 module_init(dynsec_init);

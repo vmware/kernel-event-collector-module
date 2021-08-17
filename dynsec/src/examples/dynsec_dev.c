@@ -27,12 +27,15 @@
 
 static int quiet = 0;
 static int quiet_open_events = 1;
+static uint32_t default_cache_flags = 0;
 
 int max_parsed_per_read = 0;
+int max_bytes_per_event = 0;
 unsigned long long total_events = 0;
 unsigned long long total_bytes_read = 0;
 unsigned long long total_reads = 0;
 unsigned long long total_nonstall_events = 0;
+unsigned long long total_cached_stall_events = 0;
 unsigned long long *histo_reads = NULL;
 unsigned long long *histo_event_type = NULL;
 #define MAX_BUF_SZ (1 << 15)
@@ -78,8 +81,29 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
         .event_type = hdr->event_type,
         .tid = hdr->tid,
         .response = response_type,
-        .cache_flags = 0xFFFFFFFF,
+        .cache_flags = default_cache_flags,
     };
+
+    // switch(hdr->event_type)
+    // {
+    // // rm -rf
+    // case DYNSEC_EVENT_TYPE_UNLINK:
+    //     // Should periodically get evicted/unset
+    //     // if RMDIR events enabled
+    //     response.cache_flags = DYNSEC_CACHE_CLEAR_ON_EVENT;
+    //     break;
+
+    // // tar -xf
+    // case DYNSEC_EVENT_TYPE_CREATE:
+    // case DYNSEC_EVENT_TYPE_SETATTR:
+    //     response.cache_flags = DYNSEC_CACHE_ENABLE_EXCL;
+    //     break;
+
+    // case DYNSEC_EVENT_TYPE_OPEN:
+    // case DYNSEC_EVENT_TYPE_EXEC:
+    //     response.cache_flags = DYNSEC_CACHE_CLEAR_ON_EVENT;
+    //     break;
+    // }
 
     ret = write(fd, &response, sizeof(response));
     if (ret < 0) {
@@ -510,7 +534,7 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
 void read_events(int fd, const char *banned_path)
 {
-    int timeout_ms = -1;
+    int timeout_ms = 100;
     char *buf = global_buf;
 
     memset(global_buf, 'A',  MAX_BUF_SZ);
@@ -532,11 +556,17 @@ void read_events(int fd, const char *banned_path)
             fprintf(stderr, "poll(%m)\n");
             break;
         }
+        if (ret == 0) {
+            if (timeout_ms < 500)
+                timeout_ms += 100;
+            continue;
+        }
         if (ret != 1 || !(pollfd.revents & POLLIN)) {
             fprintf(stderr, "poll ret:%d revents:%lx\n",
                     ret, pollfd.revents);
             break;
         }
+        timeout_ms = 100;
 
         bytes_read = read(fd, buf, MAX_BUF_SZ);
         if (bytes_read <= 0) {
@@ -551,8 +581,14 @@ void read_events(int fd, const char *banned_path)
             count++;
             hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
             histo_event_type[hdr->event_type] += 1;
-            if (!(hdr->report_flags & DYNSEC_REPORT_STALL)) {
+            if (!(hdr->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_CACHED))) {
                 total_nonstall_events += 1;
+            }
+            if (hdr->report_flags & DYNSEC_REPORT_CACHED) {
+                total_cached_stall_events += 1;
+            }
+            if (hdr->payload > max_bytes_per_event) {
+                max_bytes_per_event = hdr->payload;
             }
             print_event(fd, hdr, banned_path);
 
@@ -602,15 +638,18 @@ static void on_sig(int sig)
 {
     int i;
 
-    printf("MaxEventsOnRead: %d\nTotalReads: %llu\nTotalEvents: %llu\nTotalBytesRead: %llu\n"
+    printf("MostEventsPerRead: %d\n LargestEventSize: %d\nTotalReads: %llu\n"
+           "TotalEvents: %llu\nTotalBytesRead: %llu\n"
            "AvgBytesPerEvent: %llu\nAvgBytesPerRead: %llu\nReadsSaved: %llu\n"
-           "AvgEventsPerRead: %lf\nTotalNonStallEvents: %llu\n",
-           max_parsed_per_read,
+           "AvgEventsPerRead: %lf\nTotalNonStallEvents: %llu\n"
+           "TotalCachedStallEvents: %llu\n",
+           max_parsed_per_read, max_bytes_per_event,
            total_reads, total_events, total_bytes_read,
            total_events ? total_bytes_read / total_events: 0,
            total_reads ? total_bytes_read / total_reads: 0,
            total_events - total_reads,
-           total_events / (double)total_reads, total_nonstall_events
+           total_events / (double)total_reads, total_nonstall_events,
+           total_cached_stall_events
     );
 
     if (histo_event_type) {

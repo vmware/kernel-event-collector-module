@@ -28,14 +28,29 @@
 #define DYNSEC_REPORT_STALL      0x0001
 #define DYNSEC_REPORT_INTENT     0x0002
 #define DYNSEC_REPORT_AUDIT      0x0004
-#define DYNSEC_REPORT_EXITING    0x0008
+#define DYNSEC_REPORT_CACHED     0x0008
 #define DYNSEC_REPORT_TP         0x0010
 #define DYNSEC_REPORT_SELF       0x0020
+#define DYNSEC_REPORT_HI_PRI     0x0040
+#define DYNSEC_REPORT_LO_PRI     0x0080
 
 
 // Response Type For Stalls
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
 #define DYNSEC_RESPONSE_EPERM 0x00000001
+
+// Keep Event Cache Enabled Until Explicitly Disabled
+#define DYNSEC_CACHE_ENABLE           0x00000001
+// Keep Event Cache Enabled If Prev Event Also Cachable
+#define DYNSEC_CACHE_ENABLE_EXCL      0x00000002
+// Keep Event Cache Enabled If Prev Event Same Type.
+#define DYNSEC_CACHE_ENABLE_STRICT    0x00000004
+// Explicitly Disable Caching For Event Type
+#define DYNSEC_CACHE_DISABLE          0x00000010
+// Clear All Caching Explicitly
+#define DYNSEC_CACHE_CLEAR            0x00000020
+// Clear All Caching For An Event Type
+#define DYNSEC_CACHE_CLEAR_ON_EVENT   0x00000040
 
 // For Setattr Event
 #define DYNSEC_SETATTR_MODE     (1 << 0)

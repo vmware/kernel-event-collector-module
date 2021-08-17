@@ -78,8 +78,6 @@ extern struct stall_entry *
 stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode);
 
 extern u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event);
-extern u32 enqueue_nonstall_event_low_pri(struct stall_tbl *tbl,
-                                          struct dynsec_event *event);
 
 extern int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry);
 

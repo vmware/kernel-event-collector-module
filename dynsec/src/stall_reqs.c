@@ -14,6 +14,7 @@
 #include "stall_tbl.h"
 #include "factory.h"
 #include "version.h"
+#include "task_cache.h"
 
 static dev_t g_maj_t;
 static int maj_no;
@@ -254,7 +255,15 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
     key.tid = response.tid;
     ret = stall_tbl_resume(stall_tbl, &key, response.response);
     if (ret == 0) {
+        if (response.cache_flags) {
+            (void)task_cache_handle_response(&response);
+        }
         ret = sizeof(response);
+    } else if (ret == -ENOENT) {
+        // Only accept disable cache opts here
+        if (response.cache_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE)) {
+            (void)task_cache_handle_response(&response);
+        }
     }
 
     return ret;

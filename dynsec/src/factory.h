@@ -6,8 +6,6 @@
 #include "dynsec.h"
 #include <linux/version.h>
 
-extern uint32_t debug_disable_stall_mask;
-
 #pragma pack(push, 1)
 // Helper kernel structs in queue
 struct dynsec_exec_kmsg {
@@ -214,6 +212,8 @@ dynsec_event_to_signal(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_signal_event, event);
 }
+
+extern void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode);
 
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
 

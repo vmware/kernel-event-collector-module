@@ -68,11 +68,14 @@ static void stall_queue_defer_wakeup(struct irq_work *work)
     wake_up_interruptible(&queue->wq);
 }
 
-static void stall_queue_wakeup(struct stall_q *queue)
+static void stall_queue_wakeup(struct stall_q *queue, bool defer)
 {
     if (waitqueue_active(&queue->wq)) {
-        // wake_up(&queue->wq);
-        irq_work_queue(&queue->defer_wakeup);
+        if (defer) {
+            irq_work_queue(&queue->defer_wakeup);
+        } else {
+            wake_up(&queue->wq);
+        }
     }
 }
 
@@ -302,20 +305,10 @@ u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
     u32 size = stall_tbl_enqueue_event(tbl, event);
 
     if (size) {
-        stall_queue_wakeup(&tbl->queue);
+        if (!(event->report_flags & DYNSEC_REPORT_LO_PRI)) {
+            stall_queue_wakeup(&tbl->queue, true);
+        }
     } else {
-        free_dynsec_event(event);
-    }
-
-    return size;
-}
-
-// Explicitly don't wake queue for this event
-u32 enqueue_nonstall_event_low_pri(struct stall_tbl *tbl, struct dynsec_event *event)
-{
-    u32 size = stall_tbl_enqueue_event(tbl, event);
-
-    if (!size) {
         free_dynsec_event(event);
     }
 
@@ -363,7 +356,7 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
 
     (void)stall_tbl_enqueue_event(tbl, event);
 
-    stall_queue_wakeup(&tbl->queue);
+    stall_queue_wakeup(&tbl->queue, false);
 
     return entry;
 }
