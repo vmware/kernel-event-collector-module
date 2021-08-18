@@ -49,6 +49,8 @@
 #include <net/sock.h>
 #include <net/inet_sock.h>
 
+#define MAX_FNAME 255L
+
 // Create BPF_LRU if it does not exist.
 // Support for lru hashes begins with 4.10, so a regular hash table must be used on earlier
 // kernels (https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md#tables-aka-maps)
@@ -76,13 +78,17 @@
 #define PT_REGS_RC(x) ((x)->ax)
 #endif
 
-#ifndef bpf_probe_read_str
 // Note that these functions are not 100% compatible.  The read_str function returns the number of bytes read,
 //   while the old version returns 0 on success.  Some of the logic we use does depend on the non-zero result
 //   (described later).
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
-#define bpf_probe_read_str bpf_probe_read
-#endif
+static long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr)
+{
+	bpf_probe_read(dst, size, unsafe_ptr);
+	return MAX_FNAME;
+}
+#else
+#define cb_bpf_probe_read_str bpf_probe_read_str
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
@@ -142,8 +148,6 @@ enum PP {
 	PP_APPEND,
 	PP_DEBUG,
 };
-
-#define MAX_FNAME 255L
 
 struct data_header {
 	u64 event_time; // Time the event collection started.  (Same across message parts.)
@@ -428,23 +432,30 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 	__init_header_with_task(type, state, header, (struct task_struct *)bpf_get_current_task());
 }
 
-#define PATH_MSG_SIZE(DATA) (sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+// The verifier on older kernels does not like us to play with the size dynamically
+// # R5 type=inv expected=imm  (from verifier)
+#define PATH_MSG_SIZE(DATA) (sizeof(struct path_data))
+#else
+#define PATH_MSG_SIZE(DATA) (size_t)(sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
+#endif
 
 static u8 __write_fname(struct path_data *data, const void *ptr)
 {
-    if (!ptr)
-    {
-        return 0;
-    }
-	// Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
-	//  substituted by bpf_probe_read.  The return value for these two cases mean something
-	//  different, but that is OK for our logic.
-	// The bpf_probe_read_str will return the actual bytes written
-	// The bpf_probe_read case will return 0, so we need to assume MAX_FNAME
-	u8 result = bpf_probe_read_str(&data->fname, MAX_FNAME, ptr);
-	data->size = result == 0 ? MAX_FNAME : result;
+	if (!ptr)
+	{
+		data->fname[0] = '\0';
+		data->size = 1;
+		return 0;
+	}
 
-	return result;
+	// Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
+	//  substituted by bpf_probe_read.
+	// The bpf_probe_read_str will return the actual bytes written
+	// The bpf_probe_read case will return MAX_FNAME
+	data->size = cb_bpf_probe_read_str(&data->fname, MAX_FNAME, ptr);
+
+	return data->size;
 }
 
 static u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
@@ -609,50 +620,32 @@ out:
 static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 				   struct path_data *data)
 {
-	struct dentry *current_dentry = NULL;
 	struct dentry *parent_dentry = NULL;
 	struct qstr sp = {};
-
-	struct dentry *root_fs_dentry = NULL;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-	if (task->fs) {
-		root_fs_dentry = task->fs->root.dentry;
-	}
-#else
-	u32 index = 0;
-	struct dentry **t_dentry = (struct dentry **)root_fs.lookup(&index);
-	if (t_dentry) {
-		root_fs_dentry = *t_dentry;
-	}
-#endif
 
 	data->header.state = PP_PATH_COMPONENT;
 #pragma unroll
 	for (int i = 0; i < MAX_PATH_ITER; i++) {
-		if (dentry == root_fs_dentry) {
-			goto out;
-		}
-
 		bpf_probe_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
-		bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
-		if ((void *)sp.name != NULL) {
-			__write_fname(data, sp.name);
-			send_event(ctx, data, PATH_MSG_SIZE(data));
-		}
 
 		if (parent_dentry == dentry || parent_dentry == NULL) {
 			break;
+		}
+
+		bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
+
+		// Check that the name is valid
+		//  We sometimes get a dentry of '/', so this logic will skip it
+		if (__write_fname(data, sp.name) > 0 && data->size > 1) {
+			send_event(ctx, data, PATH_MSG_SIZE(data));
 		}
 
 		dentry = parent_dentry;
 	}
 
 	// Trigger the agent to add the mount path
-	data->fname[0] = '\0';
-	data->size = 1;
-	send_event(ctx, data, PATH_MSG_SIZE(data));
+	data->header.state = PP_NO_EXTRA_DATA;
+	send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 
 out:
 	data->header.state = PP_FINALIZED;
@@ -874,7 +867,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	} else if (file->f_flags & (O_RDWR | O_WRONLY)) {
 		type = EVENT_FILE_WRITE;
 	} else {
-        type = EVENT_FILE_READ;
+		type = EVENT_FILE_READ;
 	}
 
 	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
