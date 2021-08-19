@@ -14,6 +14,7 @@
 #include "path_utils.h"
 #include "tracepoints.h"
 #include "task_cache.h"
+#include "preaction_hooks.h"
 
 #define DYNSEC_LSM_HOOKS (\
         DYNSEC_HOOK_TYPE_EXEC      |\
@@ -105,18 +106,28 @@ static int __init dynsec_init(void)
         return -EINVAL;
     }
 
+    pr_info("%s:%d\n", __func__, __LINE__);
     if (!dynsec_init_lsmhooks(lsm_hooks_mask)) {
+        pr_info("%s:%d\n", __func__, __LINE__);
         dynsec_tp_shutdown(tracepoint_hooks);
         return -EINVAL;
     }
 
+    pr_info("%s:%d\n", __func__, __LINE__);
     if (!dynsec_chrdev_init()) {
+        pr_info("%s:%d\n", __func__, __LINE__);
         dynsec_tp_shutdown(tracepoint_hooks);
         dynsec_lsm_shutdown();
         return -EINVAL;
     }
 
+    // Depends on process events
     task_cache_register();
+
+    // Depends on task cache
+    pr_info("%s:%d\n", __func__, __LINE__);
+    register_preaction_hooks();
+    pr_info("Loaded DynSec\n");
 
     return 0;
 }
@@ -133,6 +144,10 @@ static void __exit dynsec_exit(void)
     dynsec_lsm_shutdown();
 
     task_cache_shutdown();
+
+    pr_info("%s:%d\n", __func__, __LINE__);
+    preaction_hooks_shutdown();
+    pr_info("%s:%d\n", __func__, __LINE__);
 }
 
 module_init(dynsec_init);
