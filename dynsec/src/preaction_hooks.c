@@ -545,6 +545,7 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
     symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
     old_symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
 
+    // Don't assume existing sys_call_table addr is the same
     find_symbol_indirect("sys_call_table",
                          (unsigned long *)&curr_table);
     get_syscall_hooks(curr_table, curr_hooks);
@@ -665,6 +666,7 @@ bool register_preaction_hooks(uint64_t lsm_hooks)
     return true;
 }
 
+// Call with lock held
 static void restore_syscalls(void)
 {
     if (orig) {
