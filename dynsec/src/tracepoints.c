@@ -8,7 +8,7 @@
 #include <trace/events/sched.h>
 #endif
 #include <linux/kprobes.h>
-#include <linux/slab.h>
+#include <linux/mutex.h>
 #include "dynsec.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -33,6 +33,14 @@ extern void dynsec_sched_process_free_tp(struct task_struct *task);
 
 extern int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs);
 
+static DEFINE_MUTEX(tp_lock);
+uint32_t enabled_tp_hooks = 0;
+struct kprobe *new_task_kprobe = NULL;
+struct kprobe __new_task_kprobe;
+
+#define lock_tp() mutex_lock(&tp_lock);
+#define unlock_tp() mutex_unlock(&tp_lock);
+
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
 struct tp {
     bool enabled;
@@ -40,27 +48,31 @@ struct tp {
     char *name;
     void *hook;
 };
+#define TP_CLONE_IDX        0
+#define TP_EXIT_IDX         1
+#define TP_TASK_FREE_IDX    2
+#define TP_MAX_IDX          3
 struct dynsec_tracepoints {
-    struct tp tp[3];
+    struct tp tp[TP_MAX_IDX];
     int count;
     int registered;
 };
 
 struct dynsec_tracepoints dtp = {
     .tp = {
-        [0] = {
+        [TP_CLONE_IDX] = {
             .enabled = false,
             .tp = NULL,
             .name = "sched_process_fork",
             .hook = dynsec_sched_process_fork_tp,
         },
-        [1] = {
+        [TP_EXIT_IDX] = {
             .enabled = false,
             .tp = NULL,
             .name = "sched_process_exit",
             .hook = dynsec_sched_process_exit_tp,
         },
-        [2] = {
+        [TP_TASK_FREE_IDX] = {
             .enabled = false,
             .tp = NULL,
             .name = "sched_process_free",
@@ -95,8 +107,6 @@ static void tracepoint_itr_cb(struct tracepoint *tp, void *data)
 }
 #endif
 
-struct kprobe *new_task_kprobe;
-
 static void dummy_post_handler(struct kprobe *p, struct pt_regs *regs,
                 unsigned long flags)
 {
@@ -106,134 +116,216 @@ static int dummy_fault_handler(struct kprobe *kprobe, struct pt_regs *regs, int 
     return 0;
 }
 
-bool dynsec_init_tp(uint64_t tp_hooks)
+// hold tp_lock
+static void __enable_clone_tp(uint32_t tp_hooks)
 {
-    // Try attaching wake_up_new_task for fork/clone events
-    // as it provides the accurate start_times.
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        new_task_kprobe = kzalloc(sizeof(*new_task_kprobe), GFP_KERNEL);
-        if (new_task_kprobe) {
-            new_task_kprobe->symbol_name = "wake_up_new_task";
-            new_task_kprobe->pre_handler   = dynsec_wake_up_new_task;
-            new_task_kprobe->post_handler  = dummy_post_handler;
-            new_task_kprobe->fault_handler = dummy_fault_handler;
+    if (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
+        return;
+    }
 
-            if (register_kprobe(new_task_kprobe) < 0) {
-                kfree(new_task_kprobe);
-                new_task_kprobe = NULL;
-            }
-        }
-    } else {
-        new_task_kprobe = NULL;
+    if (!(tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
+        return;
+    }
+
+    new_task_kprobe = &__new_task_kprobe;
+    memset(new_task_kprobe, 0, sizeof(*new_task_kprobe));
+    new_task_kprobe->symbol_name = "wake_up_new_task";
+    new_task_kprobe->pre_handler   = dynsec_wake_up_new_task;
+    new_task_kprobe->post_handler  = dummy_post_handler;
+    new_task_kprobe->fault_handler = dummy_fault_handler;
+
+    if (register_kprobe(new_task_kprobe) >= 0 || new_task_kprobe->addr) {
+        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+        return;
+    }
+    new_task_kprobe = NULL;
+
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (dtp.tp[TP_CLONE_IDX].tp && dtp.tp[TP_CLONE_IDX].hook) {
+        tracepoint_probe_register(dtp.tp[TP_CLONE_IDX].tp,
+                                  dtp.tp[TP_CLONE_IDX].hook, NULL);
+        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+    }
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+    register_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
+    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+#else
+    register_trace_sched_process_fork(dynsec_sched_process_fork_tp);
+    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+#endif
+}
+
+// hold tp_lock
+static void __enable_exit_tp(uint32_t tp_hooks)
+{
+    if (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
+        return;
+    }
+
+    if (!(tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT)) {
+        return;
     }
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (dtp.tp[TP_EXIT_IDX].tp && dtp.tp[TP_EXIT_IDX].hook) {
+        tracepoint_probe_register(dtp.tp[TP_EXIT_IDX].tp,
+                                  dtp.tp[TP_EXIT_IDX].hook, NULL);
+        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
+    }
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+    register_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
+    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
+#else
+    register_trace_sched_process_exit(dynsec_sched_process_exit_tp);
+    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
+#endif
+}
+
+// hold tp_lock
+static void __enable_task_free_tp(uint32_t tp_hooks)
+{
+    if (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
+        return;
+    }
+
+    if (!(tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE)) {
+        return;
+    }
+
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (dtp.tp[TP_TASK_FREE_IDX].tp && dtp.tp[TP_TASK_FREE_IDX].hook) {
+        tracepoint_probe_register(dtp.tp[TP_TASK_FREE_IDX].tp,
+                                  dtp.tp[TP_TASK_FREE_IDX].hook, NULL);
+        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
+    }
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+    register_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
+    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
+#else
+    register_trace_sched_process_free(dynsec_sched_process_free_tp);
+    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
+#endif
+}
+
+// hold tp_lock
+static void __disable_clone_tp(void)
+{
+    if (!(enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
+        return;
+    }
+
+    enabled_tp_hooks &= ~(DYNSEC_TP_HOOK_TYPE_CLONE);
+
+    if (new_task_kprobe) {
+        unregister_kprobe(new_task_kprobe);
+        new_task_kprobe = NULL;
+        return;
+    }
+
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (dtp.tp[TP_CLONE_IDX].tp && dtp.tp[TP_CLONE_IDX].hook) {
+        tracepoint_probe_unregister(dtp.tp[TP_CLONE_IDX].tp,
+                                    dtp.tp[TP_CLONE_IDX].hook, NULL);
+    }
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+    unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
+#else
+    unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp);
+#endif
+}
+
+// hold tp_lock
+static void __disable_exit_tp(void)
+{
+    if (!(enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT)) {
+        return;
+    }
+
+    enabled_tp_hooks &= ~(DYNSEC_TP_HOOK_TYPE_EXIT);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (dtp.tp[TP_EXIT_IDX].tp && dtp.tp[TP_EXIT_IDX].hook) {
+        tracepoint_probe_unregister(dtp.tp[TP_EXIT_IDX].tp,
+                                    dtp.tp[TP_EXIT_IDX].hook, NULL);
+    }
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+    unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
+#else
+    unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp);
+#endif
+}
+
+// hold tp_lock
+static void __disable_task_free_tp(void)
+{
+    if (!(enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE)) {
+        return;
+    }
+
+    enabled_tp_hooks &= ~(DYNSEC_TP_HOOK_TYPE_TASK_FREE);
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+    if (dtp.tp[TP_TASK_FREE_IDX].tp && dtp.tp[TP_TASK_FREE_IDX].hook) {
+        tracepoint_probe_unregister(dtp.tp[TP_TASK_FREE_IDX].tp,
+                                    dtp.tp[TP_TASK_FREE_IDX].hook, NULL);
+    }
+#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+    unregister_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
+#else
+    unregister_trace_sched_process_free(dynsec_sched_process_free_tp);
+#endif
+}
+
+bool may_enable_task_cache(void)
+{
+    return (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE);
+}
+
+void dynsec_tp_shutdown(void)
+{
+    if (enabled_tp_hooks) {
+        mutex_lock(&tp_lock);
+        __disable_clone_tp();
+        __disable_exit_tp();
+        __disable_task_free_tp();
+        mutex_unlock(&tp_lock);
+    }
+
+    tracepoint_synchronize_unregister();
+}
+
+bool dynsec_init_tp(uint32_t tp_hooks)
+{
+    enabled_tp_hooks = 0;
+    new_task_kprobe = NULL;
+
+    if (!tp_hooks) {
+        return true;
+    }
+
+    lock_tp();
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
     if (!new_task_kprobe && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
-        dtp.tp[0].enabled = true;
+        dtp.tp[TP_CLONE_IDX].enabled = true;
         dtp.count += 1;
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        dtp.tp[1].enabled = true;
+        dtp.tp[TP_EXIT_IDX].enabled = true;
         dtp.count += 1;
     }
     if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        dtp.tp[2].enabled = true;
+        dtp.tp[TP_TASK_FREE_IDX].enabled = true;
         dtp.count += 1;
     }
 
     if (dtp.count) {
         for_each_kernel_tracepoint(tracepoint_itr_cb, &dtp);
     }
-    if (dtp.count != dtp.registered) {
-        return false;
-    }
-
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        if (dtp.tp[0].tp && dtp.tp[0].hook) {
-            tracepoint_probe_register(dtp.tp[0].tp, dtp.tp[0].hook, NULL);
-        }
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        if (dtp.tp[1].tp && dtp.tp[1].hook) {
-            tracepoint_probe_register(dtp.tp[1].tp, dtp.tp[1].hook, NULL);
-        }
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        if (dtp.tp[2].tp && dtp.tp[2].hook) {
-            tracepoint_probe_register(dtp.tp[2].tp, dtp.tp[2].hook, NULL);
-        }
-    }
-#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
-    if (!new_task_kprobe && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
-        register_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        register_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        register_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
-    }
-#else
-    if (!new_task_kprobe && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
-        register_trace_sched_process_fork(dynsec_sched_process_fork_tp);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        register_trace_sched_process_exit(dynsec_sched_process_exit_tp);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        register_trace_sched_process_free(dynsec_sched_process_free_tp);
-    }
 #endif
+
+    __enable_clone_tp(tp_hooks);
+    __enable_exit_tp(tp_hooks);
+    __enable_task_free_tp(tp_hooks);
+
+    unlock_tp();
 
     return true;
-}
-
-void dynsec_tp_shutdown(uint64_t tp_hooks)
-{
-    if (new_task_kprobe) {
-        unregister_kprobe(new_task_kprobe);
-    }
-
-#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
-        if (dtp.tp[0].tp && dtp.tp[0].hook) {
-            tracepoint_probe_unregister(dtp.tp[0].tp, dtp.tp[0].hook, NULL);
-        }
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        if (dtp.tp[1].tp && dtp.tp[1].hook) {
-            tracepoint_probe_unregister(dtp.tp[1].tp, dtp.tp[1].hook, NULL);
-        }
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        if (dtp.tp[2].tp && dtp.tp[2].hook) {
-            tracepoint_probe_unregister(dtp.tp[2].tp, dtp.tp[2].hook, NULL);
-        }
-    }
-#elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
-    if (!new_task_kprobe && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
-        unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        unregister_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
-    }
-#else
-    if (!new_task_kprobe && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
-        unregister_trace_sched_process_fork(dynsec_sched_process_fork_tp);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
-        unregister_trace_sched_process_exit(dynsec_sched_process_exit_tp);
-    }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
-        unregister_trace_sched_process_free(dynsec_sched_process_free_tp);
-    }
-#endif
-
-    if (new_task_kprobe) {
-        kfree(new_task_kprobe);
-        new_task_kprobe = NULL;
-    }
 }

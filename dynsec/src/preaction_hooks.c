@@ -1,34 +1,82 @@
-
-
+// SPDX-License-Identifier: GPL-2.0
+// Copyright (c) 2021 VMware, Inc. All rights reserved.
 #include <linux/kprobes.h>
 #include <linux/module.h>
 #include <linux/kallsyms.h>
 #include <linux/version.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/capability.h>
+#include <linux/unistd.h>
 #include "preaction_hooks.h"
 #include "symbols.h"
 #include "version.h"
+#include "dynsec.h"
+#include "lsm_mask.h"
 
+
+struct syscall_hooks {
+#ifdef USE_PT_REGS
+    #define DEF_SYS_HOOK(NAME, ...) asmlinkage long (*NAME)(struct pt_regs *regs)
+#else
+#define DEF_SYS_HOOK(NAME, ...) asmlinkage long (*NAME)(__VA_ARGS__)
+#endif
+    DEF_SYS_HOOK(delete_module, const char __user *name_user,
+                 unsigned int flags);
+    DEF_SYS_HOOK(open, const char __user *filename, int flags, umode_t mode);
+    DEF_SYS_HOOK(creat, const char __user *pathname, umode_t mode);
+    DEF_SYS_HOOK(openat, int dfd, const char __user *filename, int flags,
+                 umode_t mode);
+#ifdef __NR_openat2
+    DEF_SYS_HOOK(openat2, int dfd, const char __user *filename,
+                 struct open_how __user * how, size_t usize);
+#endif /* __NR_openat2 */
+
+    DEF_SYS_HOOK(rename, const char __user *oldname,
+                 const char __user *newname);
+#ifdef __NR_renameat
+    DEF_SYS_HOOK(renameat, int olddfd, const char __user *oldname,
+                 int newdfd, const char __user *newname);
+#endif /* __NR_renameat */
+#ifdef __NR_renameat2
+    DEF_SYS_HOOK(renameat2, int olddfd, const char __user *oldname,
+                 int newdfd, const char __user *newname, unsigned int flags);
+#endif /* __NR_renameat2 */
+
+    DEF_SYS_HOOK(mkdir, const char __user *pathname, umode_t mode);
+    DEF_SYS_HOOK(mkdirat, int dfd, const char __user *pathname, umode_t mode);
+
+    DEF_SYS_HOOK(unlink, const char __user *pathname);
+    DEF_SYS_HOOK(unlinkat, int dfd, const char __user *pathname, int flag);
+    DEF_SYS_HOOK(rmdir, const char __user *pathname);
+
+    DEF_SYS_HOOK(symlink, const char __user *oldname,
+                 const char __user *newname);
+    DEF_SYS_HOOK(symlinkat, const char __user *oldname,
+                 int newdfd, const char __user *newname);
+
+    DEF_SYS_HOOK(link, const char __user *oldname, const char __user *newname);
+    DEF_SYS_HOOK(linkat, int olddfd, const char __user *oldname,
+                 int newdfd, const char __user *newname, int flags);
+
+#undef DEF_SYS_HOOK
+};
 
 static struct syscall_hooks *orig;
 static struct syscall_hooks *ours;
 
 static struct syscall_hooks in_kernel;
 static struct syscall_hooks in_our_kmod;
-// static struct syscall_hooks foreign;
 
+// Mask of LSM hooks requesting PreActions
+static uint64_t syscall_hooks_enabled;
 
 static DEFINE_MUTEX(lookup_lock);
 static void **sys_call_table;
-static void **prev_sys_call_table;
 static void **ia32_sys_call_table;
-static void **prev_ia32_sys_call_table;
-
-#define GPF_DISABLE() write_cr0(read_cr0() & (~ 0x10000))
-#define GPF_ENABLE()  write_cr0(read_cr0() | 0x10000)
 
 
+// PreAction hooks we can support via kprobe
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
 int dynsec_chmod_common(struct kprobe *kprobe, struct pt_regs *regs)
 {
@@ -44,200 +92,220 @@ int dynsec_vfs_truncate(struct kprobe *kprobe, struct pt_regs *regs)
 {
     return 0;
 }
+#else
+// Would have to rely on syscalls or syscall tracepoints
 #endif
 
 
-static inline struct syscall_hooks *select_hook(void)
+
+// Call with lock held
+static void restore_syscalls(void);
+static int syscall_changed(const struct syscall_hooks *old_hooks,
+                           bool *entire_tbl_chg);
+static bool may_restore_syscalls(void)
 {
-    if (orig) {
-        return orig;
+    bool entire_tbl_chg = false;
+    int diff;
+
+    if (!ours || !orig || !sys_call_table) {
+        return true;
     }
-    return &in_kernel;
+
+    diff = syscall_changed(ours, &entire_tbl_chg);
+    pr_info("%s:%d entire_tbl_chg:%d diff:%d\n", __func__, __LINE__,
+            entire_tbl_chg, diff);
+    return (entire_tbl_chg == false && diff == 0);
 }
 
-asmlinkage long dynsec_delete_module(const char __user *name_user, unsigned int flags)
+// Stubbed to potentially handle further redirection
+#define select_hook() (&in_kernel)
+#ifdef USE_PT_REGS
+#define DEF_DYNSEC_SYS(NAME, ...) static asmlinkage long dynsec_##NAME(struct pt_regs *regs)
+#define ret_sys(NAME, ...) select_hook()->NAME(regs)
+#else
+#define DEF_DYNSEC_SYS(NAME, ...) static asmlinkage long dynsec_##NAME(__VA_ARGS__)
+#define ret_sys(NAME, ...) select_hook()->NAME(__VA_ARGS__)
+#endif
+
+// #ifdef USE_PT_REGS
+// static asmlinkage long dynsec_delete_module(struct pt_regs *regs)
+// #else
+// static asmlinkage long dynsec_delete_module(const char __user *name_user,
+//                                      unsigned int flags)
+// #endif
+DEF_DYNSEC_SYS(delete_module, const char __user *name_user, unsigned int flags)
 {
-    char *modname = NULL;
+#ifdef USE_PT_REGS
+    DECL_ARG_1(const char __user *, name_user);
+    DECL_ARG_2(unsigned int, flags);
+#endif
+    char name_kernel[MODULE_NAME_LEN];
+    int ref_count;
     int ret;
-    static int count = 0;
-    int local_count;
+    bool restored = false;
 
-    modname = kzalloc(MODULE_NAME_LEN + 1, GFP_KERNEL);
-    if (!modname) {
-        return -ENOMEM;
+    if (!capable(CAP_SYS_MODULE)) {
+        // Allow event to audit
+        goto out;
     }
 
-    ret = strncpy_from_user(modname, name_user, MODULE_NAME_LEN);
+    ret = strncpy_from_user(name_kernel, name_user, MODULE_NAME_LEN-1);
     if (ret < 0) {
-        kfree(modname);
-        return ret;
+        return -EFAULT;
+    }
+    name_kernel[MODULE_NAME_LEN - 1] = 0;
+
+    // THIS_MODULE->name should work instead of CB_APP_MODULE_NAME
+    if (strncmp(name_kernel, CB_APP_MODULE_NAME, MODULE_NAME_LEN) != 0) {
+        goto out;
     }
 
-    if (strncmp(modname, CB_APP_MODULE_NAME, MODULE_NAME_LEN) == 0) {
-        kfree(modname);
-
-        mutex_lock(&lookup_lock);
-        count += 1;
-        local_count = count;
-        mutex_unlock(&lookup_lock);
-
-        if (local_count == 1) {
-            preaction_hooks_shutdown();
-            return -EBUSY;
-        }
+    ref_count = module_refcount(THIS_MODULE);
+    // Already unloading
+    if (ref_count < 0) {
+        return -EWOULDBLOCK;
     }
 
-    kfree(modname);
-    return select_hook()->delete_module(name_user, flags);
+    // Client connected or some other kmod refcounted us
+    if (ref_count > 0) {
+        return -EWOULDBLOCK;
+    }
+
+    if (check_lsm_hooks_changed() != 0) {
+        // If we wanted to check syscall hooks to be verbose
+        // mutex_lock(&lookup_lock);
+        // (void)may_restore_syscalls();
+        // mutex_unlock(&lookup_lock);
+        return -EWOULDBLOCK;
+    }
+
+    mutex_lock(&lookup_lock);
+    if (may_restore_syscalls()) {
+        restored = true;
+        restore_syscalls();
+    }
+    mutex_unlock(&lookup_lock);
+
+    // Should we return -EBUSY or -EWOULDBLOCK?
+    if (restored) {
+        return -EBUSY;
+    }
+
+out:
+    return ret_sys(delete_module, name_user, flags);
 }
 
-asmlinkage long dynsec_open(const char __user *filename, int flags, umode_t mode)
+
+DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 {
-    return select_hook()->open(filename, flags, mode);
+    return ret_sys(open, filename, flags, mode);
 }
-asmlinkage long dynsec_creat(const char __user *pathname, umode_t mode)
+DEF_DYNSEC_SYS(creat, const char __user *pathname, umode_t mode)
 {
-    return select_hook()->creat(pathname, mode);
+    return ret_sys(creat, pathname, mode);
 }
-asmlinkage long dynsec_openat(int dfd, const char __user *filename,
-                              int flags, umode_t mode)
+DEF_DYNSEC_SYS(openat, int dfd, const char __user *filename,
+               int flags, umode_t mode)
 {
-    return select_hook()->openat(dfd, filename, flags, mode);
+    return ret_sys(openat, dfd, filename, flags, mode);
 }
 #ifdef __NR_openat2
-asmlinkage long dynsec_openat2(int dfd, const char __user *filename,
-                               struct open_how __user *how, size_t usize)
+DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
+               struct open_how __user *how, size_t usize)
 {
-    return select_hook()->openat2(dfd, filename, how, usize);
+    return ret_sys(openat2, dfd, filename, how, usize);
 }
 #endif /* __NR_openat2 */
 
-asmlinkage long dynsec_rename(const char __user *oldname, const char __user *newname)
+
+DEF_DYNSEC_SYS(rename, const char __user *oldname, const char __user *newname)
 {
-    return select_hook()->rename(oldname, newname);
+    return ret_sys(rename, oldname, newname);
 }
 #ifdef __NR_renameat
-asmlinkage long dynsec_renameat(int olddfd, const char __user *oldname,
-                                int newdfd, const char __user *newname)
+DEF_DYNSEC_SYS(renameat, int olddfd, const char __user *oldname,
+               int newdfd, const char __user *newname)
 {
-    return select_hook()->renameat(olddfd, oldname, newdfd, newname);
+    return ret_sys(renameat, olddfd, oldname, newdfd, newname);
 }
 #endif /* __NR_renameat */
 #ifdef __NR_renameat2
-asmlinkage long dynsec_renameat2(int olddfd, const char __user *oldname,
-                                 int newdfd, const char __user *newname,
-                                 unsigned int flags)
+DEF_DYNSEC_SYS(renameat2, int olddfd, const char __user *oldname,
+               int newdfd, const char __user *newname, unsigned int flags)
 {
-    return select_hook()->renameat2(olddfd, oldname, newdfd, newname, flags);
+    return ret_sys(renameat2, olddfd, oldname, newdfd, newname, flags);
 }
 #endif /* __NR_renameat2 */
 
 
-asmlinkage long dynsec_mkdir(const char __user *pathname, umode_t mode)
+DEF_DYNSEC_SYS(mkdir, const char __user *pathname, umode_t mode)
 {
-    return select_hook()->mkdir(pathname, mode);
+    return ret_sys(mkdir, pathname, mode);
 }
-asmlinkage long dynsec_mkdirat(int dfd, const char __user *pathname, umode_t mode)
+
+DEF_DYNSEC_SYS(mkdirat, int dfd, const char __user *pathname, umode_t mode)
 {
-    return select_hook()->mkdirat(dfd, pathname, mode);
+    return ret_sys(mkdirat, dfd, pathname, mode);
 }
 
 
-asmlinkage long dynsec_unlink(const char __user *pathname)
+DEF_DYNSEC_SYS(unlink, const char __user *pathname)
 {
-    return select_hook()->unlink(pathname);
+    return ret_sys(unlink, pathname);
 }
-asmlinkage long dynsec_unlinkat(int dfd, const char __user *pathname, int flag)
+DEF_DYNSEC_SYS(unlinkat, int dfd, const char __user *pathname,
+                                       int flag)
 {
-    return select_hook()->unlinkat(dfd, pathname, flag);
+    return ret_sys(unlinkat, dfd, pathname, flag);
 }
-asmlinkage long dynsec_rmdir(const char __user *pathname)
+DEF_DYNSEC_SYS(rmdir, const char __user *pathname)
 {
-    return select_hook()->rmdir(pathname);
+    return ret_sys(rmdir, pathname);
+}
+
+
+DEF_DYNSEC_SYS(symlink, const char __user *oldname, const char __user *newname)
+{
+    return ret_sys(symlink, oldname, newname);
+}
+DEF_DYNSEC_SYS(symlinkat, const char __user *oldname,
+               int newdfd, const char __user *newname)
+{
+    return ret_sys(symlinkat, oldname, newdfd, newname);
 }
 
 
-asmlinkage long dynsec_symlink(const char __user *oldname, const char __user *newname)
+DEF_DYNSEC_SYS(link, const char __user *oldname, const char __user *newname)
 {
-    return select_hook()->symlink(oldname, newname);
+    return ret_sys(link, oldname, newname);
 }
-
-asmlinkage long dynsec_symlinkat(const char __user *oldname,
-                                 int newdfd, const char __user *newname)
+DEF_DYNSEC_SYS(linkat, int olddfd, const char __user *oldname,
+               int newdfd, const char __user *newname, int flags)
 {
-    return select_hook()->symlinkat(oldname, newdfd, newname);
-}
-
-asmlinkage long dynsec_link(const char __user *oldname, const char __user *newname)
-{
-    return select_hook()->link(oldname, newname);
-}
-
-asmlinkage long dynsec_linkat(int olddfd, const char __user *oldname,
-                              int newdfd, const char __user *newname, int flags)
-{
-    return select_hook()->linkat(olddfd, oldname, newdfd, newname, flags);
+    return ret_sys(linkat, olddfd, oldname, newdfd, newname, flags);
 }
 
 // On success unlock lookup_lock
-static int get_syscall_tbl(void)
+static void get_syscall_tbl(void)
 {
-    void **local_sys_call_table = NULL;
-    void **local_ia32_sys_call_table = NULL;
+    sys_call_table = NULL;
+    find_symbol_indirect("sys_call_table", (unsigned long *)&sys_call_table);
 
-    find_symbol_indirect("sys_call_table", (unsigned long *)&local_sys_call_table);
-
-    if (local_sys_call_table) {
-        // Only get 32bit table if we can get the main tbl
-        find_symbol_indirect("ia32_sys_call_table",
-                             (unsigned long *)&local_ia32_sys_call_table);
-
-        mutex_lock(&lookup_lock);
-        if (local_sys_call_table) {
-            if (!sys_call_table) {
-                prev_sys_call_table = local_sys_call_table;
-            } else {
-                prev_sys_call_table = sys_call_table;
-            }
-            sys_call_table = local_sys_call_table;
-        }
-
-        // For now grab the 32bit but not act on it yet
-        if (local_ia32_sys_call_table) {
-            if (!ia32_sys_call_table) {
-                prev_ia32_sys_call_table = local_ia32_sys_call_table;
-            } else {
-                prev_ia32_sys_call_table = ia32_sys_call_table;
-            }
-            ia32_sys_call_table = local_ia32_sys_call_table;
-        }
-
-        return true;
-    }
-
-    return false;
+    ia32_sys_call_table = NULL;
+    // Only get 32bit table if we can get the main tbl
+    find_symbol_indirect("ia32_sys_call_table",
+                         (unsigned long *)&ia32_sys_call_table);
 }
 
-static int get_current_syscall_hooks(struct syscall_hooks *hooks)
+static void get_syscall_hooks(void **table, struct syscall_hooks *hooks)
 {
-    int ret = 0;
-
-    if (!get_syscall_tbl()) {
-        return -ENOENT;
-    }
-    if (!sys_call_table) {
-        mutex_unlock(&lookup_lock);
-        return -ENOENT;
-    }
-    if (sys_call_table != prev_sys_call_table) {
-        ret = 1;
+    if (hooks) {
+        memset(hooks, 0, sizeof(*hooks));
     }
 
-    if (!hooks) {
-        goto out_unlock;
+    if (!table || !hooks) {
+        return;
     }
-
-    memset(hooks, 0, sizeof(*hooks));
 
 #define copy_syscall(NAME) \
     hooks->NAME = sys_call_table[__NR_##NAME]
@@ -250,7 +318,7 @@ static int get_current_syscall_hooks(struct syscall_hooks *hooks)
     copy_syscall(openat2);
 #endif /* __NR_openat2 */
     copy_syscall(rename);
-#ifdef __NR_rename
+#ifdef __NR_renameat
     copy_syscall(renameat);
 #endif /* __NR_renameat */
 #ifdef __NR_renameat2
@@ -268,49 +336,73 @@ static int get_current_syscall_hooks(struct syscall_hooks *hooks)
 
 #undef copy_syscall
 
-out_unlock:
-    mutex_unlock(&lookup_lock);
-
-    return 0;
+    return;
 }
 
 
-static void init_our_syscall_hooks(void)
+static void init_our_syscall_hooks(uint64_t lsm_hooks)
 {
     memset(&in_our_kmod, 0, sizeof(in_our_kmod));
+
+    if (!lsm_hooks) {
+        return;
+    }
 
 #define copy_hook(NAME) \
     in_our_kmod.NAME = dynsec_##NAME
 
+
+#define cond_copy_hook(NAME, MASK) \
+    do { \
+        copy_hook(NAME); \
+        if (lsm_hooks & (MASK)) { \
+            syscall_hooks_enabled |= (MASK); \
+        } \
+    } while (0)
+
     copy_hook(delete_module);
-    copy_hook(open);
-    copy_hook(creat);
-    copy_hook(openat);
+
+    cond_copy_hook(open, DYNSEC_HOOK_TYPE_CREATE);
+    cond_copy_hook(creat, DYNSEC_HOOK_TYPE_CREATE);
+    cond_copy_hook(openat, DYNSEC_HOOK_TYPE_CREATE);
 #ifdef __NR_openat2
-    copy_hook(openat2);
+    cond_copy_hook(openat2, DYNSEC_HOOK_TYPE_CREATE);
 #endif /* __NR_openat2 */
-    copy_hook(rename);
-#ifdef __NR_rename
-    copy_hook(renameat);
+
+    cond_copy_hook(rename, DYNSEC_HOOK_TYPE_RENAME);
+#ifdef __NR_renameat
+    cond_copy_hook(renameat, DYNSEC_HOOK_TYPE_RENAME);
 #endif /* __NR_renameat */
 #ifdef __NR_renameat2
-    copy_hook(renameat2);
+    cond_copy_hook(renameat2, DYNSEC_HOOK_TYPE_RENAME);
 #endif /* __NR_renameat2 */
-    copy_hook(mkdir);
-    copy_hook(mkdirat);
-    copy_hook(unlink);
-    copy_hook(unlinkat);
-    copy_hook(rmdir);
-    copy_hook(symlink);
-    copy_hook(symlinkat);
-    copy_hook(link);
-    copy_hook(linkat);
+
+    cond_copy_hook(mkdir, DYNSEC_HOOK_TYPE_MKDIR);
+    cond_copy_hook(mkdirat, DYNSEC_HOOK_TYPE_MKDIR);
+
+    cond_copy_hook(unlink, DYNSEC_HOOK_TYPE_UNLINK);
+    cond_copy_hook(unlinkat, DYNSEC_HOOK_TYPE_UNLINK|DYNSEC_HOOK_TYPE_RMDIR);
+    cond_copy_hook(rmdir, DYNSEC_HOOK_TYPE_RMDIR);
+
+    cond_copy_hook(symlink, DYNSEC_HOOK_TYPE_SYMLINK);
+    cond_copy_hook(symlinkat, DYNSEC_HOOK_TYPE_SYMLINK);
+
+    cond_copy_hook(link, DYNSEC_HOOK_TYPE_LINK);
+    cond_copy_hook(linkat, DYNSEC_HOOK_TYPE_LINK);
+
+#undef cond_copy_hook
 #undef copy_syscall
+
+    pr_info("syscall_hooks_enabled: %#018llx\n", syscall_hooks_enabled);
 
     ours = &in_our_kmod;
 }
 
-bool ec_set_page_state_rw(void **tbl, unsigned long *old_page_rw)
+#ifdef CONFIG_X86_64
+#define GPF_DISABLE() write_cr0(read_cr0() & (~ 0x10000))
+#define GPF_ENABLE()  write_cr0(read_cr0() | 0x10000)
+
+static inline bool set_page_state_rw(void **tbl, unsigned long *old_page_rw)
 {
     unsigned int level;
     unsigned long irq_flags;
@@ -332,7 +424,7 @@ bool ec_set_page_state_rw(void **tbl, unsigned long *old_page_rw)
     return true;
 }
 
-void ec_restore_page_state(void **tbl, unsigned long page_rw)
+static inline void restore_page_state(void **tbl, unsigned long page_rw)
 {
     unsigned int level;
     unsigned long irq_flags;
@@ -353,16 +445,25 @@ void ec_restore_page_state(void **tbl, unsigned long page_rw)
     if (!page_rw) pte->pte &= ~_PAGE_RW;
     local_irq_restore(irq_flags);
 }
+#endif
 
 static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 {
     unsigned long flags;
-    unsigned long page_rw_set;
+    static unsigned long page_rw_set;
 
-#define set_syscall(NAME)                       \
-    do {                                        \
-        if (hooks->NAME)                        \
-            table[__NR_##NAME] = hooks->NAME;   \
+#define set_syscall(NAME) \
+    do { \
+        if (hooks->NAME) { \
+            table[__NR_##NAME] = hooks->NAME; \
+        } \
+    } while (0)
+
+#define cond_set_syscall(NAME, MASK) \
+    do { \
+        if (hooks->NAME && (syscall_hooks_enabled & (MASK))) { \
+            table[__NR_##NAME] = hooks->NAME; \
+        } \
     } while (0)
 
     local_irq_save(flags);
@@ -370,78 +471,99 @@ static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
     get_cpu();
     GPF_DISABLE();
 
-    if (ec_set_page_state_rw(table, &page_rw_set))
-    {
-
-    set_syscall(delete_module);
-    set_syscall(open);
-    set_syscall(creat);
-    set_syscall(openat);
-#ifdef __NR_openat2
-    set_syscall(openat2);
-#endif /* __NR_openat2 */
-    set_syscall(rename);
-#ifdef __NR_rename
-    set_syscall(renameat);
-#endif /* __NR_renameat */
-#ifdef __NR_renameat2
-    set_syscall(renameat2);
-#endif /* __NR_renameat2 */
-    set_syscall(mkdir);
-    set_syscall(mkdirat);
-    set_syscall(unlink);
-    set_syscall(unlinkat);
-    set_syscall(rmdir);
-    set_syscall(symlink);
-    set_syscall(symlinkat);
-    set_syscall(link);
-    set_syscall(linkat);
-
-        ec_restore_page_state(table, page_rw_set);
+    if (!set_page_state_rw(table, &page_rw_set)) {
+        goto out_unlock;
     }
 
+    set_syscall(delete_module);
+
+    // Always copy this when CONFIG_SECURITY_PATH disabled
+    cond_set_syscall(open, DYNSEC_HOOK_TYPE_CREATE);
+    cond_set_syscall(creat, DYNSEC_HOOK_TYPE_CREATE);
+    cond_set_syscall(openat, DYNSEC_HOOK_TYPE_CREATE);
+#ifdef __NR_openat2
+    cond_set_syscall(openat2, DYNSEC_HOOK_TYPE_CREATE);
+#endif /* __NR_openat2 */
+
+    cond_set_syscall(rename, DYNSEC_HOOK_TYPE_RENAME);
+#ifdef __NR_renameat
+    cond_set_syscall(renameat, DYNSEC_HOOK_TYPE_RENAME);
+#endif /* __NR_renameat */
+#ifdef __NR_renameat2
+    cond_set_syscall(renameat2, DYNSEC_HOOK_TYPE_RENAME);
+#endif /* __NR_renameat2 */
+
+    cond_set_syscall(mkdir, DYNSEC_HOOK_TYPE_MKDIR);
+    cond_set_syscall(mkdirat, DYNSEC_HOOK_TYPE_MKDIR);
+
+    cond_set_syscall(unlink, DYNSEC_HOOK_TYPE_UNLINK);
+    cond_set_syscall(unlinkat, DYNSEC_HOOK_TYPE_UNLINK|DYNSEC_HOOK_TYPE_RMDIR);
+    cond_set_syscall(rmdir, DYNSEC_HOOK_TYPE_RMDIR);
+
+    cond_set_syscall(symlink, DYNSEC_HOOK_TYPE_SYMLINK);
+    cond_set_syscall(symlinkat, DYNSEC_HOOK_TYPE_SYMLINK);
+
+    cond_set_syscall(link, DYNSEC_HOOK_TYPE_LINK);
+    cond_set_syscall(linkat, DYNSEC_HOOK_TYPE_LINK);
+
+#undef set_syscall
+#undef cond_set_syscall
+
+    restore_page_state(table, page_rw_set);
+
+out_unlock:
     GPF_ENABLE();
     put_cpu();
     local_irq_restore(flags);
-
-#undef set_syscall
 }
 
 
-static int syscall_changed(const struct syscall_hooks *old_hooks)
+static int syscall_changed(const struct syscall_hooks *old_hooks,
+                           bool *entire_tbl_chg)
 {
-    int ret = 0;
     int diff = 0;
-
-    char *modname = NULL;
+    char modname[MODULE_NAME_LEN + 1];
+    char old_modname[MODULE_NAME_LEN + 1];
     char *symname = NULL;
-    char *old_modname = NULL;
     char *old_symname = NULL;
     struct syscall_hooks *curr_hooks = NULL;
+    void **curr_table = NULL;
+
+    if (entire_tbl_chg) {
+        *entire_tbl_chg = false;
+    }
+
+    if (!sys_call_table || !old_hooks) {
+        return 0;
+    }
 
     curr_hooks = kzalloc(sizeof(*curr_hooks), GFP_KERNEL);
-
     if (!curr_hooks) {
         return -ENOMEM;
     }
 
-    modname = kzalloc(MODULE_NAME_LEN + 1, GFP_KERNEL);
     symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
-    old_modname = kzalloc(MODULE_NAME_LEN + 1, GFP_KERNEL);
     old_symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
 
-    ret = get_current_syscall_hooks(curr_hooks);
-    if (ret < 0) {
-        goto out;
+    find_symbol_indirect("sys_call_table",
+                         (unsigned long *)&curr_table);
+    get_syscall_hooks(curr_table, curr_hooks);
+
+    if (entire_tbl_chg) {
+        *entire_tbl_chg = (curr_table != sys_call_table);
     }
-    if (ret > 0) {
-        pr_info("Entire Syscall Table Changed\n");
+    if (curr_table != sys_call_table) {
+        diff += 1;
+    }
+    if (!curr_table) {
+        return diff;
     }
 
-#define cmp_syscall(NAME) \
+#define __cmp_syscall(NAME, MASK, x) \
     do { \
-        if (old_hooks->NAME != curr_hooks->NAME) { \
-            ret += 1; \
+        if (((syscall_hooks_enabled & (MASK)) || (x)) && \
+            old_hooks->NAME != curr_hooks->NAME) { \
+            diff += 1; \
             dynsec_module_name((unsigned long)curr_hooks->NAME, \
                                modname, MODULE_NAME_LEN); \
             if (symname) { \
@@ -459,111 +581,104 @@ static int syscall_changed(const struct syscall_hooks *old_hooks)
         } \
     } while (0)
 
-    cmp_syscall(delete_module);
-    cmp_syscall(open);
-    cmp_syscall(creat);
-    cmp_syscall(openat);
+#define cmp_syscall(NAME, MASK) \
+    __cmp_syscall(NAME, MASK, 0)
+
+    // No event mask for delete_module
+    __cmp_syscall(delete_module, 0, 1);
+
+    cmp_syscall(open, DYNSEC_HOOK_TYPE_CREATE);
+    cmp_syscall(creat, DYNSEC_HOOK_TYPE_CREATE);
+    cmp_syscall(openat, DYNSEC_HOOK_TYPE_CREATE);
 #ifdef __NR_openat2
-    cmp_syscall(openat2);
+    cmp_syscall(openat2, DYNSEC_HOOK_TYPE_CREATE);
 #endif /* __NR_openat2 */
-    cmp_syscall(rename);
-#ifdef __NR_rename
-    cmp_syscall(renameat);
+
+    cmp_syscall(rename, DYNSEC_HOOK_TYPE_RENAME);
+#ifdef __NR_renameat
+    cmp_syscall(renameat, DYNSEC_HOOK_TYPE_RENAME);
 #endif /* __NR_renameat */
 #ifdef __NR_renameat2
-    cmp_syscall(renameat2);
+    cmp_syscall(renameat2, DYNSEC_HOOK_TYPE_RENAME);
 #endif /* __NR_renameat2 */
-    cmp_syscall(mkdir);
-    cmp_syscall(mkdirat);
-    cmp_syscall(unlink);
-    cmp_syscall(unlinkat);
-    cmp_syscall(rmdir);
-    cmp_syscall(symlink);
-    cmp_syscall(symlinkat);
-    cmp_syscall(link);
-    cmp_syscall(linkat);
+
+    cmp_syscall(mkdir, DYNSEC_HOOK_TYPE_MKDIR);
+    cmp_syscall(mkdirat, DYNSEC_HOOK_TYPE_MKDIR);
+
+    cmp_syscall(unlink, DYNSEC_HOOK_TYPE_UNLINK);
+    cmp_syscall(unlinkat, DYNSEC_HOOK_TYPE_UNLINK|DYNSEC_HOOK_TYPE_RMDIR);
+    cmp_syscall(rmdir, DYNSEC_HOOK_TYPE_RMDIR);
+
+    cmp_syscall(symlink, DYNSEC_HOOK_TYPE_SYMLINK);
+    cmp_syscall(symlinkat, DYNSEC_HOOK_TYPE_SYMLINK);
+
+    cmp_syscall(link, DYNSEC_HOOK_TYPE_LINK);
+    cmp_syscall(linkat, DYNSEC_HOOK_TYPE_LINK);
 
 #undef cmp_syscall
+#undef __cmp_syscall
 
-    if (diff > 0) {
-        ret = diff;
-    }
-
-out:
     kfree(curr_hooks);
-    kfree(modname);
     kfree(symname);
-    kfree(old_modname);
     kfree(old_symname);
 
-    return ret;
+    return diff;
 }
 
-bool register_preaction_hooks(void)
+bool register_preaction_hooks(uint64_t lsm_hooks)
 {
-    int ret;
-    char *modname;
-    char *symname;
-
-    modname = kzalloc(MODULE_NAME_LEN + 1, GFP_KERNEL);
-    symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
+    syscall_hooks_enabled = 0;
     orig = NULL;
     ours = NULL;
+    sys_call_table = NULL;
+    ia32_sys_call_table = NULL;
 
-    ret = get_current_syscall_hooks(&in_kernel);
-    if (ret < 0) {
-        pr_info("Failed to grab syscall hooks: %d\n", ret);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
+    if (!lsm_hooks) {
+        return true;
+    }
+#endif
+
+    mutex_lock(&lookup_lock);
+    get_syscall_tbl();
+    if (!sys_call_table) {
+        pr_info("Failed to grab syscall hooks\n");
+        mutex_unlock(&lookup_lock);
         return false;
     }
 
-    if (ret > 0) {
-        pr_info("Syscall Table Has Been Modified\n");
-    }
-
-    init_our_syscall_hooks();
-
-    if (in_kernel.delete_module) {
-        dynsec_module_name((unsigned long)in_kernel.delete_module,
-                           modname, MODULE_NAME_LEN);
-        if (symname) {
-            dynsec_lookup_symbol_name((unsigned long)in_kernel.delete_module,
-                                      symname);
-        }
-        pr_info("%s symbol:%s modname:%s\n", __func__, symname, modname);
-    }
+    get_syscall_hooks(sys_call_table, &in_kernel);
+    orig = &in_kernel;
+    init_our_syscall_hooks(lsm_hooks);
 
     if (ours) {
-        mutex_lock(&lookup_lock);
         if (sys_call_table) {
             orig = &in_kernel;
             __set_syscall_table(ours, sys_call_table);
         }
-        mutex_unlock(&lookup_lock);
-
         if (orig) {
-            syscall_changed(orig);
+            (void)syscall_changed(orig, NULL);
         }
     }
+    mutex_unlock(&lookup_lock);
 
-    kfree(modname);
-    kfree(symname);
     return true;
 }
 
+static void restore_syscalls(void)
+{
+    if (orig) {
+        orig = NULL;
+        if (sys_call_table) {
+            __set_syscall_table(&in_kernel, sys_call_table);
+            sys_call_table = NULL;
+        }
+    }
+}
 
 void preaction_hooks_shutdown(void)
 {
-    if (ours) {
-        syscall_changed(ours);
-        ours = NULL;
-    }
-
-    if (orig) {
-        mutex_lock(&lookup_lock);
-        if (sys_call_table) {
-            orig = NULL;
-            __set_syscall_table(&in_kernel, sys_call_table);
-        }
-        mutex_unlock(&lookup_lock);
-    }
+    mutex_lock(&lookup_lock);
+    restore_syscalls();
+    mutex_unlock(&lookup_lock);
 }

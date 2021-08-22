@@ -9,6 +9,7 @@
 #include <linux/lsm_hooks.h>  // security_hook_heads
 #endif  //}
 #include <linux/rculist.h>  // hlist_add_tail_rcu
+#include <linux/module.h>
 #include "symbols.h"
 #include "lsm_mask.h"
 #include "dynsec.h"
@@ -72,9 +73,11 @@ struct lsm_symbols {
 
 static struct lsm_symbols lsm_syms;
 static struct lsm_symbols *p_lsm;
+static uint64_t enabled_lsm_hooks;
 
 bool dynsec_init_lsmhooks(uint64_t enableHooks)
 {
+    enabled_lsm_hooks = 0;
     p_lsm = NULL;
     g_lsmRegistered = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
@@ -135,8 +138,10 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     pr_info("Other LSM named %s", g_original_ops_ptr->name);
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
-        if (enableHooks & DYNSEC_LSM_##NAME) \
+        if (enableHooks & DYNSEC_LSM_##NAME) {\
+            enabled_lsm_hooks |= DYNSEC_LSM_##NAME; \
             g_combined_ops.NAME = dynsec_##NAME; \
+        } \
     } while (0)
 
 #else  // }{ LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
@@ -145,6 +150,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
         if (p_lsm->security_hook_heads && enableHooks & DYNSEC_LSM_##NAME) { \
+            enabled_lsm_hooks |= DYNSEC_LSM_##NAME; \
             pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &p_lsm->security_hook_heads->NAME, #NAME); \
             cblsm_hooks[cblsm_hooks_count].head = &p_lsm->security_hook_heads->NAME; \
             cblsm_hooks[cblsm_hooks_count].hook.NAME = dynsec_##NAME; \
@@ -182,7 +188,9 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-    *(p_lsm->security_ops) = &g_combined_ops;
+    if (enabled_lsm_hooks) {
+        *(p_lsm->security_ops) = &g_combined_ops;
+    }
 #else  //}{
     {
         unsigned int j;
@@ -208,33 +216,70 @@ out_fail:
 }
 
 // KERNEL_VERSION(4,0,0) and above say this is none of our business
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-bool ec_do_lsm_hooks_changed(uint64_t enableHooks)
+
+int check_lsm_hooks_changed(void)
 {
-    bool changed = false;
+    int diff = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    struct lsm_symbols local_lsm;
+    struct security_operations *secops = NULL;
+    char modname[MODULE_NAME_LEN + 1];
 
-    // TODO: Implement this if we need check for changed LSM hooks
+    memset(&local_lsm, 0, sizeof(local_lsm));
 
-    return changed;
+    if (!g_lsmRegistered) {
+        pr_info("%s:%d\n", __func__, __LINE__);
+        return 0;
+    }
+    if (!enabled_lsm_hooks) {
+        pr_info("%s:%d\n", __func__, __LINE__);
+        return 0;
+    }
+    if (!p_lsm) {
+        pr_info("%s:%d\n", __func__, __LINE__);
+        return 0;
+    }
+
+    if (*(p_lsm->security_ops) != &g_combined_ops) {
+        dynsec_module_name((unsigned long)*(p_lsm->security_ops),
+                               modname, MODULE_NAME_LEN);
+        pr_info("LSM Change: security_ops: from KMOD:%s\n", modname);
+        return -1;
+    }
+
+    find_lsm_sym(security_ops, local_lsm);
+    if (local_lsm.security_ops) {
+        secops = *(local_lsm.security_ops);
+        if (&g_combined_ops != secops) {
+            pr_info("%s:%d LSM security_ops changed!\n",
+                    __func__, __LINE__);
+            return -1;
+        }
+    }
+#endif
+
+    return diff;
 }
-#endif  //}
 
 void dynsec_lsm_shutdown(void)
 {
     if (g_lsmRegistered
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-    &&      p_lsm->security_ops
+    &&     p_lsm && p_lsm->security_ops
 #endif  //}
     )
     {
-        pr_info("Unregistering ec_LSM...");
+        pr_info("Unregistering dynsec LSM...");
+        g_lsmRegistered = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
         *(p_lsm->security_ops) = g_original_ops_ptr;
+        enabled_lsm_hooks = 0;
+        p_lsm = NULL;
 #else  // }{ >= KERNEL_VERSION(4,0,0)
         security_delete_hooks(cblsm_hooks, cblsm_hooks_count);
 #endif  //}
     } else
     {
-        pr_info("ec_LSM not registered so not unregistering");
+        pr_info("dynsec LSM not registered so not unregistering");
     }
 }
