@@ -33,6 +33,7 @@
 #define DYNSEC_REPORT_SELF       0x0020
 #define DYNSEC_REPORT_HI_PRI     0x0040
 #define DYNSEC_REPORT_LO_PRI     0x0080
+#define DYNSEC_REPORT_POST       0x0100
 
 
 // Response Type For Stalls
@@ -79,6 +80,7 @@ enum dynsec_event_type {
     DYNSEC_EVENT_TYPE_MMAP,
     DYNSEC_EVENT_TYPE_CLONE,
     DYNSEC_EVENT_TYPE_EXIT,
+    // Special Events
     DYNSEC_EVENT_TYPE_HEALTH,
     DYNSEC_EVENT_TYPE_GENERIC_AUDIT,
     DYNSEC_EVENT_TYPE_GENERIC_DEBUG,

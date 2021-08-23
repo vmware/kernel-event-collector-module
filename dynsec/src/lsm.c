@@ -9,6 +9,7 @@
 #include <linux/lsm_hooks.h>  // security_hook_heads
 #endif  //}
 #include <linux/rculist.h>  // hlist_add_tail_rcu
+#include <linux/module.h>
 #include "symbols.h"
 #include "lsm_mask.h"
 #include "dynsec.h"
@@ -72,9 +73,11 @@ struct lsm_symbols {
 
 static struct lsm_symbols lsm_syms;
 static struct lsm_symbols *p_lsm;
+static uint64_t enabled_lsm_hooks;
 
 bool dynsec_init_lsmhooks(uint64_t enableHooks)
 {
+    enabled_lsm_hooks = 0;
     p_lsm = NULL;
     g_lsmRegistered = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
@@ -135,8 +138,10 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
     pr_info("Other LSM named %s", g_original_ops_ptr->name);
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
-        if (enableHooks & DYNSEC_LSM_##NAME) \
+        if (enableHooks & DYNSEC_LSM_##NAME) {\
+            enabled_lsm_hooks |= DYNSEC_LSM_##NAME; \
             g_combined_ops.NAME = dynsec_##NAME; \
+        } \
     } while (0)
 
 #else  // }{ LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
@@ -145,6 +150,7 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
         if (p_lsm->security_hook_heads && enableHooks & DYNSEC_LSM_##NAME) { \
+            enabled_lsm_hooks |= DYNSEC_LSM_##NAME; \
             pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &p_lsm->security_hook_heads->NAME, #NAME); \
             cblsm_hooks[cblsm_hooks_count].head = &p_lsm->security_hook_heads->NAME; \
             cblsm_hooks[cblsm_hooks_count].hook.NAME = dynsec_##NAME; \
@@ -182,7 +188,9 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-    *(p_lsm->security_ops) = &g_combined_ops;
+    if (enabled_lsm_hooks) {
+        *(p_lsm->security_ops) = &g_combined_ops;
+    }
 #else  //}{
     {
         unsigned int j;
@@ -208,33 +216,95 @@ out_fail:
 }
 
 // KERNEL_VERSION(4,0,0) and above say this is none of our business
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-bool ec_do_lsm_hooks_changed(uint64_t enableHooks)
+
+int check_lsm_hooks_changed(void)
 {
-    bool changed = false;
+    int diff = 0;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
+    struct security_operations *secops = NULL;
+    char modname[MODULE_NAME_LEN + 1];
 
-    // TODO: Implement this if we need check for changed LSM hooks
+    if (!g_lsmRegistered) {
+        return 0;
+    }
+    if (!enabled_lsm_hooks) {
+        return 0;
+    }
+    if (!p_lsm) {
+        return 0;
+    }
 
-    return changed;
+    // Detect when something else may be referencing our LSM hooks
+    if (*(p_lsm->security_ops) != &g_combined_ops) {
+        dynsec_module_name((unsigned long)*(p_lsm->security_ops),
+                               modname, MODULE_NAME_LEN);
+        // Won't find kmod if secops dynamically allocated
+        if (modname[0]) {
+            pr_info("LSM security_ops Changed by: %s\n", modname);
+        }
+        // Something could be referencing our LSM hooks
+        // but not overriding with their own.
+        diff += 1;
+    }
+
+    secops = *(p_lsm->security_ops);
+#define check_lsm_hook(NAME) do { \
+        if (enabled_lsm_hooks & DYNSEC_LSM_##NAME) { \
+            if (secops->NAME != g_combined_ops.NAME) { \
+                diff += 1; \
+                dynsec_module_name((unsigned long)secops->NAME, \
+                                   modname, MODULE_NAME_LEN); \
+                pr_info("LSM Hook " #NAME " Changed by: %s\n", modname); \
+            } \
+        } \
+    } while (0)
+
+    // Log who at where overrided specific hooks
+    check_lsm_hook(bprm_set_creds);
+    check_lsm_hook(inode_unlink);
+    check_lsm_hook(inode_rmdir);
+    check_lsm_hook(inode_rename);
+    check_lsm_hook(inode_setattr);
+    check_lsm_hook(inode_create);
+    check_lsm_hook(inode_mkdir);
+    check_lsm_hook(inode_link);
+    check_lsm_hook(inode_symlink);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+    check_lsm_hook(dentry_open);
+    check_lsm_hook(file_mmap);
+#else
+    check_lsm_hook(file_open);
+    check_lsm_hook(mmap_file);
+    // check_lsm_hook(task_free);
+#endif
+    check_lsm_hook(file_free_security);
+
+#undef check_lsm_hook
+
+#endif //}
+
+    return diff;
 }
-#endif  //}
 
 void dynsec_lsm_shutdown(void)
 {
     if (g_lsmRegistered
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-    &&      p_lsm->security_ops
+    &&     p_lsm && p_lsm->security_ops
 #endif  //}
     )
     {
-        pr_info("Unregistering ec_LSM...");
+        pr_info("Unregistering dynsec LSM...");
+        g_lsmRegistered = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
         *(p_lsm->security_ops) = g_original_ops_ptr;
+        enabled_lsm_hooks = 0;
+        p_lsm = NULL;
 #else  // }{ >= KERNEL_VERSION(4,0,0)
         security_delete_hooks(cblsm_hooks, cblsm_hooks_count);
 #endif  //}
     } else
     {
-        pr_info("ec_LSM not registered so not unregistering");
+        pr_info("dynsec LSM not registered so not unregistering");
     }
 }

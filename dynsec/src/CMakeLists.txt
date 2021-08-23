@@ -126,6 +126,8 @@ configure_file(${INCLUDE_DIR}/version.h.in ${CONFIGURED_VERSION_FILE})
 
 set(SOURCE_FILES
     dynsec.c
+    preaction_hooks.c
+    preaction_hooks.h
     hooks.c
     hooks.h
     tracepoints.c

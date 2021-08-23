@@ -14,6 +14,7 @@
 #include "path_utils.h"
 #include "tracepoints.h"
 #include "task_cache.h"
+#include "preaction_hooks.h"
 
 #define DYNSEC_LSM_HOOKS (\
         DYNSEC_HOOK_TYPE_EXEC      |\
@@ -30,11 +31,6 @@
         DYNSEC_HOOK_TYPE_MMAP)
 
 uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
-uint64_t lsm_hooks_enabled = DYNSEC_LSM_HOOKS &
-    ~(
-        DYNSEC_HOOK_TYPE_OPEN   |
-        DYNSEC_HOOK_TYPE_CLOSE
-    );
 
 uint32_t tracepoint_hooks = (
         DYNSEC_TP_HOOK_TYPE_CLONE |
@@ -43,14 +39,9 @@ uint32_t tracepoint_hooks = (
 );
 
 static char lsm_hooks_str[64];
-static char lsm_hooks_disable[64];
 // Hooks to only allow for kmod instance. Superset.
 module_param_string(lsm_hooks, lsm_hooks_str,
                     sizeof(lsm_hooks_str), 0644);
-// Hooks to allow later on but disable on load of kmod.
-// Subset of lsm_hooks_mask
-module_param_string(lsm_hooks_disable, lsm_hooks_disable,
-                    sizeof(lsm_hooks_disable), 0644);
 
 module_param(tracepoint_hooks, uint, 0644);
 
@@ -68,20 +59,6 @@ static void setup_lsm_hooks(void)
         if (!strto_ret)
         {
             lsm_hooks_mask = local_lsm_hooks;
-            lsm_hooks_enabled = lsm_hooks_mask;
-        }
-    }
-
-    // Hook to disable on load but may allow later.
-    if (lsm_hooks_disable[0])
-    {
-        uint64_t local_lsm_hooks = 0;
-
-        lsm_hooks_disable[sizeof(lsm_hooks_disable) - 1] = 0;
-        strto_ret = kstrtoull(lsm_hooks_disable, 16, &local_lsm_hooks);
-        if (!strto_ret)
-        {
-            lsm_hooks_enabled &= ~(local_lsm_hooks);
         }
     }
 }
@@ -102,21 +79,29 @@ static int __init dynsec_init(void)
     }
 
     if (!dynsec_init_tp(tracepoint_hooks)) {
+        pr_info("Unable to load process tracepoints\n");
         return -EINVAL;
     }
 
     if (!dynsec_init_lsmhooks(lsm_hooks_mask)) {
-        dynsec_tp_shutdown(tracepoint_hooks);
+        pr_info("Unable to load LSM hooks\n");
+        dynsec_tp_shutdown();
         return -EINVAL;
     }
 
     if (!dynsec_chrdev_init()) {
-        dynsec_tp_shutdown(tracepoint_hooks);
+        dynsec_tp_shutdown();
         dynsec_lsm_shutdown();
         return -EINVAL;
     }
 
-    task_cache_register();
+    // Depends on process events
+    if (may_enable_task_cache()) {
+        task_cache_register();
+    }
+    register_preaction_hooks(lsm_hooks_mask);
+
+    pr_info("Loaded DynSec\n");
 
     return 0;
 }
@@ -128,11 +113,11 @@ static void __exit dynsec_exit(void)
 
     dynsec_chrdev_shutdown();
 
-    dynsec_tp_shutdown(tracepoint_hooks);
+    dynsec_tp_shutdown();
 
     dynsec_lsm_shutdown();
 
-    task_cache_shutdown();
+    preaction_hooks_shutdown();
 }
 
 module_init(dynsec_init);
