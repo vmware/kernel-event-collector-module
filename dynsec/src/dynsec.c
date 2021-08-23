@@ -31,7 +31,6 @@
         DYNSEC_HOOK_TYPE_MMAP)
 
 uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
-uint64_t lsm_hooks_enabled = DYNSEC_LSM_HOOKS;
 
 uint32_t tracepoint_hooks = (
         DYNSEC_TP_HOOK_TYPE_CLONE |
@@ -60,7 +59,6 @@ static void setup_lsm_hooks(void)
         if (!strto_ret)
         {
             lsm_hooks_mask = local_lsm_hooks;
-            lsm_hooks_enabled = lsm_hooks_mask;
         }
     }
 }
@@ -91,9 +89,7 @@ static int __init dynsec_init(void)
         return -EINVAL;
     }
 
-    pr_info("%s:%d\n", __func__, __LINE__);
     if (!dynsec_chrdev_init()) {
-        pr_info("%s:%d\n", __func__, __LINE__);
         dynsec_tp_shutdown();
         dynsec_lsm_shutdown();
         return -EINVAL;
