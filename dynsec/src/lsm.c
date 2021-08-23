@@ -221,42 +221,67 @@ int check_lsm_hooks_changed(void)
 {
     int diff = 0;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-    struct lsm_symbols local_lsm;
     struct security_operations *secops = NULL;
     char modname[MODULE_NAME_LEN + 1];
 
-    memset(&local_lsm, 0, sizeof(local_lsm));
-
     if (!g_lsmRegistered) {
-        pr_info("%s:%d\n", __func__, __LINE__);
         return 0;
     }
     if (!enabled_lsm_hooks) {
-        pr_info("%s:%d\n", __func__, __LINE__);
         return 0;
     }
     if (!p_lsm) {
-        pr_info("%s:%d\n", __func__, __LINE__);
         return 0;
     }
 
+    // Detect when something else may be referencing our LSM hooks
     if (*(p_lsm->security_ops) != &g_combined_ops) {
         dynsec_module_name((unsigned long)*(p_lsm->security_ops),
                                modname, MODULE_NAME_LEN);
-        pr_info("LSM Change: security_ops: from KMOD:%s\n", modname);
-        return -1;
+        // Won't find kmod if secops dynamically allocated
+        if (modname[0]) {
+            pr_info("LSM security_ops Changed by: %s\n", modname);
+        }
+        // Something could be referencing our LSM hooks
+        // but not overriding with their own.
+        diff += 1;
     }
 
-    find_lsm_sym(security_ops, local_lsm);
-    if (local_lsm.security_ops) {
-        secops = *(local_lsm.security_ops);
-        if (&g_combined_ops != secops) {
-            pr_info("%s:%d LSM security_ops changed!\n",
-                    __func__, __LINE__);
-            return -1;
-        }
-    }
+    secops = *(p_lsm->security_ops);
+#define check_lsm_hook(NAME) do { \
+        if (enabled_lsm_hooks & DYNSEC_LSM_##NAME) { \
+            if (secops->NAME != g_combined_ops.NAME) { \
+                diff += 1; \
+                dynsec_module_name((unsigned long)secops->NAME, \
+                                   modname, MODULE_NAME_LEN); \
+                pr_info("LSM Hook " #NAME " Changed by: %s\n", modname); \
+            } \
+        } \
+    } while (0)
+
+    // Log who at where overrided specific hooks
+    check_lsm_hook(bprm_set_creds);
+    check_lsm_hook(inode_unlink);
+    check_lsm_hook(inode_rmdir);
+    check_lsm_hook(inode_rename);
+    check_lsm_hook(inode_setattr);
+    check_lsm_hook(inode_create);
+    check_lsm_hook(inode_mkdir);
+    check_lsm_hook(inode_link);
+    check_lsm_hook(inode_symlink);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+    check_lsm_hook(dentry_open);
+    check_lsm_hook(file_mmap);
+#else
+    check_lsm_hook(file_open);
+    check_lsm_hook(mmap_file);
+    // check_lsm_hook(task_free);
 #endif
+    check_lsm_hook(file_free_security);
+
+#undef check_lsm_hook
+
+#endif //}
 
     return diff;
 }
