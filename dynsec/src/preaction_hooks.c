@@ -17,7 +17,7 @@
 
 struct syscall_hooks {
 #ifdef USE_PT_REGS
-    #define DEF_SYS_HOOK(NAME, ...) asmlinkage long (*NAME)(struct pt_regs *regs)
+#define DEF_SYS_HOOK(NAME, ...) asmlinkage long (*NAME)(struct pt_regs *regs)
 #else
 #define DEF_SYS_HOOK(NAME, ...) asmlinkage long (*NAME)(__VA_ARGS__)
 #endif
@@ -127,12 +127,7 @@ static bool may_restore_syscalls(void)
 #define ret_sys(NAME, ...) select_hook()->NAME(__VA_ARGS__)
 #endif
 
-// #ifdef USE_PT_REGS
-// static asmlinkage long dynsec_delete_module(struct pt_regs *regs)
-// #else
-// static asmlinkage long dynsec_delete_module(const char __user *name_user,
-//                                      unsigned int flags)
-// #endif
+
 DEF_DYNSEC_SYS(delete_module, const char __user *name_user, unsigned int flags)
 {
 #ifdef USE_PT_REGS
@@ -445,7 +440,7 @@ static inline void restore_page_state(void **tbl, unsigned long page_rw)
     if (!page_rw) pte->pte &= ~_PAGE_RW;
     local_irq_restore(irq_flags);
 }
-#endif
+#endif /* CONFIG_X86_64 */
 
 static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 {
