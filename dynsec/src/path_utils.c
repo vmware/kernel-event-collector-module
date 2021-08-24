@@ -10,6 +10,7 @@
 
 #include "symbols.h"
 #include "path_utils.h"
+#include "dynsec.h"
 
 struct path_symz {
     char *(* dentry_path_raw)(const struct dentry *dentry, char *buf, int buflen);
@@ -93,7 +94,7 @@ char *dynsec_path_safeish(const struct path *path, char *buf, int buflen)
     return dynsec_d_path(path, buf, buflen);
 }
 
-static bool has_gfp_atomic(gfp_t mode)
+static inline bool has_gfp_atomic(gfp_t mode)
 {
 #ifdef __GFP_ATOMIC
     return (mode & __GFP_ATOMIC) == __GFP_ATOMIC;
@@ -102,7 +103,7 @@ static bool has_gfp_atomic(gfp_t mode)
 #endif
 }
 
-char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode)
+char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode)
 {
     char *buf = NULL;
     char *p;
@@ -139,8 +140,67 @@ char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode)
         memmove(buf, p, len);
     }
     buf[len] = 0;
-    if (size) {
-        *size = len + 1;
+    if (file) {
+        file->path_size = len + 1;
+        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
+    }
+
+out:
+    return buf;
+
+out_err:
+    kfree(buf);
+    buf = NULL;
+    goto out;
+}
+
+char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file, gfp_t mode)
+{
+    char *buf = NULL;
+    char *p;
+    size_t len;
+    size_t alloc_size = DEFAULT_PATH_ALLOC_SZ;
+
+    if (!path) {
+        goto out;
+    }
+
+    // Optionally provide both mnt_ns and global paths if 
+    // path->mnt in init_task's mnt_ns.
+    // if (!is_init_mnt_ns(current)) {
+    //     // still need to check if exists in init_task mnt_ns
+    //     return dynsec_build_dentry(path->dentry, size, mode);
+    // }
+
+retry_d_path:
+    buf = kmalloc(alloc_size, mode);
+    if (!buf) {
+        goto out;
+    }
+
+    if (!has_gfp_atomic(mode))
+        path_get(path);
+    p = dynsec_d_path(path, buf, alloc_size);
+    if (!has_gfp_atomic(mode))
+        path_put(path);
+
+    if (IS_ERR_OR_NULL(p) || !*p) {
+        if (alloc_size >= PATH_MAX) {
+            goto out_err;
+        }
+        kfree(buf);
+        alloc_size = PATH_MAX;
+        goto retry_d_path;
+    }
+
+    len = strlen(p);
+    if (likely(p != buf)) {
+        memmove(buf, p, len);
+    }
+    buf[len] = 0;
+    if (file) {
+        file->path_size = len + 1;
+        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
     }
 
 out:
@@ -154,29 +214,36 @@ out_err:
 
 // On RHEL7+ check if init_task->ns_proxy->mnt_ns NULL or current->ns_proxy->mnt_ns
 
-char *dynsec_build_dentry(struct dentry *dentry, uint16_t *size, gfp_t mode)
+char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t mode)
 {
     char *buf = NULL;
     char *p;
     size_t len;
+    size_t alloc_size = DEFAULT_PATH_ALLOC_SZ;
 
     if (!dentry) {
         goto out;
     }
 
-    buf = kmalloc(PATH_MAX, mode);
+retry_dentry_path:
+    buf = kmalloc(alloc_size, mode);
     if (!buf) {
         goto out;
     }
 
     if (!has_gfp_atomic(mode))
         dget(dentry);
-    p = dynsec_dentry_path(dentry, buf, PATH_MAX);
+    p = dynsec_dentry_path(dentry, buf, alloc_size);
     if (!has_gfp_atomic(mode))
         dput(dentry);
 
     if (IS_ERR_OR_NULL(p) || !*p) {
-        goto out_err;
+        if (alloc_size >= PATH_MAX) {
+            goto out_err;
+        }
+        kfree(buf);
+        alloc_size = PATH_MAX;
+        goto retry_dentry_path;
     }
 
     len = strlen(p);
@@ -184,8 +251,9 @@ char *dynsec_build_dentry(struct dentry *dentry, uint16_t *size, gfp_t mode)
         memmove(buf, p, len);
     }
     buf[len] = 0;
-    if (size) {
-        *size = len + 1;
+    if (file) {
+        file->path_size = len + 1;
+        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_DENTRY;
     }
 
 out:

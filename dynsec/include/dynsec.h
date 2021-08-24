@@ -25,15 +25,16 @@
 #define DYNSEC_TP_HOOK_TYPE_TASK_FREE   0x00000004
 
 // Event Message Flags aka Report
-#define DYNSEC_REPORT_STALL      0x0001
-#define DYNSEC_REPORT_INTENT     0x0002
-#define DYNSEC_REPORT_AUDIT      0x0004
-#define DYNSEC_REPORT_CACHED     0x0008
-#define DYNSEC_REPORT_TP         0x0010
-#define DYNSEC_REPORT_SELF       0x0020
-#define DYNSEC_REPORT_HI_PRI     0x0040
-#define DYNSEC_REPORT_LO_PRI     0x0080
-#define DYNSEC_REPORT_POST       0x0100
+#define DYNSEC_REPORT_STALL         0x0001
+#define DYNSEC_REPORT_INTENT        0x0002
+#define DYNSEC_REPORT_AUDIT         0x0004
+#define DYNSEC_REPORT_CACHED        0x0008
+#define DYNSEC_REPORT_TP            0x0010
+#define DYNSEC_REPORT_SELF          0x0020
+#define DYNSEC_REPORT_HI_PRI        0x0040
+#define DYNSEC_REPORT_LO_PRI        0x0080
+#define DYNSEC_REPORT_POST          0x0100
+#define DYNSEC_REPORT_INTENT_FOUND  0x0200
 
 
 // Response Type For Stalls
@@ -93,6 +94,7 @@ struct dynsec_msg_hdr {
     uint32_t hook_type;  // Context for non-stalling events
     uint32_t tid;
     uint64_t req_id;
+    uint64_t intent_req_id; // Valid when DYNSEC_REPORT_INTENT_FOUND set
     enum dynsec_event_type event_type;
 };
 
@@ -126,6 +128,19 @@ struct dynsec_blob {
 };
 
 struct dynsec_file {
+// ino, uid, gid, size, umode
+#define DYNSEC_FILE_ATTR_INODE          0x0001
+// dev, sb_magic
+#define DYNSEC_FILE_ATTR_DEVICE         0x0002
+// parent_[ino,uid,gid]
+#define DYNSEC_FILE_ATTR_PARENT_INODE   0x0004
+// parent_dev
+#define DYNSEC_FILE_ATTR_PARENT_DEVICE  0x0008
+// Path Type/Path Confidence Level
+#define DYNSEC_FILE_ATTR_PATH_FULL      0x0010
+#define DYNSEC_FILE_ATTR_PATH_DENTRY    0x0020
+#define DYNSEC_FILE_ATTR_PATH_RAW       0x0040
+    uint16_t attr_mask;
     uint64_t ino;
     uint32_t dev;
     uint16_t umode;

@@ -64,6 +64,7 @@ struct dynsec_event {
     enum dynsec_event_type event_type;
     struct list_head list;
     uint16_t report_flags;
+    uint64_t intent_req_id;
 };
 
 // Child event structs
@@ -215,6 +216,8 @@ dynsec_event_to_signal(const struct dynsec_event *dynsec_event)
 
 extern void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode);
 
+extern void prepare_non_report_event(enum dynsec_event_type event_type, gfp_t mode);
+
 extern uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event);
 
 extern struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
@@ -295,3 +298,10 @@ extern bool fill_in_ptrace(struct dynsec_event *dynsec_event,
 
 extern bool fill_in_task_kill(struct dynsec_event *dynsec_event,
                               const struct task_struct *target, int sig);
+
+//#ifndef CONFIG_SECURITY_PATH
+extern bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
+                                     int dfd, const char __user *filename,
+                                     int flags, umode_t umode);
+
+//#endif /* ! CONFIG_SECURITY_PATH */

@@ -11,6 +11,8 @@
 #include <linux/cred.h>
 #include <linux/fs.h>
 #include <linux/dcache.h>
+#include <linux/file.h>
+#include <linux/namei.h>
 
 #include "dynsec.h"
 #include "factory.h"
@@ -41,14 +43,7 @@ static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_e
         SUBEVENT->event.report_flags = SUBEVENT->kmsg.hdr.report_flags;\
     } while (0)
 
-#define unset_event_report_flags(SUBEVENT, REPORT_MASK) \
-    do { \
-        SUBEVENT->kmsg.hdr.report_flags &= ~(REPORT_MASK);\
-        SUBEVENT->event.report_flags = SUBEVENT->kmsg.hdr.report_flags;\
-    } while (0)
-
-#define init_event_data(EVENT_TYPE, EVENT, REPORT_FLAGS, HOOK)  \
-    do {                                                        \
+#define init_event_data(EVENT_TYPE, EVENT, REPORT_FLAGS, HOOK) do { \
         init_dynsec_event(EVENT_TYPE, &EVENT->event);           \
         init_event_report_flags(EVENT, REPORT_FLAGS);           \
         EVENT->kmsg.hdr.hook_type = HOOK;                       \
@@ -57,9 +52,9 @@ static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_e
         EVENT->kmsg.hdr.tid = EVENT->event.tid;                 \
     } while (0)
 
-#define prepare_hdr_data(subevent)                                      \
-    do {                                                                \
-        subevent->kmsg.hdr.report_flags = subevent->event.report_flags; \
+#define prepare_hdr_data(subevent) do { \
+        subevent->kmsg.hdr.report_flags = subevent->event.report_flags;   \
+        subevent->kmsg.hdr.intent_req_id = subevent->event.intent_req_id; \
     } while (0)
 
 static struct dynsec_event *alloc_exec_event(enum dynsec_event_type event_type,
@@ -314,14 +309,53 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
     return NULL;
 }
 
+// Set the last event for task_cache for PreActions
+void prepare_non_report_event(enum dynsec_event_type event_type, gfp_t mode)
+{
+    struct event_track dummy_track  = {
+        .track_flags = 0,
+        .event_type = event_type,
+        .report_flags = 0,
+        .req_id = 0,
+    };
+
+    if (event_type < DYNSEC_EVENT_TYPE_HEALTH) {
+        (void)task_cache_set_last_event(current->pid, &dummy_track, NULL, mode);
+    }
+}
+
 void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
 {
+    struct event_track event;
+    struct event_track prev_event;
+
     if (!dynsec_event) {
         return;
     }
 
+    event.track_flags = (TRACK_EVENT_REQ_ID_VALID | TRACK_EVENT_REPORTABLE);
+    event.report_flags = dynsec_event->report_flags;
+    event.req_id = dynsec_event->req_id;
+    event.event_type = dynsec_event->event_type;
+    memset(&prev_event, 0, sizeof(prev_event));
+
+    // Find the last event. If it's an PreAction aka DYNSEC_REPORT_INTENT
+    // and it was meant to be reportable then adjust req_id or tell us
     if (dynsec_event->event_type < DYNSEC_EVENT_TYPE_HEALTH) {
-        (void)task_cache_set_last_event(dynsec_event, NULL, NULL, mode);
+        if (event.report_flags & DYNSEC_REPORT_INTENT) {
+            (void)task_cache_set_last_event(dynsec_event->tid, &event,
+                                            NULL, mode);
+        } else {
+            int ret = task_cache_set_last_event(dynsec_event->tid, &event,
+                                                &prev_event, mode);
+
+            if (!ret && (prev_event.report_flags & DYNSEC_REPORT_INTENT) &&
+                    (prev_event.track_flags & TRACK_EVENT_REPORTABLE) &&
+                    prev_event.event_type == event.event_type) {
+                dynsec_event->intent_req_id = prev_event.req_id;
+                dynsec_event->report_flags |= DYNSEC_REPORT_INTENT_FOUND;
+            }
+        }
     }
 
     // Set Queueing Priority When Not High Priority
@@ -1406,7 +1440,8 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
 
 static void fill_in_sb_data(struct dynsec_file *dynsec_file, const struct super_block *sb)
 {
-    if (sb) { 
+    if (sb) {
+        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DEVICE;
         dynsec_file->dev = new_encode_dev(sb->s_dev);
         dynsec_file->sb_magic = sb->s_magic;
     }
@@ -1416,6 +1451,7 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
                                  const struct inode *inode)
 {
     if (dynsec_file && inode) {
+        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_INODE;
         dynsec_file->ino = inode->i_ino;
         dynsec_file->umode = inode->i_mode;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -1437,6 +1473,7 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
                                 struct inode *parent_dir)
 {
     if (dynsec_file && parent_dir) {
+        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_INODE;
         dynsec_file->parent_ino = parent_dir->i_ino;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         dynsec_file->parent_uid = from_kuid(&init_user_ns, parent_dir->i_uid);
@@ -1445,6 +1482,20 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
         dynsec_file->parent_uid = parent_dir->i_uid;
         dynsec_file->parent_gid = parent_dir->i_gid;
 #endif
+    }
+}
+
+static void fill_in_preaction_data(struct dynsec_file *dynsec_file,
+                                   const struct path *parent_path)
+{
+    if (dynsec_file && parent_path) {
+        if (parent_path->dentry) {
+            fill_in_parent_data(dynsec_file, parent_path->dentry->d_inode);
+        }
+        if (parent_path->mnt && parent_path->mnt->mnt_sb) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
+            dynsec_file->parent_dev = new_encode_dev(parent_path->mnt->mnt_sb->s_dev);
+        }
     }
 }
 
@@ -1490,7 +1541,7 @@ bool fill_in_bprm_set_creds(struct dynsec_event *dynsec_event,
     fill_in_file_data(&exec->kmsg.msg.file, &bprm->file->f_path);
 
     exec->path = dynsec_build_path(&bprm->file->f_path,
-                                &exec->kmsg.msg.file.path_size,
+                                &exec->kmsg.msg.file,
                                 GFP_KERNEL);
     if (exec->path && exec->kmsg.msg.file.path_size) {
         exec->kmsg.msg.file.path_offset = exec->kmsg.hdr.payload;
@@ -1519,7 +1570,7 @@ bool fill_in_inode_unlink(struct dynsec_event *dynsec_event,
     fill_in_parent_data(&unlink->kmsg.msg.file, dir);
 
     unlink->path = dynsec_build_dentry(dentry,
-                                &unlink->kmsg.msg.file.path_size,
+                                &unlink->kmsg.msg.file,
                                 mode);
     if (unlink->path && unlink->kmsg.msg.file.path_size) {
         unlink->kmsg.msg.file.path_offset = unlink->kmsg.hdr.payload;
@@ -1552,7 +1603,7 @@ bool fill_in_inode_rename(struct dynsec_event *dynsec_event,
     fill_in_parent_data(&rename->kmsg.msg.new_file, new_dir);
 
     rename->old_path = dynsec_build_dentry(old_dentry,
-                                &rename->kmsg.msg.old_file.path_size,
+                                &rename->kmsg.msg.old_file,
                                 mode);
     if (rename->old_path && rename->kmsg.msg.old_file.path_size) {
         rename->kmsg.msg.old_file.path_offset = rename->kmsg.hdr.payload;
@@ -1560,7 +1611,7 @@ bool fill_in_inode_rename(struct dynsec_event *dynsec_event,
     }
 
     rename->new_path = dynsec_build_dentry(new_dentry,
-                                &rename->kmsg.msg.new_file.path_size,
+                                &rename->kmsg.msg.new_file,
                                 mode);
     if (rename->new_path && rename->kmsg.msg.new_file.path_size) {
         rename->kmsg.msg.new_file.path_offset = rename->kmsg.hdr.payload;
@@ -1625,12 +1676,12 @@ bool fill_in_inode_setattr(struct dynsec_event *dynsec_event,
         //                     attr->ia_file->f_path.mnt->mnt_sb);
         // }
         setattr->path = dynsec_build_path(&attr->ia_file->f_path,
-                                    &setattr->kmsg.msg.file.path_size,
+                                    &setattr->kmsg.msg.file,
                                     mode);
     } else {
         fill_in_dentry_data(&setattr->kmsg.msg.file, dentry);
         setattr->path = dynsec_build_dentry(dentry,
-                                    &setattr->kmsg.msg.file.path_size,
+                                    &setattr->kmsg.msg.file,
                                     mode);
     }
     if (setattr->path && setattr->kmsg.msg.file.path_size) {
@@ -1676,7 +1727,7 @@ bool fill_in_inode_create(struct dynsec_event *dynsec_event,
     }
 
     create->path = dynsec_build_dentry(dentry,
-                                &create->kmsg.msg.file.path_size,
+                                &create->kmsg.msg.file,
                                 mode);
     if (create->path && create->kmsg.msg.file.path_size) {
         create->kmsg.msg.file.path_offset = create->kmsg.hdr.payload;
@@ -1724,7 +1775,7 @@ bool fill_in_inode_link(struct dynsec_event *dynsec_event,
     fill_in_parent_data(&link->kmsg.msg.new_file, dir);
 
     link->old_path = dynsec_build_dentry(old_dentry,
-                                &link->kmsg.msg.old_file.path_size,
+                                &link->kmsg.msg.old_file,
                                 mode);
     if (link->old_path && link->kmsg.msg.old_file.path_size) {
         link->kmsg.msg.old_file.path_offset = link->kmsg.hdr.payload;
@@ -1732,7 +1783,7 @@ bool fill_in_inode_link(struct dynsec_event *dynsec_event,
     }
 
     link->new_path = dynsec_build_dentry(new_dentry,
-                                &link->kmsg.msg.new_file.path_size,
+                                &link->kmsg.msg.new_file,
                                 mode);
     if (link->new_path && link->kmsg.msg.new_file.path_size) {
         link->kmsg.msg.new_file.path_offset = link->kmsg.hdr.payload;
@@ -1763,7 +1814,7 @@ bool fill_in_inode_symlink(struct dynsec_event *dynsec_event,
 
     symlink->kmsg.msg.file.umode |= S_IFLNK;
 
-    symlink->path = dynsec_build_dentry(dentry, &symlink->kmsg.msg.file.path_size, mode);
+    symlink->path = dynsec_build_dentry(dentry, &symlink->kmsg.msg.file, mode);
 
     if (symlink->path && symlink->kmsg.msg.file.path_size) {
         symlink->kmsg.msg.file.path_offset = symlink->kmsg.hdr.payload;
@@ -1803,7 +1854,7 @@ bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
     open->kmsg.msg.f_flags = file->f_flags;
     fill_in_file_data(&open->kmsg.msg.file, &file->f_path);
 
-    open->path = dynsec_build_path(&file->f_path, &open->kmsg.msg.file.path_size, mode);
+    open->path = dynsec_build_path(&file->f_path, &open->kmsg.msg.file, mode);
 
     if (open->path && open->kmsg.msg.file.path_size) {
         open->kmsg.msg.file.path_offset = open->kmsg.hdr.payload;
@@ -1832,7 +1883,7 @@ bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
     fill_in_file_data(&close->kmsg.msg.file, &file->f_path);
 
     // May want to provide dentry path
-    close->path = dynsec_build_path(&file->f_path, &close->kmsg.msg.file.path_size, mode);
+    close->path = dynsec_build_path(&file->f_path, &close->kmsg.msg.file, mode);
 
     if (close->path && close->kmsg.msg.file.path_size) {
         close->kmsg.msg.file.path_offset = close->kmsg.hdr.payload;
@@ -1867,10 +1918,10 @@ bool fill_in_file_mmap(struct dynsec_event *dynsec_event, struct file *file,
 
         // Older kernels have had issue with chrooted paths on mmap
         if (current->nsproxy && file->f_path.mnt) {
-            mmap->path = dynsec_build_path(&file->f_path, &mmap->kmsg.msg.file.path_size, mode);
+            mmap->path = dynsec_build_path(&file->f_path, &mmap->kmsg.msg.file, mode);
         } else {
             mmap->path = dynsec_build_dentry(file->f_path.dentry,
-                                             &mmap->kmsg.msg.file.path_size, mode);
+                                             &mmap->kmsg.msg.file, mode);
         }
 
         if (mmap->path && mmap->kmsg.msg.file.path_size) {
@@ -1961,3 +2012,233 @@ bool fill_in_task_kill(struct dynsec_event *dynsec_event,
 
     return true;
 }
+
+//#ifndef CONFIG_SECURITY_PATH
+static char *build_preaction_path(int dfd, const char __user *filename,
+                                  int lookup_flags, struct dynsec_file *file)
+{
+    char *filebuf = NULL;
+    char *input_buf = NULL;
+    char *last_component = NULL;
+    char *p = NULL;
+    char *last = NULL;
+    char *norm_path = NULL;
+    int total_len = 0;
+    int input_len = 0;
+    int last_len = 0;
+    int error = -EINVAL;
+    long max_input_len;
+    struct path parent_path;
+
+    if (!filename || !file) {
+        return ERR_PTR(-EINVAL);
+    }
+    if (dfd < 0 && dfd != AT_FDCWD) {
+        return ERR_PTR(-EINVAL);
+    }
+
+    // A couple extra bytes to detect invalid component
+    last_component = kzalloc(NAME_MAX + 2, GFP_KERNEL);
+    if (!last_component) {
+        return ERR_PTR(-ENOMEM);
+    }
+    // Setup raw last component
+    last = last_component + NAME_MAX;
+    *last = '\0';
+
+
+    filebuf = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!filebuf) {
+        error = -ENOMEM;
+        goto out_err_free;
+    }
+    input_buf = filebuf;
+
+
+    if (dfd >= 0)
+    {
+        char *bufp;
+        struct file *dfd_file = fget(dfd);
+
+        if (IS_ERR_OR_NULL(dfd_file)) {
+            goto out_err_free;
+        }
+        if (!dfd_file->f_path.dentry || !dfd_file->f_path.mnt) {
+            goto out_err_free;
+        }
+        // Might as well check if dir
+        if (!d_is_dir(dfd_file->f_path.dentry)) {
+            error = -ENOTDIR;
+            goto out_err_free;
+        }
+
+        bufp = dynsec_d_path(&dfd_file->f_path, filebuf, PATH_MAX);
+        fput(dfd_file);
+        dfd_file = NULL;
+
+        if (IS_ERR_OR_NULL(bufp) || !*bufp) {
+            error = -ENAMETOOLONG;
+            goto out_err_free;
+        }
+        total_len = strlen(bufp);
+        if (total_len >= PATH_MAX) {
+            error = -ENAMETOOLONG;
+            goto out_err_free;
+        }
+        memmove(filebuf, bufp, total_len);
+
+        // Setup for appending user string
+        filebuf[total_len] = '/';
+        total_len += 1;
+        input_buf = filebuf + total_len;
+    }
+
+    // TODO: Allocate own buffer for user filepath
+    max_input_len = PATH_MAX - total_len;
+    input_buf[max_input_len - 1] = 0; // aka filebuf[PATH_MAX - 1] = 0
+    input_len = strncpy_from_user(input_buf, filename, max_input_len);
+    if (input_len < 0) {
+        error = input_len;
+        goto out_err_free;
+    }
+    if (input_len == 0) {
+        goto out_err_free;
+    }
+    if (input_len == max_input_len &&
+        input_buf[max_input_len - 1] != 0) {
+        error = -ENAMETOOLONG;
+        goto out_err_free;
+    }
+    total_len += input_len;
+
+    // pr_info("%s:%d dfd:%d input_len:%d '%s'", __func__, __LINE__,
+    //         dfd, input_len, filebuf);
+
+
+    // Chomp trailing slashes
+    p = input_buf + input_len;
+    while (p >= input_buf && *p == '/') {
+        *p = '\0';
+        p--;
+        total_len--;
+    }
+
+    // copy component until we hit a barrier
+    while (p >= input_buf && last > last_component) {
+        if (*p == '/') {
+            break;
+        }
+        last--;
+        *last = *p;
+        last_len++;
+
+        *p = '\0';
+        p--;
+        total_len--;
+    }
+    if (last_len > NAME_MAX) {
+        error = -ENAMETOOLONG;
+        goto out_err_free;
+    }
+    if (!last_len) {
+        error = -EINVAL;
+        goto out_err_free;
+    }
+
+        // pr_info("len:%d parent:%s last_len:%d last:%s\n",
+        //         total_len, filebuf, last_len, last);
+
+    // Normalize the filepath
+    error = kern_path(filebuf, LOOKUP_DIRECTORY, &parent_path);
+    if (error) {
+        goto out_err_free;
+    }
+
+    error = -ENAMETOOLONG;
+
+    fill_in_preaction_data(file, &parent_path);
+    norm_path = dynsec_build_path(&parent_path, file, GFP_KERNEL);
+    path_put(&parent_path);
+
+    // Append the last component to the normalized or raw input data
+    if (IS_ERR_OR_NULL(norm_path)) {
+        int raw_len = strlen(filebuf);
+
+        if (raw_len + 1 + 1 + last_len > PATH_MAX) {
+            error = -ENAMETOOLONG;
+            goto out_err_free;
+        }
+        filebuf[raw_len] = '/';
+        raw_len += 1;
+        strlcpy(filebuf + raw_len, last, last_len);
+        file->path_size = (uint16_t)strlen(filebuf) + 1;
+        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_RAW;
+        kfree(last_component);
+        return filebuf;
+    } else {
+        int parent_len = strlen(norm_path);
+
+        // parent + '/' + last component
+        if (parent_len + 1 + 1 + last_len > PATH_MAX) {
+            error = -ENAMETOOLONG;
+            kfree(norm_path);
+            goto out_err_free;
+        }
+
+        norm_path[parent_len] = '/';
+        parent_len += 1;
+
+        strlcpy(norm_path + parent_len, last, last_len);
+        file->path_size = (uint16_t)strlen(norm_path) + 1;
+        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
+        kfree(filebuf);
+        kfree(last_component);
+        return norm_path;
+    }
+
+out_err_free:
+    kfree(filebuf);
+    kfree(last_component);
+    return ERR_PTR(error);
+}
+
+
+bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
+                              int dfd, const char __user *filename,
+                              int flags, umode_t umode)
+{
+    struct dynsec_create_event *create = NULL;
+
+    if (!dynsec_event ||
+        !(dynsec_event->report_flags & DYNSEC_REPORT_INTENT) ||
+        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE ||
+          dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR)) {
+        return false;
+    }
+    create = dynsec_event_to_create(dynsec_event);
+
+    create->kmsg.hdr.payload = sizeof(create->kmsg);
+    fill_in_task_ctx(&create->kmsg.msg.task);
+
+    create->path = build_preaction_path(dfd, filename, 0,
+                                        &create->kmsg.msg.file);
+    if (IS_ERR_OR_NULL(create->path)) {
+        create->path = NULL;
+        return false;
+    }
+
+    create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
+    if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
+        create->kmsg.msg.file.umode |= S_IFDIR;
+    } else if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE) {
+        create->kmsg.msg.file.umode |= S_IFREG;
+    }
+
+    if (create->path && create->kmsg.msg.file.path_size) {
+        create->kmsg.msg.file.path_offset = create->kmsg.hdr.payload;
+        create->kmsg.hdr.payload += create->kmsg.msg.file.path_size;
+    }
+    return true;
+}
+
+//#endif /* ! CONFIG_SECURITY_PATH */

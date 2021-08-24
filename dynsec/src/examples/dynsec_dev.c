@@ -259,6 +259,7 @@ void print_create_event(int fd, struct dynsec_create_umsg *create)
     int response = DYNSEC_RESPONSE_ALLOW;
     const char *path = "";
     const char *ev_str = "CREATE";
+    const char *intent_str = "";
     const char *start = (const char *)create;
 
     if (create->hdr.event_type == DYNSEC_EVENT_TYPE_MKDIR)
@@ -268,17 +269,26 @@ void print_create_event(int fd, struct dynsec_create_umsg *create)
         path = start + create->msg.file.path_offset;
     }
 
+    if (create->hdr.report_flags & DYNSEC_REPORT_INTENT) {
+        intent_str = "-INTENT";
+    }
+
     if (create->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &create->hdr, response);
 
     if (quiet) return;
 
-    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#o magic:%#lx uid:%u "
-        "parent_ino:%llu '%s'\n", ev_str,
-        create->hdr.tid, create->msg.file.ino, create->msg.file.dev,
-        create->msg.task.mnt_ns, create->msg.file.umode,
-        create->msg.file.sb_magic,
-        create->msg.task.uid, create->msg.file.parent_ino, path);
+    printf("%s%s: tid:%u req_id:%llu ino:%llu dev:%#x mnt_ns:%u"
+           " umode:%#o magic:%#lx uid:%u parent_ino:%llu",
+           ev_str, intent_str, create->hdr.tid, create->hdr.req_id,
+           create->msg.file.ino, create->msg.file.dev, create->msg.task.mnt_ns,
+           create->msg.file.umode, create->msg.file.sb_magic, create->msg.task.uid,
+           create->msg.file.parent_ino);
+    if (create->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        printf(" parent_dev:%#x intent_req_id:%llu", create->msg.file.parent_dev,
+               create->hdr.intent_req_id);
+    }
+    printf(" '%s\n", path);
 }
 
 void print_open_event(int fd, struct dynsec_file_umsg *file)
@@ -537,7 +547,7 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
 void read_events(int fd, const char *banned_path)
 {
-    int timeout_ms = 100;
+    int timeout_ms = 1000;
     char *buf = global_buf;
 
     memset(global_buf, 'A',  MAX_BUF_SZ);
@@ -559,9 +569,8 @@ void read_events(int fd, const char *banned_path)
             fprintf(stderr, "poll(%m)\n");
             break;
         }
+        // Timeout
         if (ret == 0) {
-            if (timeout_ms < 500)
-                timeout_ms += 100;
             continue;
         }
         if (ret != 1 || !(pollfd.revents & POLLIN)) {
@@ -569,7 +578,6 @@ void read_events(int fd, const char *banned_path)
                     ret, pollfd.revents);
             break;
         }
-        timeout_ms = 100;
 
         bytes_read = read(fd, buf, MAX_BUF_SZ);
         if (bytes_read <= 0) {

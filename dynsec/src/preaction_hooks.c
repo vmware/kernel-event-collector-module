@@ -8,11 +8,17 @@
 #include <linux/uaccess.h>
 #include <linux/capability.h>
 #include <linux/unistd.h>
+#include <linux/namei.h>
+
 #include "preaction_hooks.h"
 #include "symbols.h"
 #include "version.h"
 #include "dynsec.h"
 #include "lsm_mask.h"
+
+#include "stall_tbl.h"
+#include "stall_reqs.h"
+#include "factory.h"
 
 
 struct syscall_hooks {
@@ -191,23 +197,110 @@ out:
 }
 
 
+static void dynsec_do_create(int dfd, const char __user *filename,
+                             int flags, umode_t umode)
+{
+    int ret;
+    struct path path;
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+    int lookup_flags = LOOKUP_FOLLOW;
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    // Hook is specifically for CREATE events
+    // Worry about other open flags in security_file_open.
+    if (flags == O_RDONLY ||
+        (flags & (O_PATH|O_DIRECTORY)) ||
+        (flags & O_CREAT) != O_CREAT) {
+        return;
+    }
+    if ((flags & O_NOFOLLOW) == O_NOFOLLOW) {
+        lookup_flags &= ~(LOOKUP_FOLLOW);
+    }
+
+    ret = user_path_at(dfd, filename, flags, &path);
+    if (!ret) {
+        path_put(&path);
+        return;
+    }
+    if (ret != -ENOENT) {
+        return;
+    }
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CREATE, DYNSEC_HOOK_TYPE_OPEN,
+                               report_flags, GFP_KERNEL);
+
+    if (!fill_in_preaction_create(event, dfd, filename, flags, umode)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_CREATE, GFP_KERNEL);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_KERNEL);
+    enqueue_nonstall_event(stall_tbl, event);
+
+    return;
+}
+
 DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 {
+#ifdef USE_PT_REGS
+    DECL_ARG_1(const char __user *, filename);
+    DECL_ARG_2(int, flags);
+    DECL_ARG_3(umode_t, mode);
+#endif
+
+    dynsec_do_create(AT_FDCWD, filename, flags, mode);
+
     return ret_sys(open, filename, flags, mode);
 }
 DEF_DYNSEC_SYS(creat, const char __user *pathname, umode_t mode)
 {
+#ifdef USE_PT_REGS
+    DECL_ARG_1(const char __user *, pathname);
+    DECL_ARG_2(umode_t, mode);
+#endif
+
+    dynsec_do_create(AT_FDCWD, pathname, O_CREAT, mode);
+
     return ret_sys(creat, pathname, mode);
 }
 DEF_DYNSEC_SYS(openat, int dfd, const char __user *filename,
                int flags, umode_t mode)
 {
+#ifdef USE_PT_REGS
+    DECL_ARG_1(int, dfd);
+    DECL_ARG_2(const char __user *, filename);
+    DECL_ARG_3(int, flags);
+    DECL_ARG_4(umode_t, mode);
+#endif
+
+    dynsec_do_create(dfd, filename, flags, mode);
+
     return ret_sys(openat, dfd, filename, flags, mode);
 }
 #ifdef __NR_openat2
 DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
                struct open_how __user *how, size_t usize)
 {
+#ifdef USE_PT_REGS
+    DECL_ARG_1(int, dfd);
+    DECL_ARG_2(const char __user *, filename);
+    DECL_ARG_3(int, flags);
+    DECL_ARG_4(struct open_how __user *, how);
+    DECL_ARG_5(umode_t, mode);
+#endif
+    // copy in how
+
+    dynsec_do_create(dfd, filename, khow->flags, mode);
+
+out:
     return ret_sys(openat2, dfd, filename, how, usize);
 }
 #endif /* __NR_openat2 */

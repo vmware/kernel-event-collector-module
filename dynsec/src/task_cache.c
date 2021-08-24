@@ -32,13 +32,10 @@ struct task_entry {
     u32 hits;
 
     // Most recent event observed
-    uint64_t last_req_id;
-    uint16_t last_report_flags;
-    enum dynsec_event_type last_event_type;
+    struct event_track last;
 
     // Most recent event requested to stall
-    uint64_t last_stall_req_id;
-    enum dynsec_event_type last_stall_event_type;
+    struct event_track last_stall;
 
     // Per-Event Cache Options
     u16 event_caches[DYNSEC_EVENT_TYPE_MAX + 1];
@@ -93,6 +90,13 @@ int task_cache_register(void)
     return 0;
 }
 static void task_cache_free_entries(void);
+void task_cache_clear(void)
+{
+    if (task_cache_enabled) {
+        task_cache_free_entries();
+    }
+}
+
 void task_cache_shutdown(void)
 {
     if (task_cache) {
@@ -106,7 +110,7 @@ void task_cache_shutdown(void)
     }
 }
 
-static void task_cache_free_entries(void)
+void task_cache_free_entries(void)
 {
     struct task_entry *entry, *tmp;
     int i;
@@ -138,19 +142,25 @@ static struct task_entry *__lookup_entry_safe(u32 hash, struct task_key *key,
 }
 
 #define task_observed_stall_event(task_entry) \
-    (task_entry->last_stall_event_type < DYNSEC_EVENT_TYPE_MAX)
+    (task_entry->last_stall.event_type < DYNSEC_EVENT_TYPE_MAX)
 
 #define event_cache_enabled(mask) \
     (!!(mask & (DYNSEC_CACHE_ENABLE|DYNSEC_CACHE_ENABLE_EXCL|DYNSEC_CACHE_ENABLE_STRICT)))
 
 
-static inline void __update_entry_data(struct dynsec_event *event,
-                                      struct task_entry *entry)
+static inline void __update_entry_data(struct event_track *event,
+                                       struct task_entry *entry)
 {
     const u16 old_report_flags = event->report_flags;
     const bool is_stall = !!(old_report_flags & DYNSEC_REPORT_STALL);
 
     entry->hits += 1;
+
+    // If not reportable then only set last event and touch nothing else
+    if (!(event->track_flags & TRACK_EVENT_REPORTABLE)) {
+        memcpy(&entry->last, event, sizeof(*event));
+        return;
+    }
 
     switch (entry->event_caches[event->event_type])
     {
@@ -161,16 +171,18 @@ static inline void __update_entry_data(struct dynsec_event *event,
         if (is_stall) {
             event->report_flags &= ~(DYNSEC_REPORT_STALL);
             event->report_flags |= DYNSEC_REPORT_CACHED;
+            event->track_flags |= TRACK_EVENT_REPORT_FLAGS_CHG;
         }
         break;
 
     case DYNSEC_CACHE_ENABLE_EXCL:
         // Disable Cache If Previous STALL Event Is Cacheable
         if (!task_observed_stall_event(entry) ||
-            event_cache_enabled(entry->event_caches[entry->last_stall_event_type])) {
+            event_cache_enabled(entry->event_caches[entry->last_stall.event_type])) {
             if (is_stall) {
                 event->report_flags &= ~(DYNSEC_REPORT_STALL);
                 event->report_flags |= DYNSEC_REPORT_CACHED;
+                event->track_flags |= TRACK_EVENT_REPORT_FLAGS_CHG;
             }
         } else {
             entry->event_caches[event->event_type] = 0;
@@ -179,10 +191,11 @@ static inline void __update_entry_data(struct dynsec_event *event,
 
     case DYNSEC_CACHE_ENABLE_STRICT:
         // Disable Cache On Event If Another Event Type Sent
-        if (entry->last_event_type == event->event_type) {
+        if (entry->last.event_type == event->event_type) {
             if (is_stall) {
                 event->report_flags &= ~(DYNSEC_REPORT_STALL);
                 event->report_flags |= DYNSEC_REPORT_CACHED;
+                event->track_flags |= TRACK_EVENT_REPORT_FLAGS_CHG;
             }
         } else {
             entry->event_caches[event->event_type] = 0;
@@ -198,23 +211,22 @@ static inline void __update_entry_data(struct dynsec_event *event,
     }
 
     // Update last known event. Primarily for preactions.
-    entry->last_req_id = event->req_id;
-    entry->last_event_type = event->event_type;
-    entry->last_report_flags = old_report_flags;
+    memcpy(&entry->last, event, sizeof(*event));
 
     // Update last known stall event
     if (is_stall) {
-        entry->last_stall_req_id = event->req_id;
-        entry->last_stall_event_type = event->event_type;
+        memcpy(&entry->last_stall, event, sizeof(*event));
     }
 
     // Per-Task Level Event Counter
-    entry->events[event->event_type] += 1;
+    if (!(old_report_flags & DYNSEC_REPORT_INTENT)) {
+        entry->events[event->event_type] += 1;
+    }
 }
 
-int task_cache_set_last_event(struct dynsec_event *event,
-                              uint64_t *prev_req_id,
-                              enum dynsec_event_type *prev_event_type,
+int task_cache_set_last_event(pid_t tid,
+                              struct event_track *event,
+                              struct event_track *prev_event,
                               gfp_t mode)
 {
     u32 hash;
@@ -224,7 +236,7 @@ int task_cache_set_last_event(struct dynsec_event *event,
     int bkt_index;
     struct task_key key = {};
 
-    if (!task_cache_enabled || !event) {
+    if (!task_cache_enabled || !event || !tid) {
         return -EINVAL;
     }
 
@@ -233,7 +245,7 @@ int task_cache_set_last_event(struct dynsec_event *event,
         return -EINVAL;
     }
 
-    key.tid = event->tid;
+    key.tid = tid;
     hash = task_hash(&key);
     bkt_index = task_bucket_index(hash);
     bkt = &(task_cache->bkt[bkt_index]);
@@ -243,13 +255,11 @@ int task_cache_set_last_event(struct dynsec_event *event,
     entry = __lookup_entry_safe(hash, &key, &bkt->list);
     if (entry) {
         // Copy over previous event context first
-        if (prev_req_id) {
-            *prev_req_id = entry->last_req_id;
-        }
-        if (prev_event_type) {
-            *prev_event_type = entry->last_event_type;
+        if (prev_event) {
+            memcpy(prev_event, &entry->last, sizeof(*prev_event));
         }
 
+        // TODO: place in front of queue
         __update_entry_data(event, entry);
 
         spin_unlock_irqrestore(&bkt->lock, flags);
@@ -280,19 +290,16 @@ int task_cache_set_last_event(struct dynsec_event *event,
         bkt->size += 1;
     }
 
-    entry->last_req_id = event->req_id;
-    entry->last_event_type = event->event_type;
-    entry->last_report_flags = event->report_flags;
+    memcpy(&entry->last, event, sizeof(*event));
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
-        entry->last_stall_req_id = event->req_id;
-        entry->last_stall_event_type = event->event_type;
+        memcpy(&entry->last_stall, event, sizeof(*event));
     } else {
-        entry->last_stall_event_type = DYNSEC_EVENT_TYPE_MAX;
+        entry->last_stall.event_type = DYNSEC_EVENT_TYPE_MAX;
     }
     spin_unlock_irqrestore(&bkt->lock, flags);
 
-    return 0;
+    return -ENOENT;
 }
 
 int task_cache_handle_response(struct dynsec_response *response)

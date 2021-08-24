@@ -3,6 +3,10 @@
 
 #pragma once
 
+struct dynsec_file;
+
+#define DEFAULT_PATH_ALLOC_SZ 128
+
 extern bool dynsec_path_utils_init(void);
 
 extern bool dynsec_current_chrooted(void);
@@ -13,8 +17,8 @@ extern char *dynsec_d_path(const struct path *path, char *buf, int buflen);
 
 extern char *dynsec_path_safeish(const struct path *path, char *buf, int buflen);
 
-extern char *dynsec_build_path(struct path *path, uint16_t *size, gfp_t mode);
-extern char *dynsec_build_dentry(struct dentry *dentry, uint16_t *size, gfp_t mode);
+extern char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode);
+extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file, gfp_t mode);
 
 
 #include <linux/sched.h>
