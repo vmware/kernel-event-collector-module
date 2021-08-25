@@ -254,6 +254,41 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
            setattr->msg.file.dev, path_type, path);
 }
 
+// Prints fields that are available given bitmap
+void print_dynsec_file(struct dynsec_file *file)
+{
+    if (file->attr_mask & DYNSEC_FILE_ATTR_INODE) {
+        printf(" ino:%llu uid:%u gid:%u umode:%#o size:%u", file->ino,
+                file->uid, file->gid, file->umode, file->size);
+    }
+    if (file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
+        printf(" dev:%#x sb_magic:%#llx", file->dev, file->sb_magic);
+    }
+    if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
+        printf(" parent[ino:%llu uid:%u gid:%u]", file->parent_ino,
+               file->parent_uid, file->parent_gid);
+    }
+    if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
+        printf(" parent_dev:%#x", file->parent_dev);
+    }
+}
+void print_path(const char *start, struct dynsec_file *file) {
+
+    if (file->path_offset) {
+        const char *path = start + file->path_offset;
+        const char *path_type = "";
+
+        if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) {
+            path_type = "fullpath";
+        } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_DENTRY) {
+            path_type = "dentrypath";
+        } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_RAW) {
+            path_type = "rawpath";
+        }
+        printf(" %s:'%s'", path_type, path);
+    }
+}
+
 void print_create_event(int fd, struct dynsec_create_umsg *create)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -278,17 +313,14 @@ void print_create_event(int fd, struct dynsec_create_umsg *create)
 
     if (quiet) return;
 
-    printf("%s%s: tid:%u req_id:%llu ino:%llu dev:%#x mnt_ns:%u"
-           " umode:%#o magic:%#lx uid:%u parent_ino:%llu",
-           ev_str, intent_str, create->hdr.tid, create->hdr.req_id,
-           create->msg.file.ino, create->msg.file.dev, create->msg.task.mnt_ns,
-           create->msg.file.umode, create->msg.file.sb_magic, create->msg.task.uid,
-           create->msg.file.parent_ino);
+    printf("%s%s: tid:%u mnt_ns:%u req_id:%llu", ev_str, intent_str,
+           create->hdr.tid, create->msg.task.mnt_ns, create->hdr.req_id);
     if (create->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
-        printf(" parent_dev:%#x intent_req_id:%llu", create->msg.file.parent_dev,
-               create->hdr.intent_req_id);
+        printf(" intent_req_id:%llu", create->hdr.intent_req_id);
     }
-    printf(" '%s\n", path);
+    print_dynsec_file(&create->msg.file);
+    print_path(start, &create->msg.file);
+    printf("\n");
 }
 
 void print_open_event(int fd, struct dynsec_file_umsg *file)
