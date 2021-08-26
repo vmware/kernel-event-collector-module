@@ -109,9 +109,9 @@ typedef struct process_tracking {
 
     SharedTrackingData *shared_data;
 
-    // This will hold a refernce to the parents shared_data AFTER a processes exec
-    //  and UNTIL the event is queued.
-    SharedTrackingData *parent_shared_data;
+    // This holds a temporary pointer to the shared_data that will be referenced by the next event created for
+    // this proc. This is only used when creating events as a result of process execs.
+    SharedTrackingData *temp_shared_data;
 
 } ProcessTracking;
 
