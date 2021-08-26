@@ -2238,7 +2238,6 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
         return false;
     }
 
-    // TODO: Check if parent inode is POSIX acl
     create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
     if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
         create->kmsg.msg.file.umode |= S_IFDIR;
