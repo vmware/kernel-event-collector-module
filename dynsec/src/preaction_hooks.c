@@ -79,23 +79,26 @@ static uint64_t syscall_hooks_enabled;
 
 static DEFINE_MUTEX(lookup_lock);
 static void **sys_call_table;
+#if CONFIG_X86_64
 static void **ia32_sys_call_table;
-
+#endif
 
 // PreAction hooks we can support via kprobe
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
 int dynsec_chmod_common(struct kprobe *kprobe, struct pt_regs *regs)
 {
+    DECL_ARG_1(const struct path *, path);
+    DECL_ARG_2(umode_t, mode);
+
     return 0;
 }
 
 int dynsec_chown_common(struct kprobe *kprobe, struct pt_regs *regs)
 {
-    return 0;
-}
+    DECL_ARG_1(const struct path *, path);
+    DECL_ARG_2(uid_t, user);
+    DECL_ARG_3(gid_t, group);
 
-int dynsec_vfs_truncate(struct kprobe *kprobe, struct pt_regs *regs)
-{
     return 0;
 }
 #else
@@ -150,14 +153,12 @@ static bool may_restore_syscalls(void)
 
 DEF_DYNSEC_SYS(delete_module, const char __user *name_user, unsigned int flags)
 {
-#ifdef USE_PT_REGS
-    SYS_ARG_1(const char __user *, name_user);
-    SYS_ARG_2(unsigned int, flags);
-#endif
     char name_kernel[MODULE_NAME_LEN];
     int ref_count;
     int ret;
     bool restored = false;
+    SYS_ARG_1(const char __user *, name_user);
+    SYS_ARG_2(unsigned int, flags);
 
     if (!capable(CAP_SYS_MODULE)) {
         // Allow event to audit
@@ -261,7 +262,6 @@ static void dynsec_do_create(int dfd, const char __user *filename,
 
     return;
 }
-
 DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 {
     SYS_ARG_1(const char __user *, filename);

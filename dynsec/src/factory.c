@@ -341,20 +341,26 @@ void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
 
     // Find the last event. If it's an PreAction aka DYNSEC_REPORT_INTENT
     // and it was meant to be reportable then adjust req_id or tell us
-    if (dynsec_event->event_type < DYNSEC_EVENT_TYPE_HEALTH) {
-        if (event.report_flags & DYNSEC_REPORT_INTENT) {
-            (void)task_cache_set_last_event(dynsec_event->tid, &event,
-                                            NULL, mode);
-        } else {
-            int ret = task_cache_set_last_event(dynsec_event->tid, &event,
-                                                &prev_event, mode);
+    if (dynsec_event->event_type >= DYNSEC_EVENT_TYPE_HEALTH) {
+        return;
+    }
 
-            if (!ret && (prev_event.report_flags & DYNSEC_REPORT_INTENT) &&
-                    (prev_event.track_flags & TRACK_EVENT_REPORTABLE) &&
-                    prev_event.event_type == event.event_type) {
-                dynsec_event->intent_req_id = prev_event.req_id;
-                dynsec_event->report_flags |= DYNSEC_REPORT_INTENT_FOUND;
-            }
+    if (event.report_flags & DYNSEC_REPORT_INTENT) {
+        (void)task_cache_set_last_event(dynsec_event->tid, &event,
+                                        NULL, mode);
+    } else {
+        int error = task_cache_set_last_event(dynsec_event->tid, &event,
+                                              &prev_event, mode);
+        // Copy over modified report flags due to cache opts
+        if (!error) {
+            dynsec_event->report_flags = event.report_flags;
+        }
+
+        if (!error && (prev_event.report_flags & DYNSEC_REPORT_INTENT) &&
+                (prev_event.track_flags & TRACK_EVENT_REPORTABLE) &&
+                prev_event.event_type == event.event_type) {
+            dynsec_event->intent_req_id = prev_event.req_id;
+            dynsec_event->report_flags |= DYNSEC_REPORT_INTENT_FOUND;
         }
     }
 

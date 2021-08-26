@@ -106,6 +106,7 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
     //     response.cache_flags = DYNSEC_CACHE_CLEAR_ON_EVENT;
     //     break;
     // }
+    // response.cache_flags = DYNSEC_CACHE_ENABLE;
 
     ret = write(fd, &response, sizeof(response));
     if (ret < 0) {
