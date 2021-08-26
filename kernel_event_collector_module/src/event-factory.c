@@ -32,13 +32,14 @@ PCB_EVENT ec_factory_alloc_event(ProcessTracking *procp,
 
     if (procp && type_msg)
     {
-        TRACE(trace_level, "%s%s %s of %d by %d (reported as %d by %d)",
+        TRACE(trace_level, "%s%s %s of %d by %d (reported as %d:%ld by %d)",
                type_msg,
                (status_msg ? status_msg : ""),
                (procp->shared_data->path ? procp->shared_data->path : "<unknown>"),
                procp->posix_details.pid,
                procp->posix_parent_details.pid,
                procp->shared_data->exec_details.pid,
+               procp->shared_data->exec_details.start_time,
                procp->shared_data->exec_parent_details.pid);
     }
 
@@ -95,11 +96,12 @@ void ec_event_send_last_exit(PCB_EVENT        event,
 {
     CANCEL_VOID(event);
 
-    TRACE(DL_PROCESS, "EXIT <SEND-LAST> %s of %d by %d (reported as %d by %d)",
+    TRACE(DL_PROCESS, "EXIT <SEND-LAST> %s of %d by %d (reported as %d:%ld by %d)",
            (event->procInfo.path ? event->procInfo.path : "<unknown>"),
            event->procInfo.all_process_details.array[FORK].pid,
            event->procInfo.all_process_details.array[FORK_PARENT].pid,
            event->procInfo.all_process_details.array[EXEC].pid,
+           event->procInfo.all_process_details.array[EXEC].start_time,
            event->procInfo.all_process_details.array[EXEC_PARENT].pid);
 
     // Queue it to be sent to usermode
@@ -143,12 +145,13 @@ void ec_event_send_exit(ProcessTracking *procp,
 
     if (procp)
     {
-        TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d by %d)",
+        TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
                status_msg,
                (procp->shared_data->path ? procp->shared_data->path : "<unknown>"),
                procp->posix_details.pid,
                procp->posix_parent_details.pid,
                procp->shared_data->exec_details.pid,
+               procp->shared_data->exec_details.start_time,
                procp->shared_data->exec_parent_details.pid);
     }
 }
@@ -271,7 +274,7 @@ void ec_event_send_modload(
     // load, but for now we just drop it. We identify this case by seeing that no process
     // exec event for the current procp has been sent yet, because the exec event is
     // responsible for freeing the parent shared data.
-    CANCEL_VOID(!procp->parent_shared_data);
+    CANCEL_VOID(!procp->temp_shared_data);
 
     if (MAY_TRACE_LEVEL(DL_MODLOAD))
     {
