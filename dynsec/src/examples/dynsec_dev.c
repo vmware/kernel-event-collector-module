@@ -117,6 +117,44 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
     return 0;
 }
 
+// Prints fields that are available given bitmap
+static void print_dynsec_file(struct dynsec_file *file)
+{
+    if (file->attr_mask & DYNSEC_FILE_ATTR_INODE) {
+        printf(" ino:%llu uid:%u gid:%u umode:%#o size:%u", file->ino,
+                file->uid, file->gid, file->umode, file->size);
+    }
+    if (file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
+        printf(" dev:%#x sb_magic:%#llx", file->dev, file->sb_magic);
+    }
+    if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
+        printf(" parent[ino:%llu uid:%u gid:%u umode:%#o", file->parent_ino,
+               file->parent_uid, file->parent_gid, file->parent_umode);
+        if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
+            printf(" parent_dev:%#x", file->parent_dev);
+        }
+        printf("]");
+    } else if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
+        printf(" parent_dev:%#x", file->parent_dev);
+    }
+}
+
+static void print_path(const char *start, struct dynsec_file *file)
+{
+    if (file->path_offset) {
+        const char *path = start + file->path_offset;
+        const char *path_type = "";
+
+        if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) {
+            path_type = "fullpath";
+        } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_DENTRY) {
+            path_type = "dentrypath";
+        } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_RAW) {
+            path_type = "rawpath";
+        }
+        printf(" %s:'%s'", path_type, path);
+    }
+}
 
 void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *banned_path)
 {
@@ -178,33 +216,32 @@ void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
 void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
-    const char *old_path = "";
-    const char *new_path = "";
     const char *start = (const char *)rename_msg;
-
-    if (rename_msg->msg.old_file.path_offset) {
-        old_path = start + rename_msg->msg.old_file.path_offset;
-    }
-    if (rename_msg->msg.new_file.path_offset) {
-        new_path = start + rename_msg->msg.new_file.path_offset;
-    }
+    const char *intent_str = "";
 
     if (rename_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &rename_msg->hdr, response);
 
     if (quiet) return;
 
-    printf("RENAME: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
-        "'%s'[%llu %#o %llu]->'%s'[%llu %#o %llu]\n",
-        rename_msg->hdr.tid, rename_msg->msg.old_file.dev, rename_msg->msg.task.mnt_ns,
-        rename_msg->msg.old_file.sb_magic,
-        rename_msg->msg.task.uid,
-        old_path, rename_msg->msg.old_file.ino, rename_msg->msg.old_file.umode,
-        rename_msg->msg.old_file.parent_ino,
+    if (rename_msg->hdr.report_flags & DYNSEC_REPORT_INTENT) {
+        intent_str = "-INTENT";
+    }
 
-        new_path, rename_msg->msg.new_file.ino, rename_msg->msg.new_file.umode,
-        rename_msg->msg.new_file.parent_ino
-    );
+    printf("RENAME%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
+           rename_msg->hdr.tid, rename_msg->msg.task.mnt_ns,
+           rename_msg->hdr.req_id);
+
+    if (rename_msg->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        printf(" intent_req_id:%llu", rename_msg->hdr.intent_req_id);
+    }
+    printf(" OLD{");
+    print_dynsec_file(&rename_msg->msg.old_file);
+    print_path(start, &rename_msg->msg.old_file);
+    printf("} -> NEW{");
+    print_dynsec_file(&rename_msg->msg.new_file);
+    print_path(start, &rename_msg->msg.new_file);
+    printf("}\n");
 }
 
 void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
@@ -213,6 +250,7 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
     const char *path = "";
     const char *start = (const char *)setattr;
     const char *path_type = "";
+    const char *intent_str = "";
 
     if (setattr->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &setattr->hdr, response);
@@ -254,43 +292,7 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
            setattr->msg.file.dev, path_type, path);
 }
 
-// Prints fields that are available given bitmap
-void print_dynsec_file(struct dynsec_file *file)
-{
-    if (file->attr_mask & DYNSEC_FILE_ATTR_INODE) {
-        printf(" ino:%llu uid:%u gid:%u umode:%#o size:%u", file->ino,
-                file->uid, file->gid, file->umode, file->size);
-    }
-    if (file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
-        printf(" dev:%#x sb_magic:%#llx", file->dev, file->sb_magic);
-    }
-    if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
-        printf(" parent[ino:%llu uid:%u gid:%u umode:%#o", file->parent_ino,
-               file->parent_uid, file->parent_gid, file->parent_umode);
-        if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
-            printf(" parent_dev:%#x", file->parent_dev);
-        }
-        printf("]");
-    } else if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
-        printf(" parent_dev:%#x", file->parent_dev);
-    }
-}
-void print_path(const char *start, struct dynsec_file *file)
-{
-    if (file->path_offset) {
-        const char *path = start + file->path_offset;
-        const char *path_type = "";
 
-        if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) {
-            path_type = "fullpath";
-        } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_DENTRY) {
-            path_type = "dentrypath";
-        } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_RAW) {
-            path_type = "rawpath";
-        }
-        printf(" %s:'%s'", path_type, path);
-    }
-}
 
 void print_create_event(int fd, struct dynsec_create_umsg *create)
 {

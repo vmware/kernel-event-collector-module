@@ -133,12 +133,27 @@ static bool may_restore_syscalls(void)
 #define ret_sys(NAME, ...) select_hook()->NAME(__VA_ARGS__)
 #endif
 
+#ifdef USE_PT_REGS
+#define SYS_ARG_1(...) DECL_ARG_1(__VA_ARGS__)
+#define SYS_ARG_2(...) DECL_ARG_2(__VA_ARGS__)
+#define SYS_ARG_3(...) DECL_ARG_3(__VA_ARGS__)
+#define SYS_ARG_4(...) DECL_ARG_4(__VA_ARGS__)
+#define SYS_ARG_5(...) DECL_ARG_5(__VA_ARGS__)
+#define SYS_ARG_6(...) DECL_ARG_6(__VA_ARGS__)
+#else
+#define SYS_ARG_1(...) ;
+#define SYS_ARG_2(...) ;
+#define SYS_ARG_3(...) ;
+#define SYS_ARG_4(...) ;
+#define SYS_ARG_5(...) ;
+#define SYS_ARG_6(...) ;
+#endif
 
 DEF_DYNSEC_SYS(delete_module, const char __user *name_user, unsigned int flags)
 {
 #ifdef USE_PT_REGS
-    DECL_ARG_1(const char __user *, name_user);
-    DECL_ARG_2(unsigned int, flags);
+    SYS_ARG_1(const char __user *, name_user);
+    SYS_ARG_2(unsigned int, flags);
 #endif
     char name_kernel[MODULE_NAME_LEN];
     int ref_count;
@@ -251,9 +266,9 @@ static void dynsec_do_create(int dfd, const char __user *filename,
 DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 {
 #ifdef USE_PT_REGS
-    DECL_ARG_1(const char __user *, filename);
-    DECL_ARG_2(int, flags);
-    DECL_ARG_3(umode_t, mode);
+    SYS_ARG_1(const char __user *, filename);
+    SYS_ARG_2(int, flags);
+    SYS_ARG_3(umode_t, mode);
 #endif
 
     dynsec_do_create(AT_FDCWD, filename, flags, mode);
@@ -263,8 +278,8 @@ DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 DEF_DYNSEC_SYS(creat, const char __user *pathname, umode_t mode)
 {
 #ifdef USE_PT_REGS
-    DECL_ARG_1(const char __user *, pathname);
-    DECL_ARG_2(umode_t, mode);
+    SYS_ARG_1(const char __user *, pathname);
+    SYS_ARG_2(umode_t, mode);
 #endif
 
     dynsec_do_create(AT_FDCWD, pathname, O_CREAT, mode);
@@ -275,10 +290,10 @@ DEF_DYNSEC_SYS(openat, int dfd, const char __user *filename,
                int flags, umode_t mode)
 {
 #ifdef USE_PT_REGS
-    DECL_ARG_1(int, dfd);
-    DECL_ARG_2(const char __user *, filename);
-    DECL_ARG_3(int, flags);
-    DECL_ARG_4(umode_t, mode);
+    SYS_ARG_1(int, dfd);
+    SYS_ARG_2(const char __user *, filename);
+    SYS_ARG_3(int, flags);
+    SYS_ARG_4(umode_t, mode);
 #endif
 
     dynsec_do_create(dfd, filename, flags, mode);
@@ -290,11 +305,11 @@ DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
                struct open_how __user *how, size_t usize)
 {
 #ifdef USE_PT_REGS
-    DECL_ARG_1(int, dfd);
-    DECL_ARG_2(const char __user *, filename);
-    DECL_ARG_3(int, flags);
-    DECL_ARG_4(struct open_how __user *, how);
-    DECL_ARG_5(umode_t, mode);
+    SYS_ARG_1(int, dfd);
+    SYS_ARG_2(const char __user *, filename);
+    SYS_ARG_3(int, flags);
+    SYS_ARG_4(struct open_how __user *, how);
+    SYS_ARG_5(umode_t, mode);
 #endif
     // copy in how
 
@@ -305,15 +320,74 @@ out:
 }
 #endif /* __NR_openat2 */
 
+static void dynsec_do_rename(int olddfd, const char __user *oldname,
+                             int newdfd, const char __user *newname)
+{
+    int ret;
+    struct path oldpath;
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+    umode_t mode;
+    bool filled;
 
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    ret = user_path_at(olddfd, oldname, LOOKUP_FOLLOW, &oldpath);
+    if (ret) {
+        return;
+    }
+
+    if (!oldpath.dentry && !oldpath.dentry->d_inode) {
+        path_put(&oldpath);
+        return;
+    }
+    mode = oldpath.dentry->d_inode->i_mode;
+    if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
+        path_put(&oldpath);
+        return;
+    }
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_RENAME, DYNSEC_EVENT_TYPE_RENAME,
+                               report_flags, GFP_KERNEL);
+
+    filled = fill_in_preaction_rename(event, &oldpath, newdfd, newname);
+    path_put(&oldpath);
+    if (!filled) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_RENAME, GFP_KERNEL);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_KERNEL);
+    enqueue_nonstall_event(stall_tbl, event);
+}
 DEF_DYNSEC_SYS(rename, const char __user *oldname, const char __user *newname)
 {
+#ifdef USE_PT_REGS
+    SYS_ARG_1(const char __user *, oldname);
+    SYS_ARG_2(const char __user *, newname);
+#endif
+
+    dynsec_do_rename(AT_FDCWD, oldname, AT_FDCWD, newname);
     return ret_sys(rename, oldname, newname);
 }
 #ifdef __NR_renameat
 DEF_DYNSEC_SYS(renameat, int olddfd, const char __user *oldname,
                int newdfd, const char __user *newname)
 {
+#ifdef USE_PT_REGS
+    SYS_ARG_1(int, olddfd);
+    SYS_ARG_2(const char __user *, oldname);
+    SYS_ARG_3(int, newdfd);
+    SYS_ARG_4(const char __user *, newname);
+#endif
+
+    dynsec_do_rename(olddfd, oldname, newdfd, newname);
     return ret_sys(renameat, olddfd, oldname, newdfd, newname);
 }
 #endif /* __NR_renameat */
@@ -321,6 +395,14 @@ DEF_DYNSEC_SYS(renameat, int olddfd, const char __user *oldname,
 DEF_DYNSEC_SYS(renameat2, int olddfd, const char __user *oldname,
                int newdfd, const char __user *newname, unsigned int flags)
 {
+#ifdef USE_PT_REGS
+    SYS_ARG_1(int, olddfd);
+    SYS_ARG_2(const char __user *, oldname);
+    SYS_ARG_3(int, newdfd);
+    SYS_ARG_4(const char __user *, newname);
+#endif
+
+    dynsec_do_rename(olddfd, oldname, newdfd, newname);
     return ret_sys(renameat2, olddfd, oldname, newdfd, newname, flags);
 }
 #endif /* __NR_renameat2 */
@@ -362,21 +444,17 @@ static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
 }
 DEF_DYNSEC_SYS(mkdir, const char __user *pathname, umode_t mode)
 {
-#ifdef USE_PT_REGS
-    DECL_ARG_1(const char __user *, pathname);
-    DECL_ARG_2(umode_t, mode);
-#endif /* USE_PT_REGS */
+    SYS_ARG_1(const char __user *, pathname);
+    SYS_ARG_2(umode_t, mode);
 
     dynsec_do_mkdir(AT_FDCWD, pathname, mode);
     return ret_sys(mkdir, pathname, mode);
 }
 DEF_DYNSEC_SYS(mkdirat, int dfd, const char __user *pathname, umode_t mode)
 {
-#ifdef USE_PT_REGS
-    DECL_ARG_1(int, dfd);
-    DECL_ARG_2(const char __user *, pathname);
-    DECL_ARG_3(umode_t, mode);
-#endif /* USE_PT_REGS */
+    SYS_ARG_1(int, dfd);
+    SYS_ARG_2(const char __user *, pathname);
+    SYS_ARG_3(umode_t, mode);
 
     dynsec_do_mkdir(dfd, pathname, mode);
 

@@ -303,5 +303,7 @@ extern bool fill_in_task_kill(struct dynsec_event *dynsec_event,
 extern bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                                      int dfd, const char __user *filename,
                                      int flags, umode_t umode);
-
+extern bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
+                                     struct path *oldpath,
+                                     int newdfd, const char __user *newname);
 //#endif /* ! CONFIG_SECURITY_PATH */
