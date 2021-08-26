@@ -120,7 +120,7 @@ char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode)
     //     return dynsec_build_dentry(path->dentry, size, mode);
     // }
 
-    buf = kmalloc(PATH_MAX, mode);
+    buf = kzalloc(PATH_MAX, mode);
     if (!buf) {
         goto out;
     }

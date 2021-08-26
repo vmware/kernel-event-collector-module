@@ -103,7 +103,6 @@ int dynsec_vfs_truncate(struct kprobe *kprobe, struct pt_regs *regs)
 #endif
 
 
-
 // Call with lock held
 static void restore_syscalls(void);
 static int syscall_changed(const struct syscall_hooks *old_hooks,
@@ -265,11 +264,9 @@ static void dynsec_do_create(int dfd, const char __user *filename,
 
 DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(const char __user *, filename);
     SYS_ARG_2(int, flags);
     SYS_ARG_3(umode_t, mode);
-#endif
 
     dynsec_do_create(AT_FDCWD, filename, flags, mode);
 
@@ -277,10 +274,8 @@ DEF_DYNSEC_SYS(open, const char __user *filename, int flags, umode_t mode)
 }
 DEF_DYNSEC_SYS(creat, const char __user *pathname, umode_t mode)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(const char __user *, pathname);
     SYS_ARG_2(umode_t, mode);
-#endif
 
     dynsec_do_create(AT_FDCWD, pathname, O_CREAT, mode);
 
@@ -289,12 +284,10 @@ DEF_DYNSEC_SYS(creat, const char __user *pathname, umode_t mode)
 DEF_DYNSEC_SYS(openat, int dfd, const char __user *filename,
                int flags, umode_t mode)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(int, dfd);
     SYS_ARG_2(const char __user *, filename);
     SYS_ARG_3(int, flags);
     SYS_ARG_4(umode_t, mode);
-#endif
 
     dynsec_do_create(dfd, filename, flags, mode);
 
@@ -304,13 +297,11 @@ DEF_DYNSEC_SYS(openat, int dfd, const char __user *filename,
 DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
                struct open_how __user *how, size_t usize)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(int, dfd);
     SYS_ARG_2(const char __user *, filename);
     SYS_ARG_3(int, flags);
     SYS_ARG_4(struct open_how __user *, how);
     SYS_ARG_5(umode_t, mode);
-#endif
     // copy in how
 
     dynsec_do_create(dfd, filename, khow->flags, mode);
@@ -334,7 +325,7 @@ static void dynsec_do_rename(int olddfd, const char __user *oldname,
         return;
     }
 
-    ret = user_path_at(olddfd, oldname, LOOKUP_FOLLOW, &oldpath);
+    ret = user_path_at(olddfd, oldname, 0, &oldpath);
     if (ret) {
         return;
     }
@@ -356,7 +347,7 @@ static void dynsec_do_rename(int olddfd, const char __user *oldname,
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_RENAME, DYNSEC_EVENT_TYPE_RENAME,
                                report_flags, GFP_KERNEL);
 
-    filled = fill_in_preaction_rename(event, &oldpath, newdfd, newname);
+    filled = fill_in_preaction_rename(event, newdfd, newname, &oldpath);
     path_put(&oldpath);
     if (!filled) {
         prepare_non_report_event(DYNSEC_EVENT_TYPE_RENAME, GFP_KERNEL);
@@ -368,10 +359,8 @@ static void dynsec_do_rename(int olddfd, const char __user *oldname,
 }
 DEF_DYNSEC_SYS(rename, const char __user *oldname, const char __user *newname)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(const char __user *, oldname);
     SYS_ARG_2(const char __user *, newname);
-#endif
 
     dynsec_do_rename(AT_FDCWD, oldname, AT_FDCWD, newname);
     return ret_sys(rename, oldname, newname);
@@ -380,12 +369,10 @@ DEF_DYNSEC_SYS(rename, const char __user *oldname, const char __user *newname)
 DEF_DYNSEC_SYS(renameat, int olddfd, const char __user *oldname,
                int newdfd, const char __user *newname)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(int, olddfd);
     SYS_ARG_2(const char __user *, oldname);
     SYS_ARG_3(int, newdfd);
     SYS_ARG_4(const char __user *, newname);
-#endif
 
     dynsec_do_rename(olddfd, oldname, newdfd, newname);
     return ret_sys(renameat, olddfd, oldname, newdfd, newname);
@@ -395,12 +382,10 @@ DEF_DYNSEC_SYS(renameat, int olddfd, const char __user *oldname,
 DEF_DYNSEC_SYS(renameat2, int olddfd, const char __user *oldname,
                int newdfd, const char __user *newname, unsigned int flags)
 {
-#ifdef USE_PT_REGS
     SYS_ARG_1(int, olddfd);
     SYS_ARG_2(const char __user *, oldname);
     SYS_ARG_3(int, newdfd);
     SYS_ARG_4(const char __user *, newname);
-#endif
 
     dynsec_do_rename(olddfd, oldname, newdfd, newname);
     return ret_sys(renameat2, olddfd, oldname, newdfd, newname, flags);
@@ -419,7 +404,7 @@ static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
         return;
     }
 
-    ret = user_path_at(dfd, pathname, LOOKUP_FOLLOW, &path);
+    ret = user_path_at(dfd, pathname, LOOKUP_DIRECTORY, &path);
     if (!ret) {
         path_put(&path);
         return;
@@ -461,40 +446,260 @@ DEF_DYNSEC_SYS(mkdirat, int dfd, const char __user *pathname, umode_t mode)
     return ret_sys(mkdirat, dfd, pathname, mode);
 }
 
+static void dynsec_do_unlink(int dfd, const char __user *pathname,
+                             int flag, uint32_t hook_type)
+{
+    int ret;
+    struct path path;
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+    enum dynsec_event_type event_type = DYNSEC_EVENT_TYPE_UNLINK;
+    bool filled;
+    umode_t mode;
 
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    ret = user_path_at(dfd, pathname, 0, &path);
+    if (ret) {
+        return;
+    }
+
+    if (!path.dentry && !path.dentry->d_inode) {
+        path_put(&path);
+        return;
+    }
+
+    // On RMDIR only allow directory
+    mode = path.dentry->d_inode->i_mode;
+    if ((flag & AT_REMOVEDIR) && !S_ISDIR(mode)) {
+        path_put(&path);
+        return;
+    }
+    else if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
+        path_put(&path);
+        return;
+    }
+
+    if (flag & AT_REMOVEDIR) {
+        event_type = DYNSEC_EVENT_TYPE_RMDIR;
+    }
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(event_type,hook_type, report_flags,
+                               GFP_KERNEL);
+    filled = fill_in_preaction_unlink(event, &path, GFP_KERNEL);
+    path_put(&path);
+    if (!filled) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_KERNEL);
+    enqueue_nonstall_event(stall_tbl, event);
+}
 DEF_DYNSEC_SYS(unlink, const char __user *pathname)
 {
+    SYS_ARG_1(const char __user *, pathname);
+
+    dynsec_do_unlink(AT_FDCWD, pathname, 0, DYNSEC_HOOK_TYPE_UNLINK);
     return ret_sys(unlink, pathname);
 }
 DEF_DYNSEC_SYS(unlinkat, int dfd, const char __user *pathname,
                                        int flag)
 {
+    SYS_ARG_1(int, dfd);
+    SYS_ARG_2(const char __user *, pathname);
+    SYS_ARG_3(int, flag);
+
+    dynsec_do_unlink(dfd, pathname, flag, DYNSEC_HOOK_TYPE_UNLINK);
     return ret_sys(unlinkat, dfd, pathname, flag);
 }
 DEF_DYNSEC_SYS(rmdir, const char __user *pathname)
 {
+    SYS_ARG_1(const char __user *, pathname);
+
+    dynsec_do_unlink(AT_FDCWD, pathname, AT_REMOVEDIR, DYNSEC_HOOK_TYPE_RMDIR);
     return ret_sys(rmdir, pathname);
 }
 
-
-DEF_DYNSEC_SYS(symlink, const char __user *oldname, const char __user *newname)
+static void dynsec_do_symlink(const char __user *target,
+                              int newdfd, const char __user *linkpath)
 {
-    return ret_sys(symlink, oldname, newname);
+    int ret;
+    long len;
+    struct path path;
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+    char *target_path = NULL;
+    bool filled;
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    target_path = kmalloc(PATH_MAX, GFP_KERNEL);
+    if (!target_path) {
+        return;
+    }
+
+    ret = user_path_at(newdfd, linkpath, 0, &path);
+    if (!ret) {
+        path_put(&path);
+        return;
+    }
+    len = strncpy_from_user(target_path, target, PATH_MAX);
+    if (unlikely(len < 0)) {
+        kfree(target_path);
+        target_path = NULL;
+        return;
+    }
+    if (unlikely(len >= PATH_MAX)) {
+        kfree(target_path);
+        target_path = NULL;
+        return;
+    }
+    if (unlikely(len == 0)) {
+        kfree(target_path);
+        target_path = NULL;
+    } else {
+        target_path[len] = 0;
+    }
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SYMLINK,
+                               DYNSEC_HOOK_TYPE_SYMLINK,
+                               report_flags, GFP_KERNEL);
+    filled = fill_in_preaction_symlink(event, target_path, newdfd, linkpath);
+    kfree(target_path);
+    target_path = NULL;
+    if (!filled) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SYMLINK, GFP_KERNEL);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_KERNEL);
+    enqueue_nonstall_event(stall_tbl, event);
 }
-DEF_DYNSEC_SYS(symlinkat, const char __user *oldname,
-               int newdfd, const char __user *newname)
+DEF_DYNSEC_SYS(symlink, const char __user *target, const char __user *linkpath)
 {
-    return ret_sys(symlinkat, oldname, newdfd, newname);
+    SYS_ARG_1(const char __user *, target);
+    SYS_ARG_2(const char __user *, linkpath);
+
+    dynsec_do_symlink(target, AT_FDCWD, linkpath);
+    return ret_sys(symlink, target, linkpath);
+}
+DEF_DYNSEC_SYS(symlinkat, const char __user *target,
+               int newdfd, const char __user *linkpath)
+{
+    SYS_ARG_1(const char __user *, target);
+    SYS_ARG_2(int, newdfd);
+    SYS_ARG_3(const char __user *, linkpath);
+
+    dynsec_do_symlink(target, AT_FDCWD, linkpath);
+    return ret_sys(symlinkat, target, newdfd, linkpath);
 }
 
+static void dynsec_do_link(int olddfd, const char __user *oldname,
+                           int newdfd, const char __user *newname,
+                           int flags)
+{
+    int ret;
+    struct path oldpath;
+    struct path newpath;
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+    umode_t mode;
+    bool filled;
+    int lookup_flags = 0;
 
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    if ((flags & ~(AT_SYMLINK_FOLLOW | AT_EMPTY_PATH)) != 0) {
+        return;
+    }
+    if (flags & AT_EMPTY_PATH) {
+        // Do we really want to trigger a capability check?
+        if (!capable(CAP_DAC_READ_SEARCH)) {
+            return;
+        }
+        lookup_flags |= LOOKUP_EMPTY;
+    }
+#endif
+
+    if (flags & AT_SYMLINK_FOLLOW) {
+        lookup_flags |= LOOKUP_FOLLOW;
+    }
+
+    // Old path must exist
+    ret = user_path_at(olddfd, oldname, lookup_flags, &oldpath);
+    if (ret) {
+        return;
+    }
+
+    // New path must not exist
+    ret = user_path_at(newdfd, newname, lookup_flags, &newpath);
+    if (!ret) {
+        path_put(&oldpath);
+        path_put(&newpath);
+        return;
+    }
+
+    if (!oldpath.dentry && !oldpath.dentry->d_inode) {
+        path_put(&oldpath);
+        return;
+    }
+    mode = oldpath.dentry->d_inode->i_mode;
+    if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
+        path_put(&oldpath);
+        return;
+    }
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_LINK, DYNSEC_EVENT_TYPE_LINK,
+                               report_flags, GFP_KERNEL);
+
+    filled = fill_in_preaction_link(event, &oldpath, newdfd, newname);
+    path_put(&oldpath);
+    if (!filled) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_LINK, GFP_KERNEL);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_KERNEL);
+    enqueue_nonstall_event(stall_tbl, event);
+}
 DEF_DYNSEC_SYS(link, const char __user *oldname, const char __user *newname)
 {
+    SYS_ARG_1(const char __user *, oldname);
+    SYS_ARG_2(const char __user *, newname);
+
+    dynsec_do_link(AT_FDCWD, oldname, AT_FDCWD, newname, 0);
     return ret_sys(link, oldname, newname);
 }
 DEF_DYNSEC_SYS(linkat, int olddfd, const char __user *oldname,
                int newdfd, const char __user *newname, int flags)
 {
+    SYS_ARG_1(int, olddfd);
+    SYS_ARG_2(const char __user *, oldname);
+    SYS_ARG_3(int, newdfd);
+    SYS_ARG_4(const char __user *, newname);
+    SYS_ARG_5(int, flags);
+
+    dynsec_do_link(AT_FDCWD, oldname, AT_FDCWD, newname, flags);
+
     return ret_sys(linkat, olddfd, oldname, newdfd, newname, flags);
 }
 

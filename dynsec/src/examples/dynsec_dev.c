@@ -190,27 +190,32 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
 void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
-    const char *path = "";
     const char *ev_str = "UNLINK";
     const char *start = (const char *)unlink_msg;
+    const char *intent_str = "";
 
     if (unlink_msg->hdr.event_type == DYNSEC_EVENT_TYPE_RMDIR)
         ev_str = "RMDIR";
-
-    if (unlink_msg->msg.file.path_offset) {
-        path = start + unlink_msg->msg.file.path_offset;
-    }
 
     if (unlink_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &unlink_msg->hdr, response);
 
     if (quiet) return;
 
-    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u umode:%#o magic:%#lx uid:%u "
-        "parent_ino:%llu '%s'\n", ev_str,
-        unlink_msg->hdr.tid, unlink_msg->msg.file.ino, unlink_msg->msg.file.dev,
-        unlink_msg->msg.task.mnt_ns, unlink_msg->msg.file.umode, unlink_msg->msg.file.sb_magic,
-        unlink_msg->msg.task.uid, unlink_msg->msg.file.parent_ino, path);
+    if (unlink_msg->hdr.report_flags & DYNSEC_REPORT_INTENT) {
+        intent_str = "-INTENT";
+    }
+
+    printf("%s%s: tid:%u mnt_ns:%u req_id:%llu", ev_str, intent_str,
+           unlink_msg->hdr.tid, unlink_msg->msg.task.mnt_ns,
+           unlink_msg->hdr.req_id);
+
+    if (unlink_msg->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        printf(" intent_req_id:%llu", unlink_msg->hdr.intent_req_id);
+    }
+    print_dynsec_file(&unlink_msg->msg.file);
+    print_path(start, &unlink_msg->msg.file);
+    printf("\n");
 }
 
 void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
@@ -391,63 +396,61 @@ void print_mmap_event(int fd, struct dynsec_mmap_umsg *mmap)
 void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
-    const char *old_path = "";
-    const char *new_path = "";
     const char *start = (const char *)link_msg;
-
-    if (link_msg->msg.old_file.path_offset) {
-        old_path = start + link_msg->msg.old_file.path_offset;
-    }
-    if (link_msg->msg.new_file.path_offset) {
-        new_path = start + link_msg->msg.new_file.path_offset;
-    }
+    const char *intent_str = "";
 
     if (link_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &link_msg->hdr, response);
 
     if (quiet) return;
 
-    printf("LINK: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
-        "'%s'[%llu %#o %llu]->'%s'[%llu %#o %llu]\n",
-        link_msg->hdr.tid, link_msg->msg.old_file.dev, link_msg->msg.task.mnt_ns,
-        link_msg->msg.old_file.sb_magic,
-        link_msg->msg.task.uid,
-        old_path, link_msg->msg.old_file.ino, link_msg->msg.old_file.umode,
-        link_msg->msg.old_file.parent_ino,
+    if (link_msg->hdr.report_flags & DYNSEC_REPORT_INTENT) {
+        intent_str = "-INTENT";
+    }
 
-        new_path, link_msg->msg.new_file.ino, link_msg->msg.new_file.umode,
-        link_msg->msg.new_file.parent_ino
-    );
+    printf("LINK%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
+           link_msg->hdr.tid, link_msg->msg.task.mnt_ns,
+           link_msg->hdr.req_id);
+
+    if (link_msg->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        printf(" intent_req_id:%llu", link_msg->hdr.intent_req_id);
+    }
+    printf(" OLD{");
+    print_dynsec_file(&link_msg->msg.old_file);
+    print_path(start, &link_msg->msg.old_file);
+    printf("} -> NEW{");
+    print_dynsec_file(&link_msg->msg.new_file);
+    print_path(start, &link_msg->msg.new_file);
+    printf("}\n");
 }
 
 void print_symlink_event(int fd, struct dynsec_symlink_umsg *symlink)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
-    const char *path = "";
+    const char *intent_str = "";
     const char *target_path = "";
     const char *start = (const char *)symlink;
-
-    if (symlink->msg.file.path_offset) {
-        path = start + symlink->msg.file.path_offset;
-    }
-    if (symlink->msg.target.offset) {
-        target_path = start + symlink->msg.target.offset;
-    }
 
     if (symlink->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &symlink->hdr, response);
 
     if (quiet) return;
 
-    printf("SYMLINK: tid:%u dev:%#x mnt_ns:%u magic:%#lx uid:%u "
-        "'%s'[%llu %#o %llu]->'%s'\n",
-        symlink->hdr.tid, symlink->msg.file.dev, symlink->msg.task.mnt_ns,
-        symlink->msg.file.sb_magic,
-        symlink->msg.task.uid,
-        path, symlink->msg.file.ino, symlink->msg.file.umode,
-        symlink->msg.file.parent_ino,
-        target_path
-    );
+    if (symlink->msg.target.offset) {
+        target_path = start + symlink->msg.target.offset;
+    }
+    if (symlink->hdr.report_flags & DYNSEC_REPORT_INTENT) {
+        intent_str = "-INTENT";
+    }
+
+    printf("SYMLINK%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
+           symlink->hdr.tid, symlink->msg.task.mnt_ns, symlink->hdr.req_id);
+    if (symlink->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        printf(" intent_req_id:%llu", symlink->hdr.intent_req_id);
+    }
+    print_dynsec_file(&symlink->msg.file);
+    print_path(start, &symlink->msg.file);
+    printf(" -> target:'%s'\n", target_path);
 }
 
 void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
@@ -676,12 +679,12 @@ static void *defer_rename(void *arg)
     unsigned int sleep_time = 1;
 
     sleep(sleep_time);
-    fd = open(".rename_test1", O_CREAT);
+    fd = open(".rename_test1", O_CREAT, 0755);
     if (fd < 0) {
         return NULL;
     }
     close(fd);
-    rename(".rename_test1", ".rename_test2");
+    renameat(AT_FDCWD, ".rename_test1", AT_FDCWD, ".rename_test2");
     unlink(".rename_test1");
     unlink(".rename_test2");
     return NULL;

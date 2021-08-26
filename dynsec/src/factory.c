@@ -2039,7 +2039,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
     long max_input_len;
     struct path parent_path;
 
-    lookup_flags |= LOOKUP_DIRECTORY;
+    lookup_flags |= LOOKUP_FOLLOW;
 
     if (!filename || !file) {
         return ERR_PTR(-EINVAL);
@@ -2057,12 +2057,12 @@ static char *build_preaction_path(int dfd, const char __user *filename,
     last = last_component + NAME_MAX;
     *last = '\0';
 
-
-    filebuf = kmalloc(PATH_MAX, GFP_KERNEL);
+    filebuf = kzalloc(PATH_MAX, GFP_KERNEL);
     if (!filebuf) {
         error = -ENOMEM;
         goto out_err_free;
     }
+    filebuf[0] = 0;
     input_buf = filebuf;
 
 
@@ -2156,9 +2156,6 @@ static char *build_preaction_path(int dfd, const char __user *filename,
         goto out_err_free;
     }
 
-        // pr_info("len:%d parent:%s last_len:%d last:%s\n",
-        //         total_len, filebuf, last_len, last);
-
     // Normalize the filepath
     error = kern_path(filebuf, lookup_flags, &parent_path);
     if (error) {
@@ -2206,6 +2203,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
         kfree(last_component);
         return norm_path;
     }
+    pr_info("%s:%d filebuf:%s\n", __func__, __LINE__, filebuf);
 
 out_err_free:
     kfree(filebuf);
@@ -2233,7 +2231,7 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
 
     create->path = build_preaction_path(dfd, filename, 0,
                                         &create->kmsg.msg.file);
-    if (IS_ERR_OR_NULL(create->path)) {
+    if (IS_ERR(create->path)) {
         create->path = NULL;
         return false;
     }
@@ -2253,9 +2251,11 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
 }
 
 bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
-                              struct path *oldpath,
-                              int newdfd, const char __user *newname)
+                              int newdfd, const char __user *newname,
+                              struct path *oldpath)
 {
+    int ret;
+    struct path newpath;
     struct dynsec_rename_event *rename = NULL;
 
     if (!dynsec_event ||
@@ -2277,8 +2277,21 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
         rename->kmsg.hdr.payload += rename->kmsg.msg.old_file.path_size;
     }
 
-    rename->new_path = build_preaction_path(newdfd, newname, 0,
-                                            &rename->kmsg.msg.new_file);
+    // New path could already exist
+    ret = user_path_at(newdfd, newname, 0, &newpath);
+    if (!ret) {
+        fill_in_file_data(&rename->kmsg.msg.new_file, &newpath);
+        rename->new_path = dynsec_build_path(&newpath,
+                                             &rename->kmsg.msg.new_file,
+                                             GFP_KERNEL);
+        path_put(&newpath);
+    } else {
+        rename->new_path = build_preaction_path(newdfd, newname, 0,
+                                                &rename->kmsg.msg.new_file);
+        if (IS_ERR(rename->new_path)) {
+            rename->new_path = NULL;
+        }
+    }
     if (rename->new_path && rename->kmsg.msg.new_file.path_size) {
         rename->kmsg.msg.new_file.path_offset = rename->kmsg.hdr.payload;
         rename->kmsg.hdr.payload += rename->kmsg.msg.new_file.path_size;
@@ -2286,4 +2299,115 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
 
     return true;
 }
+
+bool fill_in_preaction_unlink(struct dynsec_event *dynsec_event,
+                              struct path *path, gfp_t mode)
+{
+    struct dynsec_unlink_event *unlink = NULL;
+
+    if (!dynsec_event ||
+        !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_UNLINK ||
+          dynsec_event->event_type == DYNSEC_EVENT_TYPE_RMDIR)) {
+        return false;
+    }
+    unlink = dynsec_event_to_unlink(dynsec_event);
+
+    unlink->kmsg.hdr.payload = sizeof(unlink->kmsg);
+    fill_in_task_ctx(&unlink->kmsg.msg.task);
+
+    fill_in_file_data(&unlink->kmsg.msg.file, path);
+
+    unlink->path = dynsec_build_path(path, &unlink->kmsg.msg.file, mode);
+    if (unlink->path && unlink->kmsg.msg.file.path_size) {
+        unlink->kmsg.msg.file.path_offset = unlink->kmsg.hdr.payload;
+        unlink->kmsg.hdr.payload += unlink->kmsg.msg.file.path_size;
+    }
+    return true;
+}
+
+
+bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
+                               const char *old_name,
+                               int newdfd, const char __user *newname)
+{
+    struct dynsec_symlink_event *symlink = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_SYMLINK) {
+        return false;
+    }
+
+    symlink = dynsec_event_to_symlink(dynsec_event);
+    symlink->kmsg.hdr.payload = sizeof(symlink->kmsg);
+
+    fill_in_task_ctx(&symlink->kmsg.msg.task);
+
+    symlink->path = build_preaction_path(newdfd, newname, 0,
+                                         &symlink->kmsg.msg.file);
+    if (IS_ERR(symlink->path)) {
+        symlink->path = NULL;
+    }
+    symlink->kmsg.msg.file.umode |= S_IFLNK;
+
+    if (symlink->path && symlink->kmsg.msg.file.path_size) {
+        symlink->kmsg.msg.file.path_offset = symlink->kmsg.hdr.payload;
+        symlink->kmsg.hdr.payload += symlink->kmsg.msg.file.path_size;
+    }
+
+    if (old_name && *old_name) {
+        size_t size = strlen(old_name) + 1;
+
+        symlink->target_path = kmalloc(size, GFP_KERNEL);
+        if (symlink->target_path) {
+            memcpy(symlink->target_path, old_name, size);
+            symlink->target_path[size - 1] = 0;
+            symlink->kmsg.msg.target.size = (uint16_t)size;
+            symlink->kmsg.msg.target.offset = symlink->kmsg.hdr.payload;
+            symlink->kmsg.hdr.payload += symlink->kmsg.msg.target.size;
+        }
+    }
+
+    return true;
+}
+
+bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
+                            struct path *oldpath,
+                            int newdfd, const char __user *newname)
+{
+    struct dynsec_link_event *link = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_LINK) {
+        return false;
+    }
+
+    link = dynsec_event_to_link(dynsec_event);
+    link->kmsg.hdr.payload = sizeof(link->kmsg);
+
+    fill_in_task_ctx(&link->kmsg.msg.task);
+
+    // Should be complete info
+    fill_in_file_data(&link->kmsg.msg.old_file, oldpath);
+
+
+    link->old_path = dynsec_build_path(oldpath, &link->kmsg.msg.old_file,
+                                       GFP_KERNEL);
+    if (link->old_path && link->kmsg.msg.old_file.path_size) {
+        link->kmsg.msg.old_file.path_offset = link->kmsg.hdr.payload;
+        link->kmsg.hdr.payload += link->kmsg.msg.old_file.path_size;
+    }
+
+    link->new_path = build_preaction_path(newdfd, newname, 0,
+                                          &link->kmsg.msg.new_file);
+    if (IS_ERR(link->new_path)) {
+        link->new_path = NULL;
+    }
+    if (link->new_path && link->kmsg.msg.new_file.path_size) {
+        link->kmsg.msg.new_file.path_offset = link->kmsg.hdr.payload;
+        link->kmsg.hdr.payload += link->kmsg.msg.new_file.path_size;
+    }
+
+    return true;
+}
+
 //#endif /* ! CONFIG_SECURITY_PATH */

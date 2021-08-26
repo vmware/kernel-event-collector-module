@@ -304,6 +304,16 @@ extern bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                                      int dfd, const char __user *filename,
                                      int flags, umode_t umode);
 extern bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
-                                     struct path *oldpath,
-                                     int newdfd, const char __user *newname);
+                                     int newdfd, const char __user *newname,
+                                     struct path *oldpath);
+extern bool fill_in_preaction_unlink(struct dynsec_event *dynsec_event,
+                                     struct path *path, gfp_t mode);
+
+extern bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
+                                      const char *old_name,
+                                      int newdfd, const char __user *linkpath);
+
+extern bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
+                                   struct path *oldpath,
+                                   int newdfd, const char __user *newname);
 //#endif /* ! CONFIG_SECURITY_PATH */
