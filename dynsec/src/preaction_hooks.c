@@ -326,13 +326,60 @@ DEF_DYNSEC_SYS(renameat2, int olddfd, const char __user *oldname,
 #endif /* __NR_renameat2 */
 
 
+static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
+{
+    int ret;
+    struct path path;
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        return;
+    }
+
+    ret = user_path_at(dfd, pathname, LOOKUP_FOLLOW, &path);
+    if (!ret) {
+        path_put(&path);
+        return;
+    }
+    if (ret != -ENOENT) {
+        return;
+    }
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MKDIR, DYNSEC_HOOK_TYPE_MKDIR,
+                               report_flags, GFP_KERNEL);
+    if (!fill_in_preaction_create(event, dfd, pathname, O_CREAT, umode)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_MKDIR, GFP_KERNEL);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_KERNEL);
+    enqueue_nonstall_event(stall_tbl, event);
+}
 DEF_DYNSEC_SYS(mkdir, const char __user *pathname, umode_t mode)
 {
+#ifdef USE_PT_REGS
+    DECL_ARG_1(const char __user *, pathname);
+    DECL_ARG_2(umode_t, mode);
+#endif /* USE_PT_REGS */
+
+    dynsec_do_mkdir(AT_FDCWD, pathname, mode);
     return ret_sys(mkdir, pathname, mode);
 }
-
 DEF_DYNSEC_SYS(mkdirat, int dfd, const char __user *pathname, umode_t mode)
 {
+#ifdef USE_PT_REGS
+    DECL_ARG_1(int, dfd);
+    DECL_ARG_2(const char __user *, pathname);
+    DECL_ARG_3(umode_t, mode);
+#endif /* USE_PT_REGS */
+
+    dynsec_do_mkdir(dfd, pathname, mode);
+
     return ret_sys(mkdirat, dfd, pathname, mode);
 }
 

@@ -140,6 +140,7 @@ struct dynsec_file {
 #define DYNSEC_FILE_ATTR_PATH_FULL      0x0010
 #define DYNSEC_FILE_ATTR_PATH_DENTRY    0x0020
 #define DYNSEC_FILE_ATTR_PATH_RAW       0x0040
+#define DYNSEC_FILE_ATTR_POSIX_ACL      0x0100
     uint16_t attr_mask;
     uint64_t ino;
     uint32_t dev;
@@ -152,6 +153,7 @@ struct dynsec_file {
     uint32_t parent_dev;
     uint32_t parent_uid;
     uint32_t parent_gid;
+    uint64_t parent_umode;
     uint16_t path_offset;
     uint16_t path_size;
 };

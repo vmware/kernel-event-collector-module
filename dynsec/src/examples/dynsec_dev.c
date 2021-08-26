@@ -265,15 +265,18 @@ void print_dynsec_file(struct dynsec_file *file)
         printf(" dev:%#x sb_magic:%#llx", file->dev, file->sb_magic);
     }
     if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
-        printf(" parent[ino:%llu uid:%u gid:%u]", file->parent_ino,
-               file->parent_uid, file->parent_gid);
-    }
-    if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
+        printf(" parent[ino:%llu uid:%u gid:%u umode:%#o", file->parent_ino,
+               file->parent_uid, file->parent_gid, file->parent_umode);
+        if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
+            printf(" parent_dev:%#x", file->parent_dev);
+        }
+        printf("]");
+    } else if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
         printf(" parent_dev:%#x", file->parent_dev);
     }
 }
-void print_path(const char *start, struct dynsec_file *file) {
-
+void print_path(const char *start, struct dynsec_file *file)
+{
     if (file->path_offset) {
         const char *path = start + file->path_offset;
         const char *path_type = "";

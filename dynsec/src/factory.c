@@ -1475,6 +1475,11 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
     if (dynsec_file && parent_dir) {
         dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_INODE;
         dynsec_file->parent_ino = parent_dir->i_ino;
+        dynsec_file->parent_umode = parent_dir->i_mode;
+        if (!IS_POSIXACL(parent_dir)) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_POSIX_ACL;
+        }
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         dynsec_file->parent_uid = from_kuid(&init_user_ns, parent_dir->i_uid);
         dynsec_file->parent_gid = from_kgid(&init_user_ns, parent_dir->i_gid);
@@ -1721,9 +1726,13 @@ bool fill_in_inode_create(struct dynsec_event *dynsec_event,
     fill_in_dentry_data(&create->kmsg.msg.file, dentry);
     fill_in_parent_data(&create->kmsg.msg.file, dir);
 
-    create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
+    if (!dir || !IS_POSIXACL(dir)) {
+        create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
+    }
     if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
         create->kmsg.msg.file.umode |= S_IFDIR;
+    } else {
+        create->kmsg.msg.file.umode |= S_IFREG;
     }
 
     create->path = dynsec_build_dentry(dentry,
@@ -2030,6 +2039,8 @@ static char *build_preaction_path(int dfd, const char __user *filename,
     long max_input_len;
     struct path parent_path;
 
+    lookup_flags |= LOOKUP_DIRECTORY;
+
     if (!filename || !file) {
         return ERR_PTR(-EINVAL);
     }
@@ -2149,7 +2160,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
         //         total_len, filebuf, last_len, last);
 
     // Normalize the filepath
-    error = kern_path(filebuf, LOOKUP_DIRECTORY, &parent_path);
+    error = kern_path(filebuf, lookup_flags, &parent_path);
     if (error) {
         goto out_err_free;
     }
@@ -2227,6 +2238,7 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
         return false;
     }
 
+    // TODO: Check if parent inode is POSIX acl
     create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
     if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
         create->kmsg.msg.file.umode |= S_IFDIR;
