@@ -155,7 +155,7 @@ struct dynsec_file {
     uint32_t parent_dev;
     uint32_t parent_uid;
     uint32_t parent_gid;
-    uint64_t parent_umode;
+    uint16_t parent_umode;
     uint16_t path_offset;
     uint16_t path_size;
 };
