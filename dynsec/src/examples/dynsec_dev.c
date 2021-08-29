@@ -823,9 +823,19 @@ int main(int argc, const char *argv[])
     major = strtoul(argv[2], NULL, 0);
 
     if (argc >= 4) {
-        if (argv[3]) {
-            quiet = (strcmp(argv[3], "-q") == 0 ||
-                     strcmp(argv[3], "--quiet") == 0);
+        int i;
+        for (i = 3; i < argc; i++) {
+            if (!argv[i]) {
+                break;
+            }
+            if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
+                quiet = 1;
+                continue;
+            }
+            if (strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "--cache-all") == 0) {
+                default_cache_flags = DYNSEC_CACHE_ENABLE;
+                continue;
+            }
         }
     }
 
