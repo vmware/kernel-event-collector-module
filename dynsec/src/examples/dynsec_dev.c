@@ -197,6 +197,7 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
     const char *path = "";
     const char *ev_str = "EXEC";
     const char *start = (const char *)exec_msg;
+    const char *intent_str = "";
 
     if (exec_msg->msg.file.path_offset) {
         path = start + exec_msg->msg.file.path_offset;
@@ -215,11 +216,12 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
 
     if (quiet) return;
 
-    printf("%s: tid:%u ino:%llu dev:%#x mnt_ns:%u magic:%#lx uid:%u '%s' filesize:%llu\n",
-        ev_str, exec_msg->msg.task.tid, exec_msg->msg.file.ino, exec_msg->msg.file.dev,
-        exec_msg->msg.task.mnt_ns, exec_msg->msg.file.sb_magic, exec_msg->msg.task.uid, path,
-        exec_msg->msg.file.size
-    );
+    printf("%s%s: tid:%u mnt_ns:%u req_id:%llu ", ev_str, intent_str,
+           exec_msg->hdr.tid, exec_msg->msg.task.mnt_ns,
+           exec_msg->hdr.req_id);
+    print_dynsec_file(&exec_msg->msg.file);
+    print_path(start, &exec_msg->msg.file);
+    printf("\n");
 }
 
 void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)

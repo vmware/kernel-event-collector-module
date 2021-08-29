@@ -118,8 +118,6 @@ struct dynsec_task_ctx {
     uint32_t mnt_ns;
     uint32_t flags;
     uint64_t start_time;
-    uint64_t parent_exec_id;
-    uint64_t self_exec_id;
 #define DYNSEC_TASK_IN_EXECVE 0x00000001
     uint16_t extra_ctx;
 };
@@ -300,6 +298,7 @@ struct dynsec_signal_umsg {
 struct dynsec_task_msg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_task_ctx task;
+    uint64_t parent_exec_id;
 };
 struct dynsec_task_umsg {
     struct dynsec_msg_hdr hdr;
