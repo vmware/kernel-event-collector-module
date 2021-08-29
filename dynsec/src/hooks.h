@@ -1,4 +1,5 @@
-
+/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
+// Copyright (c) 2021 VMware, Inc. All rights reserved.
 #pragma once
 
 extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
@@ -51,7 +52,7 @@ extern int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mo
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
-#if RHEL_MAJOR == 8 && RHEL_MINOR == 0
+#if defined(RHEL_MAJOR) && RHEL_MAJOR == 8 && RHEL_MINOR == 0
 extern int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
                             int sig, const struct cred *cred);
 #else

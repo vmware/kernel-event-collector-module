@@ -1410,6 +1410,14 @@ static void __fill_in_task_ctx(const struct task_struct *task,
         task_ctx->ppid = task->real_parent->tgid;
     }
 
+#if defined(RHEL_MAJOR) && RHEL_MAJOR == 8
+    task_ctx->parent_exec_id = task->task_struct_rh->parent_exec_id;
+    task_ctx->self_exec_id = task->task_struct_rh->self_exec_id;
+#else
+    task_ctx->parent_exec_id = task->parent_exec_id;
+    task_ctx->self_exec_id = task->self_exec_id;
+#endif
+
     // user DAC context
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     task_ctx->uid = from_kuid(&init_user_ns, task_cred_xxx(task, uid));
