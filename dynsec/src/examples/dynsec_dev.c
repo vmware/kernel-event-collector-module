@@ -38,8 +38,42 @@ unsigned long long total_reads = 0;
 unsigned long long total_stall_events = 0;
 unsigned long long total_nonstall_events = 0;
 unsigned long long total_cached_stall_events = 0;
+unsigned long long total_intent_events = 0;
 unsigned long long *histo_reads = NULL;
-unsigned long long *histo_event_type = NULL;
+struct event_stats {
+    unsigned long long total_events;
+    unsigned long long total_bytes;
+    unsigned long long total_stall;
+    unsigned long long total_cached;
+    unsigned long long total_nonstall;
+    unsigned long long total_intent;
+    unsigned long long total_intents_found;
+};
+static struct event_stats histo_event_type[DYNSEC_EVENT_TYPE_MAX];
+
+static const char *event_type_name[DYNSEC_EVENT_TYPE_MAX] = {
+    [DYNSEC_EVENT_TYPE_EXEC] = "EXEC",
+    [DYNSEC_EVENT_TYPE_RENAME] = "RENAME",
+    [DYNSEC_EVENT_TYPE_UNLINK] = "UNLINK",
+    [DYNSEC_EVENT_TYPE_RMDIR] = "RMDIR",
+    [DYNSEC_EVENT_TYPE_MKDIR] = "MKDIR",
+    [DYNSEC_EVENT_TYPE_CREATE] = "CREATE",
+    [DYNSEC_EVENT_TYPE_SETATTR] = "SETATTR",
+    [DYNSEC_EVENT_TYPE_OPEN] = "OPEN",
+    [DYNSEC_EVENT_TYPE_CLOSE] = "CLOSE",
+    [DYNSEC_EVENT_TYPE_LINK] = "LINK",
+    [DYNSEC_EVENT_TYPE_SYMLINK] = "SYMLINK",
+    [DYNSEC_EVENT_TYPE_SIGNAL] = "SIGNAL",
+    [DYNSEC_EVENT_TYPE_PTRACE] = "PTRACE",
+    [DYNSEC_EVENT_TYPE_MMAP] = "MMAP",
+    [DYNSEC_EVENT_TYPE_CLONE] = "CLONE",
+    [DYNSEC_EVENT_TYPE_EXIT] = "EXIT",
+    // Special Events
+    [DYNSEC_EVENT_TYPE_HEALTH] = "HEALTH",
+    [DYNSEC_EVENT_TYPE_GENERIC_AUDIT] = "AUDIT",
+    [DYNSEC_EVENT_TYPE_GENERIC_DEBUG] = "DEBUG",
+};
+
 #define MAX_BUF_SZ (1 << 15)
 #define EVENT_AVG_SZ (1 << 7)
 #define MAX_HISTO_SZ (MAX_BUF_SZ / EVENT_AVG_SZ)
@@ -263,8 +297,16 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
 
     if (quiet) return;
 
-    printf("SETATTR: tid:%u mask:%08x mnt_ns:%u", setattr->hdr.tid,
-           setattr->msg.attr_mask, setattr->msg.task.mnt_ns);
+    if (setattr->hdr.report_flags & DYNSEC_REPORT_INTENT) {
+        intent_str = "-INTENT";
+    }
+
+    printf("SETATTR%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
+           setattr->hdr.tid, setattr->msg.task.mnt_ns,
+           setattr->hdr.req_id);
+    if (setattr->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        printf(" intent_req_id:%llu", setattr->hdr.intent_req_id);
+    }
     if (setattr->msg.attr_mask & DYNSEC_SETATTR_MODE) {
         printf(" chmod umode[%o -> %o]", setattr->msg.file.umode,
                setattr->msg.attr_umode);
@@ -286,16 +328,10 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
                (setattr->msg.attr_mask & DYNSEC_SETATTR_OPEN) ?
                     "open(O_TRUNC)" : "truncate()");
     }
-    if (setattr->msg.file.path_offset) {
-        path = start + setattr->msg.file.path_offset;
-        if (setattr->msg.attr_mask & DYNSEC_SETATTR_FILE) {
-            path_type = "fullpath";
-        } else {
-            path_type = "dentrypath";
-        }
-    }
-    printf(" ino:%llu dev:%#x %s:%s\n", setattr->msg.file.ino,
-           setattr->msg.file.dev, path_type, path);
+
+    print_dynsec_file(&setattr->msg.file);
+    print_path(start, &setattr->msg.file);
+    printf("\n");
 }
 
 
@@ -588,7 +624,7 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
 void read_events(int fd, const char *banned_path)
 {
-    int timeout_ms = 1000;
+    int timeout_ms = 300;
     char *buf = global_buf;
 
     memset(global_buf, 'A',  MAX_BUF_SZ);
@@ -635,16 +671,30 @@ void read_events(int fd, const char *banned_path)
         {
             count++;
             hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
-            histo_event_type[hdr->event_type] += 1;
+            histo_event_type[hdr->event_type].total_events += 1;
+            histo_event_type[hdr->event_type].total_bytes += hdr->payload;
+
+            // Count global and per-event type statistics
             if (!(hdr->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_CACHED))) {
                 total_nonstall_events += 1;
+                histo_event_type[hdr->event_type].total_nonstall += 1;
             }
             if (hdr->report_flags & DYNSEC_REPORT_STALL) {
                 total_stall_events += 1;
+                histo_event_type[hdr->event_type].total_stall += 1;
             }
             if (hdr->report_flags & DYNSEC_REPORT_CACHED) {
                 total_cached_stall_events += 1;
+                histo_event_type[hdr->event_type].total_cached += 1;
             }
+            if (hdr->report_flags & DYNSEC_REPORT_INTENT) {
+                total_intent_events += 1;
+                histo_event_type[hdr->event_type].total_intent += 1;
+            }
+            if (hdr->report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+                histo_event_type[hdr->event_type].total_intents_found += 1;
+            }
+
             if (hdr->payload > max_bytes_per_event) {
                 max_bytes_per_event = hdr->payload;
             }
@@ -731,10 +781,15 @@ static void on_sig(int sig)
     if (histo_event_type) {
         printf("---EventType Histo---\n");
         for (i = 0; i < DYNSEC_EVENT_TYPE_MAX; i++) {
-            if (!histo_event_type[i]) {
+            if (!histo_event_type[i].total_events) {
                 continue;
             }
-            printf("Event:%d Total Events:%llu\n", i, histo_event_type[i]);
+            printf("Event:%s Total Events:%llu Intents:%llu IntentsFnd:%llu\n",
+                    event_type_name[i],
+                    histo_event_type[i].total_events,
+                    histo_event_type[i].total_intent,
+                    histo_event_type[i].total_intents_found
+            );
         }
     }
 
@@ -792,14 +847,7 @@ int main(int argc, const char *argv[])
         return 1;
     }
 
-    histo_event_type = malloc(sizeof(*histo_event_type) *
-                              DYNSEC_EVENT_TYPE_MAX);
-    if (!histo_event_type) {
-        perror("malloc(histo_event_type) ");
-        return 1;
-    }
-    memset(histo_event_type, 0,
-           sizeof(*histo_event_type) * DYNSEC_EVENT_TYPE_MAX);
+    memset(histo_event_type, 0, sizeof(histo_event_type));
 
     // Example shows we report our own rename events but not stall
     pthread_create(&rename_tid, NULL, defer_rename, NULL);

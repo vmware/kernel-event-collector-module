@@ -85,22 +85,126 @@ static void **ia32_sys_call_table;
 
 // PreAction hooks we can support via kprobe
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
-int dynsec_chmod_common(struct kprobe *kprobe, struct pt_regs *regs)
+static void dynsec_do_setattr(struct iattr *iattr, const struct path *path)
 {
+    struct dynsec_event *event = NULL;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
+
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
+    event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SETATTR, DYNSEC_HOOK_TYPE_SETATTR,
+                               report_flags, GFP_ATOMIC);
+
+    if (!fill_in_preaction_setattr(event, iattr, (struct path *)path)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
+        free_dynsec_event(event);
+        return;
+    }
+    prepare_dynsec_event(event, GFP_ATOMIC);
+    enqueue_nonstall_event(stall_tbl, event);
+}
+
+int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+    struct iattr iattr;
     DECL_ARG_1(const struct path *, path);
     DECL_ARG_2(umode_t, mode);
 
+    if (!stall_tbl_enabled(stall_tbl)) {
+        goto out;
+    }
+    if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    memset(&iattr, 0, sizeof(iattr));
+    if (path->dentry && path->dentry->d_inode) {
+        umode_t umode = path->dentry->d_inode->i_mode;
+        if ((umode & (~S_IFMT)) != mode) {
+            iattr.ia_valid |= ATTR_MODE;
+            iattr.ia_mode = mode;
+            iattr.ia_mode |= (S_IFMT & mode);
+            dynsec_do_setattr(&iattr, path);
+        }
+    }
+
+out:
     return 0;
 }
 
-int dynsec_chown_common(struct kprobe *kprobe, struct pt_regs *regs)
+int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
+    struct iattr iattr;
     DECL_ARG_1(const struct path *, path);
     DECL_ARG_2(uid_t, user);
     DECL_ARG_3(gid_t, group);
 
+    if (!stall_tbl_enabled(stall_tbl)) {
+        goto out;
+    }
+    if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    memset(&iattr, 0, sizeof(iattr));
+    if (user != -1) {
+        iattr.ia_valid |= ATTR_UID;
+        iattr.ia_uid = make_kuid(current_user_ns(), user);
+        if (!uid_valid(iattr.ia_uid)) {
+            iattr.ia_uid = KUIDT_INIT(user);
+        }
+        // Does not handle mnt_userns id mapping
+        if (path->dentry && path->dentry->d_inode &&
+            uid_eq(path->dentry->d_inode->i_uid, iattr.ia_uid)) {
+            iattr.ia_valid &= ~(ATTR_UID);
+        }
+    }
+    if (group != -1) {
+        iattr.ia_valid |= ATTR_GID;
+        iattr.ia_gid = make_kgid(current_user_ns(), group);
+        if (!gid_valid(iattr.ia_gid)) {
+            iattr.ia_gid = KGIDT_INIT(group);
+        }
+        // Does not handle mnt_userns id mapping
+        if (path->dentry && path->dentry->d_inode &&
+            gid_eq(path->dentry->d_inode->i_gid, iattr.ia_gid)) {
+            iattr.ia_valid &= ~(ATTR_GID);
+        }
+    }
+    // Only set ATTR_FILE
+    if (iattr.ia_valid) {
+        dynsec_do_setattr(&iattr, path);
+    }
+
+out:
     return 0;
 }
+
+static int ret_setattr(struct kretprobe_instance *ri, struct pt_regs *regs)
+{
+    return 0;
+}
+
+static bool enabled_chmod_common;
+static struct kretprobe kret_dynsec_chmod_common = {
+    .kp.symbol_name = "chmod_common",
+    .handler = ret_setattr,
+    .entry_handler = dynsec_chmod_common,
+    .data_size = 0,
+    .maxactive = 40,
+};
+
+static bool enabled_chown_common;
+static struct kretprobe kret_dynsec_chown_common = {
+    .kp.symbol_name = "chown_common",
+    .handler = ret_setattr,
+    .entry_handler = dynsec_chown_common,
+    .data_size = 0,
+    .maxactive = 40,
+};
+
 #else
 // Would have to rely on syscalls or syscall tracepoints
 #endif
@@ -228,7 +332,10 @@ static void dynsec_do_create(int dfd, const char __user *filename,
     // Hook is specifically for CREATE events
     // Worry about other open flags in security_file_open.
     if (flags == O_RDONLY ||
-        (flags & (O_PATH|O_DIRECTORY)) ||
+#ifdef O_PATH
+        (flags & O_PATH) ||
+#endif
+        (flags & O_DIRECTORY) ||
         (flags & O_CREAT) != O_CREAT) {
         return;
     }
@@ -1044,6 +1151,53 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
     return diff;
 }
 
+static bool register_kprobe_hooks(uint64_t lsm_hooks)
+{
+    bool success = true;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+    enabled_chmod_common = false;
+    enabled_chown_common = false;
+
+    if (lsm_hooks & DYNSEC_HOOK_TYPE_SETATTR) {
+        int ret = register_kretprobe(&kret_dynsec_chmod_common);
+        if (ret >= 0) {
+            enabled_chmod_common = true;
+        } else {
+            pr_info("Unable to hook kretprobe: %d %s\n", ret,
+                    kret_dynsec_chmod_common.kp.symbol_name);
+            success = false;
+        }
+
+        ret = register_kretprobe(&kret_dynsec_chown_common);
+        if (ret >= 0) {
+            enabled_chown_common = true;
+        } else {
+            pr_info("Unable to hook kretprobe: %d %s\n", ret,
+                    kret_dynsec_chown_common.kp.symbol_name);
+            success = false;
+        }
+    }
+#endif
+
+    return success;
+}
+
+static void unregister_kprobe_hooks(void)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+    if (enabled_chmod_common) {
+        enabled_chmod_common = false;
+        unregister_kretprobe(&kret_dynsec_chmod_common);
+    }
+
+    if (enabled_chown_common) {
+        enabled_chown_common = false;
+        unregister_kretprobe(&kret_dynsec_chown_common);
+    }
+#endif
+}
+
 bool register_preaction_hooks(uint64_t lsm_hooks)
 {
     syscall_hooks_enabled = 0;
@@ -1079,6 +1233,7 @@ bool register_preaction_hooks(uint64_t lsm_hooks)
             (void)syscall_changed(orig, NULL);
         }
     }
+    register_kprobe_hooks(lsm_hooks);
     mutex_unlock(&lookup_lock);
 
     return true;
@@ -1098,6 +1253,7 @@ static void restore_syscalls(void)
 
 void preaction_hooks_shutdown(void)
 {
+    unregister_kprobe_hooks();
     mutex_lock(&lookup_lock);
     restore_syscalls();
     mutex_unlock(&lookup_lock);

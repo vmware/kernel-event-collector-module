@@ -316,4 +316,9 @@ extern bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
 extern bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
                                    struct path *oldpath,
                                    int newdfd, const char __user *newname);
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+extern bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
+                                      struct iattr *attr, struct path *path);
+#endif
 //#endif /* ! CONFIG_SECURITY_PATH */

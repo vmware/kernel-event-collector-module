@@ -2083,11 +2083,20 @@ static char *build_preaction_path(int dfd, const char __user *filename,
         if (!dfd_file->f_path.dentry || !dfd_file->f_path.mnt) {
             goto out_err_free;
         }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         // Might as well check if dir
-        if (!d_is_dir(dfd_file->f_path.dentry)) {
+        if (!dfd_file->f_path.dentry || !d_is_dir(dfd_file->f_path.dentry)) {
             error = -ENOTDIR;
             goto out_err_free;
         }
+#else
+        if (!dfd_file->f_path.dentry ||
+            !dfd_file->f_path.dentry->d_inode ||
+            !S_ISDIR(dfd_file->f_path.dentry->d_inode->i_mode)) {
+            error = -ENOTDIR;
+            goto out_err_free;
+        }
+#endif
 
         bufp = dynsec_d_path(&dfd_file->f_path, filebuf, PATH_MAX);
         fput(dfd_file);
@@ -2416,4 +2425,57 @@ bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
     return true;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
+                               struct iattr *attr, struct path *path)
+{
+    struct dynsec_setattr_event *setattr = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_SETATTR) {
+        return false;
+    }
+    setattr = dynsec_event_to_setattr(dynsec_event);
+
+    setattr->kmsg.hdr.payload = sizeof(setattr->kmsg);
+
+    fill_in_task_ctx(&setattr->kmsg.msg.task);
+
+    // Tell user we got likely have a filepath
+    if (attr->ia_valid & ATTR_MODE) {
+        setattr->kmsg.msg.attr_umode = attr->ia_mode;
+        setattr->kmsg.msg.attr_mask |= ATTR_MODE;
+    }
+    if (attr->ia_valid & ATTR_UID) {
+        setattr->kmsg.msg.attr_uid =
+            from_kuid(&init_user_ns, attr->ia_uid);
+        setattr->kmsg.msg.attr_mask |= ATTR_UID;
+    }
+    if (attr->ia_valid & ATTR_GID) {
+        setattr->kmsg.msg.attr_gid =
+            from_kgid(&init_user_ns, attr->ia_gid);
+        setattr->kmsg.msg.attr_mask |= ATTR_GID;
+    }
+
+    // Fill in file path related info
+    if (path) {
+        // Tells user this is the full filepath
+        fill_in_file_data(&setattr->kmsg.msg.file, path);
+
+        // MUST Be GFP_ATOMIC
+        setattr->path = dynsec_build_path(path,
+                                          &setattr->kmsg.msg.file,
+                                          GFP_ATOMIC);
+        if (setattr->path && setattr->kmsg.msg.file.path_size) {
+            setattr->kmsg.msg.file.path_offset = setattr->kmsg.hdr.payload;
+            setattr->kmsg.hdr.payload += setattr->kmsg.msg.file.path_size;
+
+            // Not truly ATTR_FILE but it's fine
+            setattr->kmsg.msg.attr_mask |= ATTR_FILE;
+        }
+    }
+
+    return true;
+}
+#endif
 //#endif /* ! CONFIG_SECURITY_PATH */
