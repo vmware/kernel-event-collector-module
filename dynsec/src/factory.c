@@ -2072,8 +2072,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
     input_buf = filebuf;
 
 
-    if (dfd >= 0)
-    {
+    if (dfd >= 0) {
         char *bufp;
         struct file *dfd_file = fget(dfd);
 
@@ -2081,12 +2080,14 @@ static char *build_preaction_path(int dfd, const char __user *filename,
             goto out_err_free;
         }
         if (!dfd_file->f_path.dentry || !dfd_file->f_path.mnt) {
+            fput(dfd_file);
             goto out_err_free;
         }
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
         // Might as well check if dir
         if (!dfd_file->f_path.dentry || !d_is_dir(dfd_file->f_path.dentry)) {
             error = -ENOTDIR;
+            fput(dfd_file);
             goto out_err_free;
         }
 #else
@@ -2094,6 +2095,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
             !dfd_file->f_path.dentry->d_inode ||
             !S_ISDIR(dfd_file->f_path.dentry->d_inode->i_mode)) {
             error = -ENOTDIR;
+            fput(dfd_file);
             goto out_err_free;
         }
 #endif
