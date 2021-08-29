@@ -125,7 +125,7 @@ int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *regs)
         if ((umode & (~S_IFMT)) != mode) {
             iattr.ia_valid |= ATTR_MODE;
             iattr.ia_mode = mode;
-            iattr.ia_mode |= (S_IFMT & mode);
+            iattr.ia_mode |= (S_IFMT & umode);
             dynsec_do_setattr(&iattr, path);
         }
     }
