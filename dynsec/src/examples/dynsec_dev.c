@@ -715,7 +715,6 @@ void read_events(int fd, const char *banned_path)
         if (max_parsed_per_read < count) {
             max_parsed_per_read = count;
         }
-        histo_reads[count] += 1;
 
         // Observe bytes committed to
         memset(buf, 'A', bytes_read);
