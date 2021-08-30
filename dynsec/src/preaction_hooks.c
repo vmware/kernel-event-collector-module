@@ -106,7 +106,7 @@ static void dynsec_do_setattr(struct iattr *iattr, const struct path *path)
     enqueue_nonstall_event(stall_tbl, event);
 }
 
-int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
     struct iattr iattr;
     DECL_ARG_1(const struct path *, path);
@@ -134,7 +134,7 @@ out:
     return 0;
 }
 
-int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *regs)
+static int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
     struct iattr iattr;
     DECL_ARG_1(const struct path *, path);

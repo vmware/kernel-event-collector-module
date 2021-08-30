@@ -2202,7 +2202,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
     if (IS_ERR_OR_NULL(norm_path)) {
         int raw_len = strlen(filebuf);
 
-        if (raw_len + 1 + 1 + last_len > PATH_MAX) {
+        if (raw_len + 1 + last_len > PATH_MAX) {
             error = -ENAMETOOLONG;
             goto out_err_free;
         }
@@ -2217,7 +2217,7 @@ static char *build_preaction_path(int dfd, const char __user *filename,
         int parent_len = strlen(norm_path);
 
         // parent + '/' + last component
-        if (parent_len + 1 + 1 + last_len > PATH_MAX) {
+        if (parent_len + 1 + last_len > PATH_MAX) {
             error = -ENAMETOOLONG;
             kfree(norm_path);
             goto out_err_free;
@@ -2233,7 +2233,6 @@ static char *build_preaction_path(int dfd, const char __user *filename,
         kfree(last_component);
         return norm_path;
     }
-    pr_info("%s:%d filebuf:%s\n", __func__, __LINE__, filebuf);
 
 out_err_free:
     kfree(filebuf);
@@ -2263,7 +2262,6 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                                         &create->kmsg.msg.file);
     if (IS_ERR(create->path)) {
         create->path = NULL;
-        return false;
     }
 
     create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
