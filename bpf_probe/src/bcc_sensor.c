@@ -876,7 +876,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	FILE_DATA(&data)->flags = file->f_flags;
 	FILE_DATA(&data)->prot = file->f_mode;
 
-	if (type == EVENT_FILE_WRITE)
+	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
 		// This allows us to send the last-write event on file close
 		__track_write_entry(file, FILE_DATA(&data));
@@ -941,7 +941,8 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 	DECLARE_FILE_EVENT(data);
 	struct super_block *old_sb = NULL;
 	struct super_block *new_sb = NULL;
-	struct inode *inode = NULL;
+	u32 device;
+	u64 inode;
 
 	if (!__send_dentry_delete(ctx, &data, old_dentry)) {
 		goto out;
@@ -956,13 +957,25 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 	// Send the create event for the path where the file is being moved to
 	// (the path will be the one reported in the new dentry, but the inode
 	// will persist and be the one from the old dentry)
+	device = __get_device_from_dentry(new_dentry ? new_dentry : old_dentry);
+	inode = __get_inode_from_dentry(old_dentry);
 
 	__init_header(EVENT_FILE_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-	inode = NULL;
+	FILE_DATA(&data)->device = device;
+	FILE_DATA(&data)->inode = inode;
 
+	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+	__do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
+	send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
 
-	FILE_DATA(&data)->device = __get_device_from_dentry(new_dentry ? new_dentry : old_dentry);
-	FILE_DATA(&data)->inode = __get_inode_from_dentry(old_dentry);
+	// A close/last-write event is being sent directly from this hook (instead of
+	// using the last_write_cache) to work around the file struct* not being a param
+	// to this hook. Without it, there's no accurate way to correlate this event to
+	// the cache. There is a small chance of a race/cache damage if a file open for
+	// read is closed in the midst of a rename operation.
+	__init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	FILE_DATA(&data)->device = device;
+	FILE_DATA(&data)->inode = inode;
 
 	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
 	__do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
