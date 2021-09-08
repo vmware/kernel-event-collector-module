@@ -2,6 +2,7 @@
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 
 #pragma once
+#include <linux/ioctl.h>
 
 #define DYNSEC_HOOK_TYPE_EXEC      0x00000001
 #define DYNSEC_HOOK_TYPE_RENAME    0x00000002
@@ -18,6 +19,11 @@
 #define DYNSEC_HOOK_TYPE_MMAP      0x00001000
 #define DYNSEC_HOOK_TYPE_CLOSE     0x00002000
 #define DYNSEC_HOOK_TYPE_TASK_FREE 0x00004000
+
+#define DYNSEC_IOC_BASE            'V'
+#define DYNSEC_IOC_OFFSET          'M'
+#define DYNSEC_IOC_TASK_DUMP       _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 1)
+#define DYNSEC_IOC_TASK_DUMP_ALL   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 2)
 
 // Tracepoints
 #define DYNSEC_TP_HOOK_TYPE_CLONE       0x00000001
@@ -81,6 +87,7 @@ enum dynsec_event_type {
     DYNSEC_EVENT_TYPE_MMAP,
     DYNSEC_EVENT_TYPE_CLONE,
     DYNSEC_EVENT_TYPE_EXIT,
+    DYNSEC_EVENT_TYPE_TASK_DUMP,
     // Special Events
     DYNSEC_EVENT_TYPE_HEALTH,
     DYNSEC_EVENT_TYPE_GENERIC_AUDIT,
@@ -118,7 +125,8 @@ struct dynsec_task_ctx {
     uint32_t mnt_ns;
     uint32_t flags;
     uint64_t start_time;
-#define DYNSEC_TASK_IN_EXECVE 0x00000001
+#define DYNSEC_TASK_IN_EXECVE   0x0001
+#define DYNSEC_TASK_HAS_MM      0x0002
     uint16_t extra_ctx;
 };
 
@@ -132,7 +140,7 @@ struct dynsec_file {
 #define DYNSEC_FILE_ATTR_INODE          0x0001
 // dev, sb_magic
 #define DYNSEC_FILE_ATTR_DEVICE         0x0002
-// parent_[ino,uid,gid]
+// parent_[ino,uid,gid,umode]
 #define DYNSEC_FILE_ATTR_PARENT_INODE   0x0004
 // parent_dev
 #define DYNSEC_FILE_ATTR_PARENT_DEVICE  0x0008
@@ -140,7 +148,10 @@ struct dynsec_file {
 #define DYNSEC_FILE_ATTR_PATH_FULL      0x0010
 #define DYNSEC_FILE_ATTR_PATH_DENTRY    0x0020
 #define DYNSEC_FILE_ATTR_PATH_RAW       0x0040
+#define DYNSEC_FILE_ATTR_PATH_RESERVED  0x0080
+// Hints that umode will likely inherit parent DAC perms
 #define DYNSEC_FILE_ATTR_POSIX_ACL      0x0100
+#define DYNSEC_FILE_ATTR_DELETED        0x0200
     uint16_t attr_mask;
     uint64_t ino;
     uint32_t dev;
@@ -296,13 +307,36 @@ struct dynsec_signal_umsg {
 
 // Core Task Event
 struct dynsec_task_msg {
-    struct dynsec_msg_hdr hdr;
     struct dynsec_task_ctx task;
-    uint64_t parent_exec_id;
 };
+
 struct dynsec_task_umsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_task_msg msg;
+};
+
+// Core Task Dump Event
+struct dynsec_task_dump_msg {
+    struct dynsec_task_ctx task;
+    struct dynsec_file exec_file;
+};
+
+struct dynsec_task_dump_umsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_task_dump_msg msg;
+};
+
+// Base Header For Ioctls
+struct dynsec_ioc_hdr {
+    // Size of userspace data to help determine direct replies
+    uint16_t size;
+};
+
+// Dump Task Ioctl
+struct dynsec_task_dump_req {
+    struct dynsec_ioc_hdr hdr;
+    pid_t tgid;
+    struct dynsec_task_dump_umsg umsg;
 };
 
 #pragma pack(pop)

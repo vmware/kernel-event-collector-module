@@ -80,3 +80,5 @@ extern int dynsec_task_fix_setgid(struct cred *new, const struct cred *old, int 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 extern void dynsec_task_free(struct task_struct *task);
 #endif
+
+extern int dynsec_task_dump_all(pid_t start_tgid);

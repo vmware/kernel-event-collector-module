@@ -21,6 +21,7 @@
 #include "factory.h"
 #include "version.h"
 #include "task_cache.h"
+#include "hooks.h"
 
 static dev_t g_maj_t;
 static int maj_no;
@@ -285,8 +286,44 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
                                         unsigned long arg)
 {
     int ret = -EINVAL;
-
     // Check capable() on privileged commands.
+
+    // TODO: Protect critical ioctls with mutexes to mitigate DoS
+    // Throw most ioctls into their own helper function.
+    switch (cmd)
+    {
+    case DYNSEC_IOC_TASK_DUMP_ALL: {
+            struct dynsec_task_dump_req task_dump_req;
+
+            if (!capable(CAP_SYS_ADMIN)) {
+                return -EPERM;
+            }
+
+            // Check if we want to directly reply back
+            if (copy_from_user(&task_dump_req,
+                               (void *)arg, sizeof(task_dump_req))) {
+                return -EFAULT;
+            }
+            ret = dynsec_task_dump_all(task_dump_req.tgid);
+            break;
+        }
+
+    // case DYNSEC_IOC_TASK_DUMP: {
+    //         struct dynsec_task_dump_req task_dump_req;
+    //         // Check if we want to directly reply back
+    //         if (copy_from_user(&task_dump_req,
+    //                            (void *)arg, sizeof(task_dump_req))) {
+    //             return -EFAULT;
+    //         }
+    //         dynsec_task_dump(task_dump_req.tgid);
+    //         // Copy to user here...
+    //         ret = 0;
+    //         break;
+    //     }
+
+    default:
+        break;
+    }
 
     return ret;
 }

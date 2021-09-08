@@ -13,6 +13,8 @@
 #include "stall_reqs.h"
 #include "lsm_mask.h"
 #include "task_cache.h"
+#include "task_utils.h"
+#include "symbols.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {
@@ -1026,11 +1028,7 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
 {
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_LO_PRI;
-#ifdef CONFIG_HAVE_FUNCTION_ARG_ACCESS_API
-    struct task_struct *p = regs_get_kernel_argument(regs, 0);
-#else
-    struct task_struct *p = (struct task_struct *)regs->di;
-#endif
+    DECL_ARG_1(struct task_struct *, p);
 
     if (!p) {
         goto out;
@@ -1057,6 +1055,48 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
     (void)enqueue_nonstall_event(stall_tbl, event);
 
 out:
+    return 0;
+}
+
+int dynsec_task_dump_all(pid_t start_tgid)
+{
+    pid_t tgid = start_tgid;
+    struct dynsec_event *dynsec_event;
+    int count = 0;
+
+    if (!may_iterate_tasks()) {
+        return -EINVAL;
+    }
+
+    while (1) {
+        struct task_struct *task = dynsec_get_next_tgid(&tgid);
+
+        if (!task) {
+            break;
+        }
+        tgid += 1;
+        count += 1;
+
+        // We could dump kthreads but would want to provide task->comm
+        if (task->flags & PF_KTHREAD) {
+            put_task_struct(task);
+            continue;
+        }
+
+        dynsec_event = fill_in_dynsec_task_dump(task, GFP_KERNEL);
+        put_task_struct(task);
+        if (!dynsec_event) {
+            break;
+        }
+        if (!enqueue_nonstall_event(stall_tbl, dynsec_event)) {
+            break;
+        }
+
+        // Could be a lot of iterating so sleep when asked
+        cond_resched();
+    }
+    // pr_info("%s: count:%d\n", __func__, count);
+
     return 0;
 }
 

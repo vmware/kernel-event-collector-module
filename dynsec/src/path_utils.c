@@ -48,6 +48,7 @@ bool dynsec_path_utils_init(void)
     return false;
 }
 
+// Would be nice to provide on task dumps
 bool dynsec_current_chrooted(void)
 {
     if (likely(path_syms.current_chrooted)) {
@@ -94,15 +95,6 @@ char *dynsec_path_safeish(const struct path *path, char *buf, int buflen)
     return dynsec_d_path(path, buf, buflen);
 }
 
-static inline bool has_gfp_atomic(gfp_t mode)
-{
-#ifdef __GFP_ATOMIC
-    return (mode & __GFP_ATOMIC) == __GFP_ATOMIC;
-#else
-    return (mode & GFP_ATOMIC) == GFP_ATOMIC;
-#endif
-}
-
 char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode)
 {
     char *buf = NULL;
@@ -112,13 +104,6 @@ char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode)
     if (!path) {
         goto out;
     }
-
-    // Optionally provide both mnt_ns and global paths if 
-    // path->mnt in init_task's mnt_ns.
-    // if (!is_init_mnt_ns(current)) {
-    //     // still need to check if exists in init_task mnt_ns
-    //     return dynsec_build_dentry(path->dentry, size, mode);
-    // }
 
     buf = kzalloc(PATH_MAX, mode);
     if (!buf) {
@@ -165,13 +150,6 @@ char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file, gfp_
         goto out;
     }
 
-    // Optionally provide both mnt_ns and global paths if 
-    // path->mnt in init_task's mnt_ns.
-    // if (!is_init_mnt_ns(current)) {
-    //     // still need to check if exists in init_task mnt_ns
-    //     return dynsec_build_dentry(path->dentry, size, mode);
-    // }
-
 retry_d_path:
     buf = kmalloc(alloc_size, mode);
     if (!buf) {
@@ -211,8 +189,6 @@ out_err:
     buf = NULL;
     goto out;
 }
-
-// On RHEL7+ check if init_task->ns_proxy->mnt_ns NULL or current->ns_proxy->mnt_ns
 
 char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t mode)
 {

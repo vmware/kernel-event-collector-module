@@ -12,6 +12,7 @@
 #include "stall_reqs.h"
 #include "logging.h"
 #include "path_utils.h"
+#include "task_utils.h"
 #include "tracepoints.h"
 #include "task_cache.h"
 #include "preaction_hooks.h"
@@ -78,6 +79,7 @@ static int __init dynsec_init(void)
     if (!dynsec_path_utils_init()) {
         return -EINVAL;
     }
+    dynsec_task_utils_init();
 
     if (!dynsec_init_tp(tracepoint_hooks)) {
         pr_info("Unable to load process tracepoints\n");

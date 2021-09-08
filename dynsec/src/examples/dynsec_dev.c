@@ -68,6 +68,7 @@ static const char *event_type_name[DYNSEC_EVENT_TYPE_MAX] = {
     [DYNSEC_EVENT_TYPE_MMAP] = "MMAP",
     [DYNSEC_EVENT_TYPE_CLONE] = "CLONE",
     [DYNSEC_EVENT_TYPE_EXIT] = "EXIT",
+    [DYNSEC_EVENT_TYPE_TASK_DUMP] = "TASK_DUMP",
     // Special Events
     [DYNSEC_EVENT_TYPE_HEALTH] = "HEALTH",
     [DYNSEC_EVENT_TYPE_GENERIC_AUDIT] = "AUDIT",
@@ -77,7 +78,7 @@ static const char *event_type_name[DYNSEC_EVENT_TYPE_MAX] = {
 #define MAX_BUF_SZ (1 << 15)
 #define EVENT_AVG_SZ (1 << 7)
 #define MAX_HISTO_SZ (MAX_BUF_SZ / EVENT_AVG_SZ)
-char *global_buf;
+char *global_buf = NULL;
 
 // gcc -I../../include -pthread ./dynsec_dev.c -o dynsec
 
@@ -152,6 +153,18 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
     return 0;
 }
 
+int request_to_dump_all_tasks(int fd, pid_t pid)
+{
+    struct dynsec_task_dump_req task_dump_req = {
+        .hdr = {
+            .size = sizeof(struct dynsec_task_dump_req),
+        },
+        .tgid = pid,
+    };
+
+    return ioctl(fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_req);
+}
+
 // Prints fields that are available given bitmap
 static void print_dynsec_file(struct dynsec_file *file)
 {
@@ -166,11 +179,11 @@ static void print_dynsec_file(struct dynsec_file *file)
         printf(" parent[ino:%llu uid:%u gid:%u umode:%#o", file->parent_ino,
                file->parent_uid, file->parent_gid, file->parent_umode);
         if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
-            printf(" parent_dev:%#x", file->parent_dev);
+            printf(" dev:%#x", file->parent_dev);
         }
         printf("]");
-    } else if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
-        printf(" parent_dev:%#x", file->parent_dev);
+    } else if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
+        printf(" parent[dev:%#x]", file->parent_dev);
     }
 }
 
@@ -550,6 +563,30 @@ void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
     );
 }
 
+void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump)
+{
+    int response = DYNSEC_RESPONSE_ALLOW;
+    const char *start = (const char *)task_dump;
+
+    if (task_dump->hdr.report_flags & DYNSEC_REPORT_STALL) {
+        respond_to_access_request(fd, &task_dump->hdr, response);
+    }
+
+    if (quiet) return;
+
+    printf("TASK_DUMP: %llu pid:%u ppid:%u mnt_ns:%u uid:%u",
+        task_dump->msg.task.start_time,
+        task_dump->msg.task.pid,
+        task_dump->msg.task.ppid,
+        task_dump->msg.task.mnt_ns,
+        task_dump->msg.task.uid
+    );
+
+    print_dynsec_file(&task_dump->msg.exec_file);
+    print_path(start, &task_dump->msg.exec_file);
+    printf("\n");
+}
+
 void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
@@ -605,6 +642,10 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
 
     case DYNSEC_EVENT_TYPE_SIGNAL:
         print_signal_event(fd, (struct dynsec_signal_umsg *)hdr);
+        break;
+
+    case DYNSEC_EVENT_TYPE_TASK_DUMP:
+        print_task_dump_event(fd, (struct dynsec_task_dump_umsg *)hdr);
         break;
 
     default:
@@ -869,9 +910,17 @@ int main(int argc, const char *argv[])
     action.sa_handler = on_sig;
     sigaction(SIGINT, &action, NULL);
 
+    // Sends Task Dumps into event queue
+    request_to_dump_all_tasks(fd, 1);
+
     // Bans filepaths containing "/foo.sh"
     read_events(fd, "/foo.sh");
     close(fd);
+
+    if (global_buf) {
+        free(global_buf);
+        global_buf = NULL;
+    }
 
     return 1;
 }

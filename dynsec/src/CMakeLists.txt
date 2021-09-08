@@ -147,6 +147,8 @@ set(SOURCE_FILES
     stall_tbl.h
     path_utils.c
     path_utils.h
+    task_utils.c
+    task_utils.h
     ../include/dynsec.h
 )
 

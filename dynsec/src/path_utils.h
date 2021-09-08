@@ -18,8 +18,18 @@ extern char *dynsec_d_path(const struct path *path, char *buf, int buflen);
 extern char *dynsec_path_safeish(const struct path *path, char *buf, int buflen);
 
 extern char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode);
-extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file, gfp_t mode);
-
+extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file,
+                                 gfp_t mode);
+extern char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file,
+                                      gfp_t mode);
+static inline bool has_gfp_atomic(gfp_t mode)
+{
+#ifdef __GFP_ATOMIC
+    return (mode & __GFP_ATOMIC) == __GFP_ATOMIC;
+#else
+    return (mode & GFP_ATOMIC) == GFP_ATOMIC;
+#endif
+}
 
 #include <linux/sched.h>
 #include <linux/nsproxy.h>

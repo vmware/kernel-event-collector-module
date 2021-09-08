@@ -56,6 +56,10 @@ struct dynsec_signal_kmsg {
     struct dynsec_msg_hdr hdr;
     struct dynsec_signal_msg msg;
 };
+struct dynsec_task_dump_kmsg {
+    struct dynsec_msg_hdr hdr;
+    struct dynsec_task_dump_msg msg;
+};
 
 // Base struct in queue
 struct dynsec_event {
@@ -139,6 +143,12 @@ struct dynsec_signal_event {
     struct dynsec_event event;
     struct dynsec_signal_kmsg kmsg;
 };
+
+struct dynsec_task_dump_event {
+    struct dynsec_event event;
+    struct dynsec_task_dump_kmsg kmsg;
+    char *exec_path;
+};
 #pragma pack(pop)
 
 // Exec Event container_of helper
@@ -212,6 +222,12 @@ static inline struct dynsec_signal_event *
 dynsec_event_to_signal(const struct dynsec_event *dynsec_event)
 {
     return container_of(dynsec_event, struct dynsec_signal_event, event);
+}
+
+static inline struct dynsec_task_dump_event *
+dynsec_event_to_task_dump(const struct dynsec_event *dynsec_event)
+{
+    return container_of(dynsec_event, struct dynsec_task_dump_event, event);
 }
 
 extern void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode);
@@ -322,3 +338,6 @@ extern bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
                                       struct iattr *attr, struct path *path);
 #endif
 //#endif /* ! CONFIG_SECURITY_PATH */
+
+extern struct dynsec_event *fill_in_dynsec_task_dump(struct task_struct *task,
+                                                     gfp_t mode);

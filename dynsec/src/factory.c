@@ -18,6 +18,7 @@
 #include "factory.h"
 #include "path_utils.h"
 #include "task_cache.h"
+#include "task_utils.h"
 
 static atomic64_t req_id = ATOMIC64_INIT(0);
 
@@ -252,6 +253,21 @@ static struct dynsec_event *alloc_signal_event(enum dynsec_event_type event_type
     return &signal->event;
 }
 
+static struct dynsec_event *alloc_task_dump_event(enum dynsec_event_type event_type,
+                                               uint32_t hook_type, uint16_t report_flags,
+                                               gfp_t mode)
+{
+    struct dynsec_task_dump_event *task_dump = kzalloc(sizeof(*task_dump), mode);
+
+    if (!task_dump) {
+        return NULL;
+    }
+
+    init_event_data(event_type, task_dump, report_flags, hook_type);
+
+    return &task_dump->event;
+}
+
 
 // Event allocation factory
 struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
@@ -302,6 +318,9 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
 
     case DYNSEC_EVENT_TYPE_SIGNAL:
         return alloc_signal_event(event_type, hook_type, report_flags, mode);
+
+    case DYNSEC_EVENT_TYPE_TASK_DUMP:
+        return alloc_task_dump_event(event_type, hook_type, report_flags, mode);
 
     default:
         break;
@@ -420,7 +439,11 @@ void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
         break;
 
     case DYNSEC_EVENT_TYPE_SIGNAL:
-        prepare_hdr_data(dynsec_event_to_ptrace(dynsec_event));
+        prepare_hdr_data(dynsec_event_to_signal(dynsec_event));
+        break;
+
+    case DYNSEC_EVENT_TYPE_TASK_DUMP:
+        prepare_hdr_data(dynsec_event_to_task_dump(dynsec_event));
         break;
 
     default:
@@ -573,6 +596,16 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_TASK_DUMP:
+        {
+            struct dynsec_task_dump_event *task_dump =
+                    dynsec_event_to_task_dump(dynsec_event);
+            kfree(task_dump->exec_path);
+            task_dump->exec_path = NULL;
+            kfree(task_dump);
+        }
+        break;
+
     default:
         break;
     }
@@ -686,6 +719,14 @@ uint16_t get_dynsec_event_payload(struct dynsec_event *dynsec_event)
             struct dynsec_signal_event *signal =
                     dynsec_event_to_signal(dynsec_event);
             return signal->kmsg.hdr.payload;
+        }
+        break;
+
+    case DYNSEC_EVENT_TYPE_TASK_DUMP:
+        {
+            struct dynsec_task_dump_event *task_dump =
+                    dynsec_event_to_task_dump(dynsec_event);
+            return task_dump->kmsg.hdr.payload;
         }
         break;
 
@@ -1280,6 +1321,55 @@ out_fail:
     return -EFAULT;
 }
 
+static ssize_t copy_task_dump_event(const struct dynsec_task_dump_event *task_dump,
+                                 char *__user buf, size_t count)
+{
+    int copied = 0;
+    char *__user p = buf;
+
+    if (count < task_dump->kmsg.hdr.payload) {
+        return -EINVAL;
+    }
+
+    // Copy header
+    if (copy_to_user(p, &task_dump->kmsg, sizeof(task_dump->kmsg))) {
+        goto out_fail;
+    } else {
+        copied += sizeof(task_dump->kmsg);
+        p += sizeof(task_dump->kmsg);
+    }
+
+
+    if (task_dump->exec_path && task_dump->kmsg.msg.exec_file.path_offset &&
+        task_dump->kmsg.msg.exec_file.path_size) {
+
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    task_dump->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, task_dump->exec_path,
+                         task_dump->kmsg.msg.exec_file.path_size)) {
+            goto out_fail;
+        } else {
+            copied += task_dump->kmsg.msg.exec_file.path_size;
+            p += task_dump->kmsg.msg.exec_file.path_size;
+        }
+    }
+
+    if (task_dump->kmsg.hdr.payload != copied) {
+        pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                task_dump->kmsg.hdr.payload, copied);
+        goto out_fail;
+    }
+
+    return copied;
+
+out_fail:
+    return -EFAULT;
+}
+
 // Copy to userspace
 ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
                                   char *__user p, size_t count)
@@ -1391,6 +1481,14 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
         }
         break;
 
+    case DYNSEC_EVENT_TYPE_TASK_DUMP:
+        {
+            const struct dynsec_task_dump_event *task_dump =
+                                    dynsec_event_to_task_dump(dynsec_event);
+            return copy_task_dump_event(task_dump, p, count);
+        }
+        break;
+
     default:
         break;
     }
@@ -1441,6 +1539,9 @@ static void __fill_in_task_ctx(const struct task_struct *task,
 
     if (task->in_execve) {
         task_ctx->extra_ctx |= DYNSEC_TASK_IN_EXECVE;
+    }
+    if (task->mm) {
+        task_ctx->extra_ctx |= DYNSEC_TASK_HAS_MM;
     }
 }
 
@@ -1523,8 +1624,12 @@ static void fill_in_dentry_data(struct dynsec_file *dynsec_file,
     if (dynsec_file && dentry) {
         fill_in_inode_data(dynsec_file, dentry->d_inode);
         fill_in_sb_data(dynsec_file, dentry->d_sb);
-        if (dentry && dentry->d_parent && dentry != dentry->d_parent) {
+        if (dentry->d_parent && !IS_ROOT(dentry)) {
             fill_in_parent_data(dynsec_file, dentry->d_parent->d_inode);
+        }
+        // Hint to userspace dentry has been deleted
+        if (d_unlinked((struct dentry *)dentry)) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DELETED;
         }
     }
 }
@@ -2492,3 +2597,74 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
 }
 #endif
 //#endif /* ! CONFIG_SECURITY_PATH */
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
+#include <linux/sched/task.h>
+#include <linux/sched/mm.h>
+#endif
+
+static char *fill_in_task_exe(struct task_struct *task,
+                              struct dynsec_file *dynsec_file, gfp_t mode)
+{
+    struct mm_struct *mm;
+    char *exe_path = NULL;
+
+    // Eventually try to handle places we can't sleep?
+    if (has_gfp_atomic(mode)) {
+        return NULL;
+    }
+
+    if (!task || !dynsec_file || !task->mm || !pid_alive(task)) {
+        return NULL;
+    }
+
+    mm = get_task_mm(task);
+    if (mm) {
+        struct file *exe_file;
+
+        exe_file = dynsec_get_mm_exe_file(mm);
+        mmput(mm);
+        if (!IS_ERR_OR_NULL(exe_file)) {
+            if (dynsec_file)
+            fill_in_file_data(dynsec_file, &exe_file->f_path);
+            exe_path = dynsec_build_path_greedy(&exe_file->f_path,
+                                                dynsec_file, mode);
+            fput(exe_file);
+            if (IS_ERR(exe_path)) {
+                exe_path = NULL;
+            }
+        }
+    }
+    return exe_path;
+}
+
+struct dynsec_event *fill_in_dynsec_task_dump(struct task_struct *task, gfp_t mode)
+{
+    struct dynsec_event *dynsec_event = NULL;
+    struct dynsec_task_dump_event *task_dump;
+    bool is_task_alive;
+
+    if (!task) {
+        return NULL;
+    }
+
+    dynsec_event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_TASK_DUMP, 0,
+                                      DYNSEC_REPORT_AUDIT, mode);
+    if (!dynsec_event) {
+        return NULL;
+    }
+
+    is_task_alive = pid_alive(task);
+    task_dump = dynsec_event_to_task_dump(dynsec_event);
+
+    task_dump->kmsg.hdr.payload = sizeof(task_dump->kmsg);
+
+    __fill_in_task_ctx(task, is_task_alive, &task_dump->kmsg.msg.task);
+    task_dump->exec_path = fill_in_task_exe(task, &task_dump->kmsg.msg.exec_file,
+                                            mode);
+    if (task_dump->exec_path && task_dump->kmsg.msg.exec_file.path_size) {
+        task_dump->kmsg.msg.exec_file.path_offset = task_dump->kmsg.hdr.payload;
+        task_dump->kmsg.hdr.payload += task_dump->kmsg.msg.exec_file.path_size;
+    }
+    return dynsec_event;
+}
