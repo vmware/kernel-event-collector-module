@@ -306,7 +306,7 @@ extern bool fill_task_free(struct dynsec_event *dynsec_event,
 
 extern bool fill_in_clone(struct dynsec_event *dynsec_event,
                           const struct task_struct *parent,
-                          const struct task_struct *child);
+                          const struct task_struct *child, uint16_t extra_ctx);
 
 extern bool fill_in_ptrace(struct dynsec_event *dynsec_event,
                            const struct task_struct *source,

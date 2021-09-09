@@ -834,6 +834,8 @@ out:
     return ret;
 }
 
+// Backup hook to wake_up_new_task due to start_time
+// here being junk or the parent's start_time
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 void dynsec_sched_process_fork_tp(void *data, struct task_struct *parent,
                                   struct task_struct *child)
@@ -862,7 +864,9 @@ void dynsec_sched_process_fork_tp(struct task_struct *parent,
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
                                report_flags, GFP_ATOMIC);
-    if (!fill_in_clone(event, parent, child)) {
+    //
+    if (!fill_in_clone(event, parent, child,
+                       DYNSEC_TASK_IMPRECISE_START_TIME)) {
         free_dynsec_event(event);
         return;
     }
@@ -1024,6 +1028,7 @@ out:
 }
 
 struct kprobe;
+// Primary hook for clone events
 int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
 {
     struct dynsec_event *event = NULL;
@@ -1047,7 +1052,7 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
                                report_flags, GFP_ATOMIC);
-    if (!fill_in_clone(event, NULL, p)) {
+    if (!fill_in_clone(event, NULL, p, 0)) {
         free_dynsec_event(event);
         goto out;
     }
@@ -1058,9 +1063,9 @@ out:
     return 0;
 }
 
-int dynsec_task_dump_all(pid_t start_tgid)
+int dynsec_task_dump_all(uint16_t opts, pid_t start_pid)
 {
-    pid_t tgid = start_tgid;
+    pid_t pid = start_pid;
     struct dynsec_event *dynsec_event;
     int count = 0;
 
@@ -1069,12 +1074,12 @@ int dynsec_task_dump_all(pid_t start_tgid)
     }
 
     while (1) {
-        struct task_struct *task = dynsec_get_next_tgid(&tgid);
+        struct task_struct *task = dynsec_get_next_task(opts, &pid);
 
         if (!task) {
             break;
         }
-        tgid += 1;
+        pid += 1;
         count += 1;
 
         // We could dump kthreads but would want to provide task->comm
@@ -1098,6 +1103,54 @@ int dynsec_task_dump_all(pid_t start_tgid)
     // pr_info("%s: count:%d\n", __func__, count);
 
     return 0;
+}
+
+ssize_t dynsec_task_dump_one(uint16_t opts, pid_t start_pid,
+                             void __user *ubuf, size_t size)
+{
+    pid_t pid = start_pid;
+    struct dynsec_event *dynsec_event;
+    ssize_t ret = -ENOENT;
+
+    if (!may_iterate_tasks() || !ubuf || !size) {
+        return -EINVAL;
+    }
+
+    while (1) {
+        struct task_struct *task = dynsec_get_next_task(opts, &pid);
+        uint16_t payload;
+
+        if (!task) {
+            break;
+        }
+        pid += 1;
+
+        // We could dump kthreads but would want to provide task->comm
+        if (task->flags & PF_KTHREAD) {
+            put_task_struct(task);
+            continue;
+        }
+
+        dynsec_event = fill_in_dynsec_task_dump(task, GFP_KERNEL);
+        put_task_struct(task);
+
+        if (!dynsec_event) {
+            ret = -ENOMEM;
+            break;
+        }
+        payload = get_dynsec_event_payload(dynsec_event);
+        if (payload > size) {
+            free_dynsec_event(dynsec_event);
+            ret = -EFAULT;
+            break;
+        }
+
+        ret = copy_dynsec_event_to_user(dynsec_event, ubuf, size);
+        free_dynsec_event(dynsec_event);
+        break;
+    }
+
+    return ret;
 }
 
 // int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int flags)

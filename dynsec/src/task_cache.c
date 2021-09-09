@@ -176,7 +176,7 @@ static inline void __update_entry_data(struct event_track *event,
         break;
 
     case DYNSEC_CACHE_ENABLE_EXCL:
-        // Disable Cache If Previous STALL Event Is Cacheable
+        // Disable Cache If Previous STALL Event WAS NOT Cacheable
         if (!task_observed_stall_event(entry) ||
             event_cache_enabled(entry->event_caches[entry->last_stall.event_type])) {
             if (is_stall) {

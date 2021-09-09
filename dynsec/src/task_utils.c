@@ -11,6 +11,7 @@
 
 #include "symbols.h"
 #include "task_utils.h"
+#include "dynsec.h"
 
 struct task_symz {
     struct pid *(*find_ge_pid)(int nr, struct pid_namespace *ns);
@@ -26,7 +27,7 @@ bool dynsec_task_utils_init(void)
                          (unsigned long *)&task_syms.find_ge_pid);
 
     // Could directly be used in newer kernels
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 10, 0)
     find_symbol_indirect("get_mm_exe_file",
                          (unsigned long *)&task_syms.get_mm_exe_file);
 #else
@@ -69,7 +70,7 @@ static pid_t dynsec_pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 // On success call fput
 struct file *dynsec_get_mm_exe_file(struct mm_struct *mm)
 {
-    if (!task_syms.get_mm_exe_file) {
+    if (unlikely(!task_syms.get_mm_exe_file) || !mm) {
         return NULL;
     }
     return task_syms.get_mm_exe_file(mm);
@@ -123,7 +124,44 @@ retry:
     return task;
 }
 
-struct task_struct *dynsec_get_next_tgid(pid_t *tgid)
+static struct task_struct *__dynsec_get_next_tid(pid_t *tid, struct pid_namespace *ns)
 {
-    return __dynsec_get_next_tgid(tgid, task_active_pid_ns(current));
+    struct pid *pid;
+    struct task_struct *task = NULL;
+    pid_t local_tid;
+
+    if (!task_syms.find_ge_pid || !tid || !ns) {
+        return NULL;
+    }
+    local_tid = *tid;
+
+    rcu_read_lock();
+retry:
+    task = NULL;
+    // Finds the next pid start at given id
+    pid = dynsec_find_ge_pid(local_tid, ns);
+    if (pid) {
+        local_tid = dynsec_pid_nr_ns(pid, ns);
+        task = pid_task(pid, PIDTYPE_PID);
+        if (!task) {
+            local_tid += 1;
+            goto retry;
+        }
+        get_task_struct(task);
+        *tid = local_tid;
+    }
+    rcu_read_unlock();
+
+    return task;
+}
+
+struct task_struct *dynsec_get_next_task(uint16_t opts, pid_t *pid)
+{
+    if (opts & DUMP_NEXT_THREAD) {
+        return __dynsec_get_next_tid(pid, task_active_pid_ns(current));
+    }
+    if (opts & DUMP_NEXT_TGID) {
+        return __dynsec_get_next_tgid(pid, task_active_pid_ns(current));
+    }
+    return NULL;
 }

@@ -81,4 +81,7 @@ extern int dynsec_task_fix_setgid(struct cred *new, const struct cred *old, int 
 extern void dynsec_task_free(struct task_struct *task);
 #endif
 
-extern int dynsec_task_dump_all(pid_t start_tgid);
+extern int dynsec_task_dump_all(uint16_t opts, pid_t start_tgid);
+
+extern ssize_t dynsec_task_dump_one(uint16_t opts, pid_t start_tgid,
+                                    void __user *ubuf, size_t size);

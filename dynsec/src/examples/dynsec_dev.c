@@ -153,16 +153,17 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
     return 0;
 }
 
-int request_to_dump_all_tasks(int fd, pid_t pid)
+int request_to_dump_all_tasks(int fd, pid_t pid, uint16_t opts)
 {
-    struct dynsec_task_dump_req task_dump_req = {
+    struct dynsec_task_dump_all task_dump_all = {
         .hdr = {
-            .size = sizeof(struct dynsec_task_dump_req),
+            .size = sizeof(task_dump_all),
         },
-        .tgid = pid,
+        .pid = pid,
+        .opts = opts,
     };
 
-    return ioctl(fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_req);
+    return ioctl(fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_all);
 }
 
 // Prints fields that are available given bitmap
@@ -201,6 +202,34 @@ static void print_path(const char *start, struct dynsec_file *file)
             path_type = "rawpath";
         }
         printf(" %s:'%s'", path_type, path);
+    }
+}
+
+static void print_task_ctx(struct dynsec_task_ctx *task_ctx)
+{
+    if (!task_ctx) {
+        return;
+    }
+    printf("start_time:%c%llu",
+           (task_ctx->extra_ctx & DYNSEC_TASK_IMPRECISE_START_TIME) ?
+           '?' : '+', task_ctx->start_time
+    );
+    if (task_ctx->tid != task_ctx->pid) {
+        printf(" tid:%u");
+    }
+    printf(" pid:%u ppid:%u mnt_ns:%u ctx:%#x",
+           task_ctx->pid, task_ctx->ppid,
+           task_ctx->mnt_ns,
+           task_ctx->extra_ctx);
+    if (task_ctx->uid == task_ctx->euid) {
+        printf(" uid:%u", task_ctx->uid);
+    } else {
+        printf(" uid:%u euid:%u", task_ctx->uid, task_ctx->euid);
+    }
+    if (task_ctx->gid == task_ctx->egid) {
+        printf(" gid:%u", task_ctx->gid);
+    } else {
+        printf(" gid:%u egid:%u", task_ctx->gid, task_ctx->egid);
     }
 }
 
@@ -524,13 +553,9 @@ void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
     else if (task_msg->hdr.event_type == DYNSEC_EVENT_TYPE_CLONE)
         ev_str = "FORK";
 
-    printf("%s: %llu pid:%u ppid:%u mnt_ns:%u uid:%u\n", ev_str,
-        task_msg->msg.task.start_time,
-        task_msg->msg.task.pid,
-        task_msg->msg.task.ppid,
-        task_msg->msg.task.mnt_ns,
-        task_msg->msg.task.uid
-    );
+    printf("%s: ", ev_str);
+    print_task_ctx(&task_msg->msg.task);
+    printf("\n");
 }
 
 void print_ptrace_event(int fd, struct dynsec_ptrace_umsg *ptrace)
@@ -543,9 +568,11 @@ void print_ptrace_event(int fd, struct dynsec_ptrace_umsg *ptrace)
 
     if (quiet) return;
 
-    printf("PTRACE: source:%u -> target:%u\n",
-        ptrace->msg.source.tid, ptrace->msg.target.tid
-    );
+    printf("PTRACE: source:{");
+    print_task_ctx(&ptrace->msg.source);
+    printf("} -> target{");
+    print_task_ctx(&ptrace->msg.target);
+    printf("}\n");
 }
 
 void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
@@ -558,9 +585,11 @@ void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
 
     if (quiet) return;
 
-    printf("SIGNAL: source:%u -> target:%u sig:%d\n",
-        signal->msg.source.tid, signal->msg.target.tid, signal->msg.signal
-    );
+    printf("PTRACE: sig:%d source:{", signal->msg.signal);
+    print_task_ctx(&signal->msg.source);
+    printf("} -> target{");
+    print_task_ctx(&signal->msg.target);
+    printf("}\n");
 }
 
 void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump)
@@ -574,14 +603,8 @@ void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump)
 
     if (quiet) return;
 
-    printf("TASK_DUMP: %llu pid:%u ppid:%u mnt_ns:%u uid:%u",
-        task_dump->msg.task.start_time,
-        task_dump->msg.task.pid,
-        task_dump->msg.task.ppid,
-        task_dump->msg.task.mnt_ns,
-        task_dump->msg.task.uid
-    );
-
+    printf("TASK_DUMP: ");
+    print_task_ctx(&task_dump->msg.task);
     print_dynsec_file(&task_dump->msg.exec_file);
     print_path(start, &task_dump->msg.exec_file);
     printf("\n");
@@ -658,6 +681,30 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
                hdr->tid, hdr->payload, hdr->req_id, hdr->event_type);
         break;
     }
+}
+
+int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
+{
+    int ret;
+    char buf[8192];
+    struct dynsec_task_dump *task_dump;
+
+    memset(buf, 'A', sizeof(buf));
+    task_dump = (struct dynsec_task_dump *)buf;
+    task_dump->hdr.size = sizeof(buf);
+    task_dump->pid = pid;
+    task_dump->opts = opts;
+
+    ret = ioctl(fd, DYNSEC_IOC_TASK_DUMP, task_dump);
+    if (ret < 0) {
+        fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d %m\n", ret);
+    }
+    else if (ret > 0) {
+        fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d\n", ret);
+    } else {
+        print_task_dump_event(fd, &task_dump->umsg);
+    }
+    return ret;
 }
 
 // Event Structure
@@ -911,7 +958,10 @@ int main(int argc, const char *argv[])
     sigaction(SIGINT, &action, NULL);
 
     // Sends Task Dumps into event queue
-    request_to_dump_all_tasks(fd, 1);
+    //request_to_dump_all_tasks(fd, 1, DUMP_NEXT_TGID);
+
+    // Query for next thread/task directly
+    request_to_dump_task(fd, 1, DUMP_NEXT_THREAD);
 
     // Bans filepaths containing "/foo.sh"
     read_events(fd, "/foo.sh");

@@ -60,6 +60,8 @@ struct dynsec_tracepoints {
 
 struct dynsec_tracepoints dtp = {
     .tp = {
+        // dynsec_sched_process_fork_tp is only a backup hook
+        // to when wake_up_new_task isn't available.
         [TP_CLONE_IDX] = {
             .enabled = false,
             .tp = NULL,

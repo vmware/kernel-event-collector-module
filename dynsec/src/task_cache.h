@@ -4,8 +4,11 @@
 #pragma once
 
 struct event_track {
+// Primarily for intents that don't make it to userspace
+// still have value to cache eviction options.
 #define TRACK_EVENT_REPORTABLE          0x0001
 #define TRACK_EVENT_REQ_ID_VALID        0x0002
+// Would let us know report_flags was modified
 #define TRACK_EVENT_REPORT_FLAGS_CHG    0x0004
     uint16_t track_flags;
     uint16_t report_flags;

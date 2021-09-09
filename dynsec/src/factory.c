@@ -13,6 +13,10 @@
 #include <linux/dcache.h>
 #include <linux/file.h>
 #include <linux/namei.h>
+#if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
+#include <linux/sched/task.h>
+#include <linux/sched/mm.h>
+#endif
 
 #include "dynsec.h"
 #include "factory.h"
@@ -1502,18 +1506,14 @@ static void __fill_in_task_ctx(const struct task_struct *task,
                                struct dynsec_task_ctx *task_ctx)
 {
     task_ctx->mnt_ns = get_mnt_ns_id(task);
+    if (task_ctx->mnt_ns) {
+        task_ctx->extra_ctx |= DYNSEC_TASK_HAS_MNT_NS;
+    }
     task_ctx->tid = task->pid;
     task_ctx->pid = task->tgid;
     if (check_parent && task->real_parent) {
         task_ctx->ppid = task->real_parent->tgid;
     }
-
-// Unreliable
-// #if defined(RHEL_MAJOR) && RHEL_MAJOR == 8
-//     task_ctx->self_exec_id = task->task_struct_rh->self_exec_id;
-// #else
-//     task_ctx->self_exec_id = task->self_exec_id;
-// #endif
 
     // user DAC context
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -1543,6 +1543,14 @@ static void __fill_in_task_ctx(const struct task_struct *task,
     if (task->mm) {
         task_ctx->extra_ctx |= DYNSEC_TASK_HAS_MM;
     }
+
+// #if defined(RHEL_MAJOR) && RHEL_MAJOR == 8
+//    task_ctx->self_exec_id = task->task_struct_rh->self_exec_id;
+//    task_ctx->parent_exec_id = task->task_struct_rh->parent_exec_id;
+// #else
+//    task_ctx->self_exec_id = task->self_exec_id;
+//    task_ctx->parent_exec_id = task->parent_exec_id;
+// #endif
 }
 
 static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
@@ -2080,7 +2088,8 @@ bool fill_task_free(struct dynsec_event *dynsec_event,
 
 bool fill_in_clone(struct dynsec_event *dynsec_event,
                    const struct task_struct *parent,
-                   const struct task_struct *child)
+                   const struct task_struct *child,
+                   uint16_t extra_ctx)
 {
     struct dynsec_task_event *clone = NULL;
 
@@ -2091,12 +2100,7 @@ bool fill_in_clone(struct dynsec_event *dynsec_event,
     clone = dynsec_event_to_task(dynsec_event);
     clone->kmsg.hdr.payload = sizeof(clone->kmsg);
 
-// Unreliable
-// #if defined(RHEL_MAJOR) && RHEL_MAJOR == 8
-//     clone->kmsg.msg.parent_exec_id = child->task_struct_rh->parent_exec_id;
-// #else
-//     clone->kmsg.msg.parent_exec_id = child->parent_exec_id;
-// #endif
+    clone->kmsg.msg.task.extra_ctx |= extra_ctx;
     if (parent) {
         __fill_in_task_ctx(child, false, &clone->kmsg.msg.task);
         clone->kmsg.msg.task.ppid = parent->tgid;
@@ -2597,11 +2601,6 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
 }
 #endif
 //#endif /* ! CONFIG_SECURITY_PATH */
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-#include <linux/sched/task.h>
-#include <linux/sched/mm.h>
-#endif
 
 static char *fill_in_task_exe(struct task_struct *task,
                               struct dynsec_file *dynsec_file, gfp_t mode)

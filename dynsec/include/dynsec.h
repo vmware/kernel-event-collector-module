@@ -125,8 +125,10 @@ struct dynsec_task_ctx {
     uint32_t mnt_ns;
     uint32_t flags;
     uint64_t start_time;
-#define DYNSEC_TASK_IN_EXECVE   0x0001
-#define DYNSEC_TASK_HAS_MM      0x0002
+#define DYNSEC_TASK_IN_EXECVE               0x0001
+#define DYNSEC_TASK_HAS_MM                  0x0002
+#define DYNSEC_TASK_IMPRECISE_START_TIME    0x0004
+#define DYNSEC_TASK_HAS_MNT_NS              0x0008
     uint16_t extra_ctx;
 };
 
@@ -333,10 +335,20 @@ struct dynsec_ioc_hdr {
 };
 
 // Dump Task Ioctl
-struct dynsec_task_dump_req {
+struct dynsec_task_dump {
     struct dynsec_ioc_hdr hdr;
-    pid_t tgid;
+    pid_t pid;
+    uint16_t opts;
+#define DUMP_NEXT_THREAD 0x0001
+#define DUMP_NEXT_TGID   0x0002
     struct dynsec_task_dump_umsg umsg;
+};
+
+// Dump All Tasks Ioctl
+struct dynsec_task_dump_all {
+    struct dynsec_ioc_hdr hdr;
+    pid_t pid;
+    uint16_t opts;
 };
 
 #pragma pack(pop)
