@@ -158,9 +158,9 @@ int request_to_dump_all_tasks(int fd, pid_t pid, uint16_t opts)
     struct dynsec_task_dump_all task_dump_all = {
         .hdr = {
             .size = sizeof(task_dump_all),
+            .pid = pid,
+            .opts = opts,
         },
-        .pid = pid,
-        .opts = opts,
     };
 
     return ioctl(fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_all);
@@ -692,8 +692,8 @@ int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
     memset(buf, 'A', sizeof(buf));
     task_dump = (struct dynsec_task_dump *)buf;
     task_dump->hdr.size = sizeof(buf);
-    task_dump->pid = pid;
-    task_dump->opts = opts;
+    task_dump->hdr.pid = pid;
+    task_dump->hdr.opts = opts;
 
     ret = ioctl(fd, DYNSEC_IOC_TASK_DUMP, task_dump);
     if (ret < 0) {
@@ -958,7 +958,7 @@ int main(int argc, const char *argv[])
     sigaction(SIGINT, &action, NULL);
 
     // Sends Task Dumps into event queue
-    //request_to_dump_all_tasks(fd, 1, DUMP_NEXT_TGID);
+    request_to_dump_all_tasks(fd, 1, DUMP_NEXT_TGID);
 
     // Query for next thread/task directly
     request_to_dump_task(fd, 1, DUMP_NEXT_THREAD);

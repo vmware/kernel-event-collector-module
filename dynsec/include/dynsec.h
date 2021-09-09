@@ -328,17 +328,15 @@ struct dynsec_task_dump_umsg {
     struct dynsec_task_dump_msg msg;
 };
 
-// Base Header For Ioctls
-struct dynsec_ioc_hdr {
-    // Size of userspace data to help determine direct replies
-    uint16_t size;
-};
 
-// Dump Task Ioctl
-struct dynsec_task_dump {
-    struct dynsec_ioc_hdr hdr;
+// Dump Task Header
+struct dynsec_task_dump_hdr {
+    uint16_t size;
     pid_t pid;
     uint16_t opts;
+};
+struct dynsec_task_dump {
+    struct dynsec_task_dump_hdr hdr;
 #define DUMP_NEXT_THREAD 0x0001
 #define DUMP_NEXT_TGID   0x0002
     struct dynsec_task_dump_umsg umsg;
@@ -346,9 +344,7 @@ struct dynsec_task_dump {
 
 // Dump All Tasks Ioctl
 struct dynsec_task_dump_all {
-    struct dynsec_ioc_hdr hdr;
-    pid_t pid;
-    uint16_t opts;
+    struct dynsec_task_dump_hdr hdr;
 };
 
 #pragma pack(pop)

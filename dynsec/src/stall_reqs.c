@@ -288,63 +288,54 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
 {
     int ret = -EINVAL;
     // Check capable() on privileged commands.
-    struct dynsec_ioc_hdr ioc_hdr;
-
 
     switch (cmd)
     {
     // Dump all tasks or tgids to event queue
     case DYNSEC_IOC_TASK_DUMP_ALL: {
-            struct dynsec_task_dump_all task_dump_all;
+            struct dynsec_task_dump_hdr hdr;
 
             if (!capable(CAP_SYS_ADMIN)) {
                 return -EPERM;
             }
 
             // Check if we want to directly reply back
-            if (copy_from_user(&task_dump_all,
-                               (void *)arg, sizeof(task_dump_all))) {
+            if (copy_from_user(&hdr,
+                               (void *)arg, sizeof(hdr))) {
                 return -EFAULT;
             }
-            if (!(task_dump_all.opts & (DUMP_NEXT_THREAD|DUMP_NEXT_TGID))) {
+            if (!(hdr.opts & (DUMP_NEXT_THREAD|DUMP_NEXT_TGID))) {
                 return -EINVAL;
             }
 
             mutex_lock(&dump_all_lock);
-            ret = dynsec_task_dump_all(task_dump_all.opts, task_dump_all.pid);
+            ret = dynsec_task_dump_all(hdr.opts, hdr.pid);
             mutex_unlock(&dump_all_lock);
         }
         break;
 
     // Allow client to directly get a dump of task/thread
     case DYNSEC_IOC_TASK_DUMP: {
-            struct dynsec_task_dump task_dump;
+            struct dynsec_task_dump_hdr hdr;
             struct dynsec_task_dump __user *task_dump_u;
             size_t size;
             ssize_t copied;
 
             // Check if we want to directly reply back
-            if (copy_from_user(&ioc_hdr,
-                               (void *)arg, sizeof(ioc_hdr))) {
+            if (copy_from_user(&hdr,
+                               (void *)arg, sizeof(hdr))) {
                 return -EFAULT;
             }
-            if (ioc_hdr.size < sizeof(struct dynsec_task_dump)) {
+            if (hdr.size < sizeof(struct dynsec_task_dump)) {
                 return -EINVAL;
             }
-            // Don't have to read in the whole struct but we'll know
-            // address space is available.
-            if (copy_from_user(&task_dump,
-                               (void *)arg, sizeof(task_dump))) {
-                return -EFAULT;
-            }
-
-            if (!(task_dump.opts & (DUMP_NEXT_THREAD|DUMP_NEXT_TGID))) {
+            if (!(hdr.opts & (DUMP_NEXT_THREAD|DUMP_NEXT_TGID))) {
                 return -EINVAL;
             }
 
             task_dump_u = (struct dynsec_task_dump __user *)arg;
-            size = ioc_hdr.size - offsetof(struct dynsec_task_dump, umsg);
-            copied = dynsec_task_dump_one(task_dump.opts, task_dump.pid,
+            size = hdr.size - offsetof(struct dynsec_task_dump, umsg);
+            copied = dynsec_task_dump_one(hdr.opts, hdr.pid,
                                           &task_dump_u->umsg, size);
             if (copied > 0) {
                 ret = 0;
