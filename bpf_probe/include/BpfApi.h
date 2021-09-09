@@ -7,6 +7,8 @@
 
 #include <functional>
 #include <memory>
+#include <list>
+#include <chrono>
 
 // A number of calls are annotated with 'warn_unused_result' in their definition, so a
 // normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
@@ -22,11 +24,48 @@ namespace ebpf {
 
 namespace cb_endpoint {
 namespace bpf_probe {
+    class Data
+    {
+    public:
+        // Allow implicit conversion
+        Data(bpf_probe::data * _data)
+            : data(_data)
+        {
+            if (!data)
+            {
+                throw std::runtime_error("Bad pointer");
+            }
+        }
+
+        bpf_probe::data * data;
+
+        friend bool operator<(Data const& left, Data const& right)
+        {
+            return left.data->header.event_time < right.data->header.event_time;
+        }
+
+        uint64_t GetEventTime() const
+        {
+            return data->header.event_time;
+        }
+    };
+    using EventList = std::list<Data>;
+
     class IBpfApi
     {
     public:
         using UPtr = std::unique_ptr<IBpfApi>;
-        using EventCallbackFn = std::function<void(struct data *data)>;
+        using EventCallbackFn = std::function<void(bpf_probe::Data data)>;
+
+        #define TO_NS(TIME)  std::chrono::duration_cast<std::chrono::nanoseconds>((TIME)).count();
+
+        static const uint64_t POLL_TIMEOUT_MS = 300;
+
+        // The target_delta is the threshold we will use to start harvesting events from the list
+        static const uint64_t TARGET_DELTA  = TO_NS(std::chrono::milliseconds(IBpfApi::POLL_TIMEOUT_MS * 4));
+
+        // The harvest_delta is the threshold we will use to decide what events to actually send
+        static const uint64_t HARVEST_DELTA = TO_NS(std::chrono::milliseconds(IBpfApi::POLL_TIMEOUT_MS));
 
         enum class ProbeType
         {
@@ -50,7 +89,7 @@ namespace bpf_probe {
 
         virtual bool RegisterEventCallback(EventCallbackFn callback) = 0;
 
-        virtual int PollEvents(int timeout_ms = -1) = 0;
+        virtual int PollEvents() = 0;
 
         const std::string &GetErrorMessage() const
         {
@@ -122,7 +161,7 @@ namespace bpf_probe {
 
         bool RegisterEventCallback(EventCallbackFn callback) override;
 
-        int PollEvents(int timeout_ms = -1) override;
+        int PollEvents() override;
 
         const std::string &GetErrorMessage() const
         {
@@ -144,6 +183,10 @@ namespace bpf_probe {
 
         void CleanBuildDir();
 
+        bool OnPeek(const bpf_probe::Data data) const;
+        void OnEvent(bpf_probe::Data data);
+
+        static bool on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size);
         static void on_perf_submit(void *cb_cookie, void *data, int data_size);
 
         std::unique_ptr<ebpf::BPF>  m_BPF;
@@ -151,6 +194,13 @@ namespace bpf_probe {
         bool                        m_bracket_kptr_restrict;
         bool                        m_first_syscall_lookup;
         long                        m_kptr_restrict_orig;
+
+        uint64_t                    m_timestamp_adjust;
+        uint64_t                    m_timestamp_first;
+        bool                        m_events_waiting;
+        uint64_t                    m_event_count;
+        uint64_t                    m_event_complete_count;
+        EventList                   m_event_list;
     };
 }
 }
