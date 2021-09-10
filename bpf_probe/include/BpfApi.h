@@ -183,7 +183,7 @@ namespace bpf_probe {
 
         void CleanBuildDir();
 
-        bool OnPeek(const bpf_probe::Data data) const;
+        bool OnPeek(const bpf_probe::Data data);
         void OnEvent(bpf_probe::Data data);
 
         static bool on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size);
@@ -195,12 +195,13 @@ namespace bpf_probe {
         bool                        m_first_syscall_lookup;
         long                        m_kptr_restrict_orig;
 
+        EventList                   m_event_list;
         uint64_t                    m_timestamp_adjust;
         uint64_t                    m_timestamp_first;
         bool                        m_events_waiting;
         uint64_t                    m_event_count;
         uint64_t                    m_event_complete_count;
-        EventList                   m_event_list;
+        bool                        m_did_leave_events;
     };
 }
 }
