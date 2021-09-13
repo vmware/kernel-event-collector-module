@@ -57,15 +57,7 @@ namespace bpf_probe {
         using UPtr = std::unique_ptr<IBpfApi>;
         using EventCallbackFn = std::function<void(bpf_probe::Data data)>;
 
-        #define TO_NS(TIME)  std::chrono::duration_cast<std::chrono::nanoseconds>((TIME)).count();
-
         static const uint64_t POLL_TIMEOUT_MS = 300;
-
-        // The target_delta is the threshold we will use to start harvesting events from the list
-        static const uint64_t TARGET_DELTA  = TO_NS(std::chrono::milliseconds(IBpfApi::POLL_TIMEOUT_MS * 4));
-
-        // The harvest_delta is the threshold we will use to decide what events to actually send
-        static const uint64_t HARVEST_DELTA = TO_NS(std::chrono::milliseconds(IBpfApi::POLL_TIMEOUT_MS));
 
         enum class ProbeType
         {
@@ -196,11 +188,8 @@ namespace bpf_probe {
         long                        m_kptr_restrict_orig;
 
         EventList                   m_event_list;
-        uint64_t                    m_timestamp_adjust;
-        uint64_t                    m_timestamp_first;
-        bool                        m_events_waiting;
+        uint64_t                    m_timestamp_last;
         uint64_t                    m_event_count;
-        uint64_t                    m_event_complete_count;
         bool                        m_did_leave_events;
     };
 }

@@ -194,18 +194,18 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 int BpfApi::PollEvents()
 {
     // This poll cycle will read events from all CPU perf buffers and call the event callback for each event in the buffer.
-    //  Each buffer is read until empty OR until the target delta is reached.  The probe will continue adding events to
+    //  Each buffer is read until empty OR until the target timestamp is reached.  The probe will continue adding events to
     //  the queues during this process.  Since new events could be added to CPU queues that have already been read, and
     //  to queues yet to be read.  We could collect events in this pass that are "newer" than events in the CPU queue.
     //
-    // To account for this we collect the events in a local list, sort them, and only and only send them on to the client
-    //  the time delta between the first and last event reaches a defined threshold.
+    // To account for this we collect the events in a local list, sort them, check to queues again for any missed events
+    //  which are older than the last one we have, sort them again, and finally send them to the client.
     //
-    // We use the peek callback to stop adding events to the local list if we reach the target delta.  Otherwise on a
-    //  really busy system we could collect so many events from one CPU that that our calculations can get messed up and
-    //  events can get out of order.
+    // We use the peek callback to stop adding events to the local list if we reach the target timestamp.  Otherwise on a
+    //  really busy system we could collect so many events from one CPU that we have dificulty knowing exactly where to
+    //  stop sending events.
     //
-    // Note: This logic requires patches to BCC to provide the peek callback.
+    // Note: This logic requires patches to BCC to provide the peek callback and a force perfbuffer read.
     //
     // This article has a good writeup of the problems.
     //   https://kinvolk.io/blog/2018/02/timing-issues-when-using-bpf-with-virtual-cpus/
@@ -216,21 +216,27 @@ int BpfApi::PollEvents()
         return -1;
     }
 
-    // Were events available in the queue?
-    //  This will trigger a purge of the list.  This "should" be safe because it means that no events were reported
-    //  before the poll times out.  (Likely POLL_TIMEOUT_MS)
-    bool poll_timeout = false;
+    // Do we have events waiting to be sent from a previous read cycle
+    auto events_waiting = !m_event_list.empty();
 
     if (m_did_leave_events)
     {
+        // We left events on a CPU queue so we need to bypass the poll
         m_did_leave_events = false;
         m_BPF->read_perf_buffer("events");
     }
     else
     {
+        auto timeout_ms = POLL_TIMEOUT_MS;
+        if (events_waiting)
+        {
+            // We had events waiting, so force a very short sleep to give the probe the probe a chance to finish submitting
+            //  events.  Also provide a very short timeout to the poll so that we don't hold onto events for very long.
+            usleep(500);
+            timeout_ms = 1;
+        }
         m_did_leave_events = false;
-        auto result = m_BPF->poll_perf_buffer("events", POLL_TIMEOUT_MS);
-        poll_timeout = (result == 0);
+        auto result = m_BPF->poll_perf_buffer("events", timeout_ms);
 
         if (result < 0)
         {
@@ -238,22 +244,10 @@ int BpfApi::PollEvents()
         }
     }
 
-
     // Were events collected during this pass?
     //  This can be false even if events are available in the queuue since the peek function will cause us to stop reading
     //  events once we reach the target delta.
     auto collected_events = (m_event_count > 0);
-
-    if (poll_timeout)
-    {
-        // If events were not queued add the timeout to the adjustment.  This allows the events to be purged when idle.
-        m_timestamp_adjust += TO_NS(std::chrono::milliseconds(POLL_TIMEOUT_MS));
-    }
-    else
-    {
-        // We collected events so clear the adjustment
-        m_timestamp_adjust = 0;
-    }
 
     if (!m_event_list.empty())
     {
@@ -261,64 +255,30 @@ int BpfApi::PollEvents()
         {
             // If we collected events during this cycle, than sort the list
             m_event_list.sort();
-            m_timestamp_first = m_event_list.front().GetEventTime();
-
-            // Reset the counter since we collected events.
-            m_event_complete_count = 0;
+            m_timestamp_last  = m_event_list.back().GetEventTime();
 
             DEBUG_HARVEST({
                 fprintf(stderr, "sorted ");
             });
-        } else {
-            // Count how many cycles where we did not collect events.  We use this to ensure that we gathered everything
-            //  we can from all the queues.
-            m_event_complete_count++;
         }
-
-        // Figure out the the delta between the first event and the last event (possibly adjusted by the poll timeout)
-        uint64_t timestamp_last = m_event_list.back().GetEventTime() + m_timestamp_adjust;
-        uint64_t delta = (timestamp_last - m_timestamp_first);
-
-        // There is two conditions where we decide to havest events
-        //  1. The delta is greater than the target AND we did not collect events for two cycles
-        //    * This covers the case where the system has become idle, so no new events are collected.  We increase the
-        //      timestamp_last by the timout each time, so the delta passes the target
-        //  2. Events are still queued AND we did not collect events for two cycles
-        //    * This covers the case where we stop collecting events from the queue because the target delta is reached
-        auto shouldHarvest = ((delta > TARGET_DELTA && m_event_complete_count > 2) || (!poll_timeout && m_event_complete_count > 2));
 
         DEBUG_HARVEST({
             #define TF(A) ((A) ? "true" : "false")
-            fprintf(stderr, "%ld w:%s q:%s d:%s c:%s\n",
+            fprintf(stderr, "%ld w:%s c:%s l:%s\n",
                 m_event_list.size(),
-                TF(m_events_waiting),
-                TF(events_were_queued),
-                TF(delta > TARGET_DELTA),
-                TF(collected_events));
+                TF(events_waiting),
+                TF(collected_events),
+                TF(m_did_leave_events));
         });
 
-        if (shouldHarvest)
+        if (!collected_events)
         {
             // We have decided to harvest events.  We need to loop over all events in the list and send them to the target
-            auto it = m_event_list.begin();
-
-            for (; it != m_event_list.end(); ++it)
+            for (auto & data: m_event_list)
             {
-                auto & data = *it;
-
-                uint64_t event_time = data.GetEventTime();
-
-                // We want to stop harvesting events once we reach the harvest_delta.  This ensures we give a chance for
-                //  the out of order events to be collected. If the system is idle, we add the poll timer to the last_timestamp
-                //  value.  This will allow the list to become completely empty.
-                uint64_t delta = event_time - m_timestamp_first;
-                if (delta > HARVEST_DELTA)
-                {
-                    break;
-                }
-
                 // Leave this here for future debugging
                 DEBUG_ORDER({
+                     uint64_t event_time = data.GetEventTime();
                      static uint64_t m_last_event_time = 0;
                      if (event_time < m_last_event_time)
                      {
@@ -336,20 +296,9 @@ int BpfApi::PollEvents()
             }
 
             // Erase the events that we sent
-            m_event_list.erase(m_event_list.begin(), it);
+            m_event_list.clear();
+            m_timestamp_last  = 0;
         }
-
-        DEBUG_ORDER({
-            if (m_events_waiting && m_event_list.empty())
-            {
-                fprintf(stderr, "list purged\n");
-            }
-        });
-
-        // Record if we still have events waiting to be sent.  This is use by the peek function to help decide what events
-        //  to collect.
-        m_events_waiting = !m_event_list.empty();
-        m_timestamp_first = (m_events_waiting ? m_event_list.front().GetEventTime() : 0);
     }
     m_event_count = 0;
 
@@ -426,10 +375,10 @@ void BpfApi::RaiseKptrRestrict()
 bool BpfApi::OnPeek(const bpf_probe::Data data)
 {
     // This callback allows us to inspect the next event and signal BPF to stop reading from the current CPU queue
-    //  * Always continue reading if this is the first cycle after we have cleared the list because m_timestamp_first is
+    //  * Always continue reading if this is the first cycle after we have cleared the list because m_timestamp_last is
     //    not valid.
-    //  * Otherwise stop reading from this CPU if the delta is greater than the target.
-    auto keep_collecting =  (!m_events_waiting || (data.GetEventTime() - m_timestamp_first) < TARGET_DELTA);
+    //  * Otherwise stop reading from this CPU if the event time is greater than the last timestamp.
+    auto keep_collecting =  (!m_timestamp_last || (data.GetEventTime() <= m_timestamp_last));
 
     m_did_leave_events |= !keep_collecting;
 
