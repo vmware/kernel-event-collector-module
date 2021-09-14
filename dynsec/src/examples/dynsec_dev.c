@@ -1144,15 +1144,17 @@ static void dump_stats(void)
 
 static void on_sig(int sig)
 {
-    int i;
-
     shutdown = true;
 
-    for (i = 0; i < max_index; i++) {
-        if (!progeny[i]) {
-            continue;
+    if (is_tracing && debug) {
+        int i;
+
+        for (i = 0; i < max_index; i++) {
+            if (!progeny[i]) {
+                continue;
+            }
+            fprintf(stderr, "%d %d\n",i, progeny[i]);
         }
-        fprintf(stderr, "%d %d\n",i, progeny[i]);
     }
 }
 
