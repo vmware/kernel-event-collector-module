@@ -244,6 +244,7 @@ static void send_event(
 	void           *data,
 	size_t          data_size)
 {
+    ((struct data*)data)->header.event_time = bpf_ktime_get_ns();
 	events.perf_submit(ctx, data, data_size);
 }
 
@@ -402,7 +403,6 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
 {
 	header->type = type;
 	header->state = state;
-	header->event_time = bpf_ktime_get_ns();
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 	if (task) {

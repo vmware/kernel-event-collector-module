@@ -60,7 +60,7 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
-        void setup_PollEvents(int timeout_ms, int result)
+        void setup_PollEvents(int result)
         {
             ::mock(BPF_API_SCOPE)
                     .expectOneCall(__MOCKED_FUNCTION__)
@@ -94,7 +94,7 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
 
-        int PollEvents(int timeout_ms) override
+        int PollEvents() override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
