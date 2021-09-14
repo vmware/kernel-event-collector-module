@@ -740,7 +740,7 @@ void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
 
     if (quiet) return;
 
-    printf("PTRACE: sig:%d source:{", signal->msg.signal);
+    printf("SIGNAL: sig:%d source:{", signal->msg.signal);
     print_task_ctx(&signal->msg.source);
     printf("} -> target{");
     print_task_ctx(&signal->msg.target);
