@@ -16,8 +16,10 @@
 #include <sys/sysmacros.h>
 #include <signal.h>
 #include <sys/mman.h>
-#include <pthread.h>
 #include <signal.h>
+#include <getopt.h>
+#include <stdbool.h>
+#include <limits.h>
 
 #include "dynsec.h"
 
@@ -25,9 +27,22 @@
 #define FMODE_EXEC 0x20
 #endif
 
+static int verbosity = 0;
 static int quiet = 0;
 static int quiet_open_events = 1;
 static uint32_t default_cache_flags = 0;
+static pid_t trace_pid = 0;
+static bool is_child = false;
+static bool is_tracing = false;
+static bool follow_progeny = false;
+static bool shutdown = false;
+static const char *kmod_search_str = "dynsec";
+static int major_num = 0;
+static int minor_num = 0;
+#define MAX_TRACK_PIDS 256
+static pid_t progeny[MAX_TRACK_PIDS];
+static int max_index = 0;
+static bool debug = false;
 
 unsigned int largest_read = 0;
 int max_parsed_per_read = 0;
@@ -85,6 +100,116 @@ char *global_buf = NULL;
 // Pass in the desired char device and the major number
 // That can be grabbed from /proc/devices
 
+static void dump_stats(void);
+
+static void do_shutdown(int fd)
+{
+    close(fd);
+    fd = -1;
+
+    dump_stats();
+}
+
+static bool is_empty_trace_list(void)
+{
+    int i;
+
+    for (i = 0; i < MAX_TRACK_PIDS; i++) {
+        if (progeny[i]) {
+            if (debug)
+                fprintf(stderr, "NOT EMPTY: [%d]%d\n", i, progeny[i]);
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool insert_trace_list(pid_t pid)
+{
+    int i;
+
+    for (i = 0; i < max_index; i++) {
+        if (!progeny[i]) {
+            progeny[i] = pid;
+            if (debug)
+                fprintf(stderr, "INSERT: [%d]%d\n", i, progeny[i]);
+            return true;
+        }
+    }
+
+    if (i == max_index && max_index < MAX_TRACK_PIDS) {
+        max_index += 1;
+        progeny[max_index] = pid;
+        if (debug)
+            fprintf(stderr, "INSERT NEW MAX: [%d]%d\n", i, progeny[i]);
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static bool in_trace_list(pid_t pid, bool remove)
+{
+    int i;
+    int prev_valid = 0;
+
+    for (i = 0; i <= max_index && i < MAX_TRACK_PIDS; i++) {
+        if (!progeny[i]) {
+            continue;
+        }
+        if (progeny[i] == pid) {
+            if (remove) {
+                if (debug)
+                    fprintf(stderr, "REMOVING: [%d]%d\n", i, pid);
+                if (i == max_index) {
+                    max_index = prev_valid;
+                }
+                progeny[i] = 0;
+            }
+            return true;
+        } else {
+            prev_valid = i;
+        }
+    }
+
+    return false;
+}
+
+static int find_device_major(const char *proc_file, const char *kmod)
+{
+    FILE *fh = fopen(proc_file, "r");
+    char *line = NULL;
+    size_t len = 0;
+    int major = -ENOENT;
+    char buf[256];
+
+    if (!proc_file) {
+        return -EINVAL;
+    }
+
+    while (true) {
+        int local_major;
+        ssize_t nread = getline(&line, &len, fh);
+
+        if (nread == -1) {
+            break;
+        }
+        memset(buf, 0, sizeof(buf));
+
+        sscanf(line, "%d %s", &local_major, buf);
+        if (strstr(buf, kmod)) {
+            major = local_major;
+            break;
+        }
+    }
+
+    if (line) {
+        free(line);
+        line = NULL;
+    }
+    return major;
+}
+
 static int create_chrdev(unsigned int major_num, unsigned int minor,
                          const char *dev_path)
 {
@@ -95,10 +220,13 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
         return -EINVAL;
     }
 
-    dev = makedev(major_num, 0);
+    dev = makedev(major_num, minor);
 
     ret = mknod(dev_path, S_IFCHR|S_IRUSR|S_IWUSR, dev);
     if (!ret || (ret < 0 && errno == EEXIST)) {
+        // Likely case device major/minor changed on -EEXIST
+        // OR file system doesn't support creating char devices
+        // OR we are in a container/unpriv usernamespace etc..
         ret = open(dev_path, O_RDWR | O_CLOEXEC);
         if (ret < 0) {
             fprintf(stderr, "Unable to open(%s,O_RDWR| O_CLOEXEC) = %m\n",
@@ -107,6 +235,44 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
     }
 
     return ret;
+}
+
+void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump);
+int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
+{
+    int ret;
+    char buf[8192];
+    struct dynsec_task_dump *task_dump;
+
+    memset(buf, 'A', sizeof(buf));
+    task_dump = (struct dynsec_task_dump *)buf;
+    task_dump->hdr.size = sizeof(buf);
+    task_dump->hdr.pid = pid;
+    task_dump->hdr.opts = opts;
+
+    ret = ioctl(fd, DYNSEC_IOC_TASK_DUMP, task_dump);
+    if (ret < 0) {
+        fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d %m\n", ret);
+    }
+    else if (ret > 0) {
+        fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d\n", ret);
+    } else {
+        print_task_dump_event(fd, &task_dump->umsg);
+    }
+    return ret;
+}
+
+int request_to_dump_all_tasks(int fd, pid_t pid, uint16_t opts)
+{
+    struct dynsec_task_dump_all task_dump_all = {
+        .hdr = {
+            .size = sizeof(task_dump_all),
+            .pid = pid,
+            .opts = opts,
+        },
+    };
+
+    return ioctl(fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_all);
 }
 
 int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
@@ -153,18 +319,7 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
     return 0;
 }
 
-int request_to_dump_all_tasks(int fd, pid_t pid, uint16_t opts)
-{
-    struct dynsec_task_dump_all task_dump_all = {
-        .hdr = {
-            .size = sizeof(task_dump_all),
-            .pid = pid,
-            .opts = opts,
-        },
-    };
 
-    return ioctl(fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_all);
-}
 
 // Prints fields that are available given bitmap
 static void print_dynsec_file(struct dynsec_file *file)
@@ -683,28 +838,92 @@ void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
     }
 }
 
-int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
+bool pre_process_task_event(struct dynsec_task_umsg *task_msg)
 {
-    int ret;
-    char buf[8192];
-    struct dynsec_task_dump *task_dump;
+    bool is_trace_event = false;
 
-    memset(buf, 'A', sizeof(buf));
-    task_dump = (struct dynsec_task_dump *)buf;
-    task_dump->hdr.size = sizeof(buf);
-    task_dump->hdr.pid = pid;
-    task_dump->hdr.opts = opts;
+    if (is_tracing) {
+        if (task_msg->hdr.event_type == DYNSEC_EVENT_TYPE_EXIT) {
+            if (in_trace_list(task_msg->msg.task.pid, true)) {
+                is_trace_event = true;
+            }
+            if (is_empty_trace_list()) {
+                shutdown = true;
+                fprintf(stderr, "Shutting Down!\n");
+            }
+        } else if (task_msg->hdr.event_type == DYNSEC_EVENT_TYPE_CLONE) {
+            if (follow_progeny) {
+                if (in_trace_list(task_msg->msg.task.ppid, false)) {
+                    is_trace_event = true;
+                    insert_trace_list(task_msg->msg.task.pid);
+                }
+            }
+        }
+    }
+    return is_trace_event;
+}
 
-    ret = ioctl(fd, DYNSEC_IOC_TASK_DUMP, task_dump);
-    if (ret < 0) {
-        fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d %m\n", ret);
+static bool event_in_trace_list(struct dynsec_msg_hdr *hdr)
+{
+    if (!is_tracing) {
+        return false;
     }
-    else if (ret > 0) {
-        fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d\n", ret);
-    } else {
-        print_task_dump_event(fd, &task_dump->umsg);
+
+    switch (hdr->event_type)
+    {
+    case DYNSEC_EVENT_TYPE_EXEC:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_exec_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_UNLINK:
+    case DYNSEC_EVENT_TYPE_RMDIR:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_unlink_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_RENAME:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_rename_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_SETATTR:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_setattr_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_CREATE:
+    case DYNSEC_EVENT_TYPE_MKDIR:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_create_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_OPEN:
+    case DYNSEC_EVENT_TYPE_CLOSE:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_file_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_MMAP:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_mmap_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_LINK:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_link_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_SYMLINK:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_symlink_umsg *)hdr)->msg.task.pid, false);
+
+    case DYNSEC_EVENT_TYPE_PTRACE:
+        return in_trace_list(hdr->tid, false)
+            || in_trace_list(((struct dynsec_ptrace_umsg *)hdr)->msg.source.pid, false)
+            || in_trace_list(((struct dynsec_ptrace_umsg *)hdr)->msg.target.pid, false);
+
+    case DYNSEC_EVENT_TYPE_SIGNAL:
+        return in_trace_list(hdr->tid, false)
+            ||in_trace_list(((struct dynsec_signal_umsg *)hdr)->msg.source.pid, false)
+            || in_trace_list(((struct dynsec_signal_umsg *)hdr)->msg.target.pid, false);
+
+    default:
+        break;
     }
-    return ret;
+    return false;
 }
 
 // Event Structure
@@ -730,7 +949,14 @@ void read_events(int fd, const char *banned_path)
              .revents = 0,
         };
         int count = 0;
-        int ret = poll(&pollfd, 1, timeout_ms);
+        int ret;
+
+        if (shutdown) {
+            do_shutdown(fd);
+            break;
+        }
+
+        ret = poll(&pollfd, 1, timeout_ms);
 
         if (ret < 0) {
             fprintf(stderr, "poll(%m)\n");
@@ -743,6 +969,10 @@ void read_events(int fd, const char *banned_path)
         if (ret != 1 || !(pollfd.revents & POLLIN)) {
             fprintf(stderr, "poll ret:%d revents:%lx\n",
                     ret, pollfd.revents);
+            break;
+        }
+
+        if (shutdown) {
             break;
         }
 
@@ -759,8 +989,35 @@ void read_events(int fd, const char *banned_path)
 
         while (bytes_parsed < bytes_read)
         {
+            bool is_trace_event = false;
             count++;
             hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
+
+            if (is_tracing) {
+                is_trace_event = event_in_trace_list(hdr);
+
+                switch (hdr->event_type) {
+                case DYNSEC_EVENT_TYPE_CLONE:
+                case DYNSEC_EVENT_TYPE_EXIT:
+                    is_trace_event = pre_process_task_event((struct dynsec_task_umsg *)hdr);
+                    break;
+                default:
+                    break;
+                }
+
+                // if (in_trace_list(hdr->tid, false)) {
+                if (!is_trace_event) {
+                    if (hdr->report_flags & DYNSEC_REPORT_STALL) {
+                        respond_to_access_request(fd, hdr,
+                                                  DYNSEC_RESPONSE_ALLOW);
+                    }
+                    bytes_parsed += hdr->payload;
+                    continue;
+                }
+            }
+
+            // Would need to check specific event's task.pid in trace
+            // list to handle thread events.
             histo_event_type[hdr->event_type].total_events += 1;
             histo_event_type[hdr->event_type].total_bytes += hdr->payload;
 
@@ -791,6 +1048,10 @@ void read_events(int fd, const char *banned_path)
             print_event(fd, hdr, banned_path);
 
             bytes_parsed += hdr->payload;
+
+            if (shutdown) {
+                break;
+            }
         }
 
         // Increment total reads
@@ -805,33 +1066,19 @@ void read_events(int fd, const char *banned_path)
         if (max_parsed_per_read < count) {
             max_parsed_per_read = count;
         }
+        if (shutdown) {
+            break;
+        }
 
         // Observe bytes committed to
         memset(buf, 'A', bytes_read);
     }
-}
 
-// The reported events from these file operations
-// will tell if they need a response aka are stalled.
-static void *defer_rename(void *arg)
-{
-    int fd;
-    unsigned int sleep_time = 1;
-
-    sleep(sleep_time);
-    fd = open(".rename_test1", O_CREAT, 0755);
-    if (fd < 0) {
-        return NULL;
-    }
-    close(fd);
-    renameat(AT_FDCWD, ".rename_test1", AT_FDCWD, ".rename_test2");
-    unlink(".rename_test1");
-    unlink(".rename_test2");
-    return NULL;
+    do_shutdown(fd);
 }
 
 
-static void on_sig(int sig)
+static void dump_stats(void)
 {
     int i;
 
@@ -895,42 +1142,232 @@ static void on_sig(int sig)
     }
 }
 
-int main(int argc, const char *argv[])
+static void on_sig(int sig)
+{
+    int i;
+
+    shutdown = true;
+
+    for (i = 0; i < max_index; i++) {
+        if (!progeny[i]) {
+            continue;
+        }
+        fprintf(stderr, "%d %d\n",i, progeny[i]);
+    }
+}
+
+void usage(void)
+{
+    printf("dynsec_dev [-c|--cache <disable|all|greedy|excl|strict>]\n"
+           "[-q|--quiet] [-k|--kmod <kmod name>] [-f|--follow]\n"
+           "[-x|--exec] <path to exec> [args ...]]\n");
+}
+
+int parse_args(int argc, char *const *argv)
+{
+    static struct option long_options[] = {
+        {"debug", no_argument, 0, 'z'},
+        {"verbose", no_argument, 0, 'v'},
+        {"kmod", required_argument, 0, 'k'},
+        {"quiet", no_argument, 0, 'q'},
+        {"cache", required_argument, 0, 'c'},
+        {"follow", no_argument, 0, 'f'},
+        {"pid", required_argument, 0, 'p'},
+        {"dump-all", required_argument, 0, 'd'},
+        {"dump-one", required_argument, 0, 'o'},
+        {"exec", no_argument, 0, 'x'},
+#define OPT_STRING "zvk:qc:fp:d:o:x"
+        {NULL, 0, NULL, 0},
+    };
+
+    int option_index = 0;
+
+    while(1) {
+        int opt = getopt_long(argc, argv, OPT_STRING,
+                              long_options, &option_index);
+        if(-1 == opt) break;
+
+        switch(opt)
+        {
+        case 'z':
+            debug = true;
+            break;
+        case 'v':
+            verbosity += 1;
+            break;
+        case 'q':
+            quiet = 1;
+            verbosity = 0;
+            break;
+
+        case 'k': {
+            kmod_search_str = optarg;
+            // could easily change this to search for minor in misc_devices
+            major_num = find_device_major("/proc/devices", kmod_search_str);
+
+            if (major_num <= 0) {
+                printf("major:%d %s\n", major_num, kmod_search_str);
+                return -1;
+            }
+            break;
+        }
+
+        case 'c':
+            // On default to greedy caching
+            if (!optarg) {
+                default_cache_flags = DYNSEC_CACHE_DISABLE;
+            }
+            if (strcmp(optarg, "disable") == 0) {
+                default_cache_flags = DYNSEC_CACHE_DISABLE;
+            } else if (strcmp(optarg, "excl") == 0) {
+                default_cache_flags = DYNSEC_CACHE_ENABLE_EXCL;
+            } else if (strcmp(optarg, "strict") == 0) {
+                default_cache_flags = DYNSEC_CACHE_ENABLE_STRICT;
+            } else if (strcmp(optarg, "greedy") == 0 ||
+                       strcmp(optarg, "all") == 0) {
+                default_cache_flags = DYNSEC_CACHE_ENABLE;
+            } else {
+                printf("Invalid cache option: %s\n", optarg);
+                return -1;
+            }
+            break;
+
+        case 'f':
+            follow_progeny = true;
+            break;
+
+        case 'p': {
+            // unsigned long local_pid;
+
+            // Append to current trace list
+            // if follow is enabled, append descendents too?
+            // local_pid = strtoul(optarg, NULL, 10);
+            // if (local_pid == 0) return -1;
+            // if (errno == ERANGE &&
+            //     (local_pid == 0 || local_pid == ULONG_MAX)) {
+            //     return -1;
+            // }
+            // trace_pid = (pid_t)local_pid;
+            // is_tracing = true;
+            break;
+        }
+
+        // TODO: Dump only task lookups and exit.
+        case 'd': {
+            // if (optarg)
+            //     printf("dump-all: %s\n", optarg);
+
+            // unsigned long local_pid;
+
+            // Append to current trace list
+            // if follow is enabled, append descendents too?
+            // local_pid = strtoul(optarg, NULL, 10);
+            // if (local_pid == 0) return -1;
+            // if (errno == ERANGE &&
+            //     (local_pid == 0 || local_pid == ULONG_MAX)) {
+            //     return -1;
+            // }
+
+            // request_to_dump_all_tasks()
+            break;
+        }
+        case 'o':
+            // printf("dump-one: %s\n", optarg);
+            break;
+
+        case 'x':
+            is_tracing = true;
+            return optind;
+
+        case '?':
+            return -1;
+
+        default:
+            printf("Unknown option: %c\n", opt);
+            return -1;
+        }
+    }
+
+    return option_index;
+}
+
+void do_trace_fork(void)
+{
+    pid_t pid = fork();
+
+    switch (pid)
+    {
+    case -1:
+        exit(1);
+        break;
+
+    case 0:
+        is_child = true;
+        return;
+
+    default:
+        trace_pid = pid;
+        progeny[0] = pid;
+        max_index = 1;
+        break;
+    }
+}
+
+int main(int argc, char *const *argv)
 {
     int fd;
     const char *devpath;
     unsigned long major;
     pthread_t rename_tid;
     struct sigaction action;
+    int option_index;
 
-    if (argc < 3) {
-        fprintf(stderr, "Usage: %s <desired dev filename> <major dev num>\n", argv[0]);
+    memset(progeny, 0, sizeof(progeny));
+
+    option_index = parse_args(argc, argv);
+    printf("option_index:%d argc:%d\n", option_index, argc);
+
+    if (option_index < 0) {
+        usage();
         return 1;
     }
 
-    devpath = argv[1];
-    major = strtoul(argv[2], NULL, 0);
-
-    if (argc >= 4) {
-        int i;
-        for (i = 3; i < argc; i++) {
-            if (!argv[i]) {
-                break;
-            }
-            if (strcmp(argv[i], "-q") == 0 || strcmp(argv[i], "--quiet") == 0) {
-                quiet = 1;
-                continue;
-            }
-            if (strcmp(argv[i], "-a") == 0 || strcmp(argv[i], "--cache-all") == 0) {
-                default_cache_flags = DYNSEC_CACHE_ENABLE;
-                continue;
-            }
-        }
+    // Could look up minor if we change device type
+    if (!major_num && !minor_num) {
+        major_num = find_device_major("/proc/devices", kmod_search_str);
     }
 
-    fd = create_chrdev(major, 0, devpath);
+    if (major_num <= 0 && minor_num <= 0) {
+        fprintf(stderr, "Invalid device: %d:%d\n", major_num, minor_num);
+        usage();
+        return 1;
+    }
+
+    fd = create_chrdev(major_num, minor_num, kmod_search_str);
     if (fd < 0) {
-        return 255;
+        fprintf(stderr, "Unable to connect to %s: [%d,%d]\n",
+                kmod_search_str, major_num, minor_num);
+        exit(1);
+    }
+
+    // Trace mode has some limitations
+    //  - Proper exit count
+    //  - Some stats may be skewed due to discarding other events
+    if (is_tracing &&
+        option_index > 0 && option_index < argc) {
+        if (argv[option_index]) {
+            do_trace_fork();
+            if (is_child) {
+                int ret;
+                close(fd);
+                fd = -1;
+                ret = execvp(argv[option_index], argv + option_index);
+                fprintf(stderr, "Unabled to exec: %m\n");
+                exit(1);
+            } else {
+                printf("trace_pid: %u\n", progeny[0]);
+            }
+        }
     }
 
     histo_reads = malloc(sizeof(*histo_reads) * MAX_HISTO_SZ);
@@ -948,20 +1385,16 @@ int main(int argc, const char *argv[])
 
     memset(histo_event_type, 0, sizeof(histo_event_type));
 
-    // Example shows we report our own rename events but not stall
-    pthread_create(&rename_tid, NULL, defer_rename, NULL);
-    pthread_detach(rename_tid);
-
     // Rough an Dirty Catch sigint
     memset(&action, 0, sizeof(action));
     action.sa_handler = on_sig;
     sigaction(SIGINT, &action, NULL);
 
-    // Sends Task Dumps into event queue
-    request_to_dump_all_tasks(fd, 1, DUMP_NEXT_TGID);
+    // // Sends Task Dumps into event queue
+    // request_to_dump_all_tasks(fd, 1, DUMP_NEXT_TGID);
 
-    // Query for next thread/task directly
-    request_to_dump_task(fd, 1, DUMP_NEXT_THREAD);
+    // // Query for next thread/task directly
+    // request_to_dump_task(fd, 1, DUMP_NEXT_THREAD);
 
     // Bans filepaths containing "/foo.sh"
     read_events(fd, "/foo.sh");
