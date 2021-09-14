@@ -200,3 +200,5 @@ file (GLOB SRC_FILES
 #         CB_EVENT_DNS_RESPONSE
 #         SOURCE_FILES        ${SRC_FILES}
 # )
+
+add_subdirectory(examples)
