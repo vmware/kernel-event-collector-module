@@ -103,15 +103,16 @@ retry:
     pid = dynsec_find_ge_pid(local_tgid, ns);
     if (pid) {
         local_tgid = dynsec_pid_nr_ns(pid, ns);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
-        task = pid_task(pid, PIDTYPE_TGID);
-        if (!task) {
+// TODO: Find when PIDTYPE_TGID is really defined
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(3,10,0) || defined(RHEL_MAJOR) && RHEL_MAJOR == 8 && RHEL_MINOR == 0
+        task = pid_task(pid, PIDTYPE_PID);
+        if (!task || !has_group_leader_pid(task)) {
             local_tgid += 1;
             goto retry;
         }
 #else
-        task = pid_task(pid, PIDTYPE_PID);
-        if (!task || !has_group_leader_pid(task)) {
+        task = pid_task(pid, PIDTYPE_TGID);
+        if (!task) {
             local_tgid += 1;
             goto retry;
         }
