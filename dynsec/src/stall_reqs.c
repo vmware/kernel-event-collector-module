@@ -321,6 +321,10 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
             size_t size;
             ssize_t copied;
 
+            if (!capable(CAP_SYS_ADMIN)) {
+                return -EPERM;
+            }
+
             // Check if we want to directly reply back
             if (copy_from_user(&hdr,
                                (void *)arg, sizeof(hdr))) {
