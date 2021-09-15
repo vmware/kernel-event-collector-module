@@ -915,7 +915,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	FILE_DATA(&data)->flags = file->f_flags;
 	FILE_DATA(&data)->prot = file->f_mode;
 
-	if (type == EVENT_FILE_WRITE)
+	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
 		// This allows us to send the last-write event on file close
 		__track_write_entry(file, FILE_DATA(&data));
