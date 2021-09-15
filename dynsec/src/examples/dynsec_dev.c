@@ -43,6 +43,10 @@ static int minor_num = 0;
 static pid_t progeny[MAX_TRACK_PIDS];
 static int max_index = 0;
 static bool debug = false;
+// refer to MODULE_NAME_LEN in mount.h kernel
+// 256 is much larger than the 64 bytes module names are limited to
+#define MAX_KMOD_NAME_LEN 256
+static char kmod_name[MAX_KMOD_NAME_LEN];
 
 unsigned int largest_read = 0;
 int max_parsed_per_read = 0;
@@ -175,13 +179,15 @@ static bool in_trace_list(pid_t pid, bool remove)
     return false;
 }
 
-static int find_device_major(const char *proc_file, const char *kmod)
+static int find_device_major(const char *proc_file, const char *kmod_search_str)
 {
     FILE *fh = fopen(proc_file, "r");
     char *line = NULL;
     size_t len = 0;
     int major = -ENOENT;
-    char buf[256];
+    char buf[MAX_KMOD_NAME_LEN];
+
+    memset(kmod_name, 0, MAX_KMOD_NAME_LEN);
 
     if (!proc_file) {
         return -EINVAL;
@@ -197,8 +203,9 @@ static int find_device_major(const char *proc_file, const char *kmod)
         memset(buf, 0, sizeof(buf));
 
         sscanf(line, "%d %s", &local_major, buf);
-        if (strstr(buf, kmod)) {
+        if (strstr(buf, kmod_search_str)) {
             major = local_major;
+            strncpy(kmod_name, buf, MAX_KMOD_NAME_LEN -1);
             break;
         }
     }
@@ -215,23 +222,47 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
 {
     dev_t dev = 0;
     int ret;
+    struct stat sb;
+    bool reuse_device = false;
 
-    if (!dev_path) {
+    if (!dev_path || !*dev_path) {
         return -EINVAL;
     }
 
     dev = makedev(major_num, minor);
+    ret = stat(dev_path, &sb);
+    if (!ret) {
+        if (S_ISCHR(sb.st_mode)) {
+            if (sb.st_rdev == dev) {
+                reuse_device = true;
+            } else {
+                unlink(dev_path);
+            }
+        } else {
+            // Don't delete a regular file
+            fprintf(stderr, "Non chrdev file exists for: %s\n",
+                    dev_path);
+            return -EEXIST;
+        }
+    }
 
     ret = mknod(dev_path, S_IFCHR|S_IRUSR|S_IWUSR, dev);
     if (!ret || (ret < 0 && errno == EEXIST)) {
-        // Likely case device major/minor changed on -EEXIST
-        // OR file system doesn't support creating char devices
-        // OR we are in a container/unpriv usernamespace etc..
         ret = open(dev_path, O_RDWR | O_CLOEXEC);
         if (ret < 0) {
+            ret = -errno;
             fprintf(stderr, "Unable to open(%s,O_RDWR| O_CLOEXEC) = %m\n",
                     dev_path);
+        } else {
+            if (!reuse_device) {
+                unlink(dev_path);
+            }
         }
+    } else {
+        ret = -errno;
+        // Likely file system doesn't support creating char devices
+        // OR we are in a container/unpriv usernamespace etc..
+        // If in container, create externally and bind mount to container.
     }
 
     return ret;
@@ -241,9 +272,12 @@ void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump);
 int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
 {
     int ret;
-    char buf[8192];
+#define DUMP_STORAGE_SPACE 8192
+    char buf[DUMP_STORAGE_SPACE];
     struct dynsec_task_dump *task_dump;
 
+    // Fill in storage blob with 'A' for helpful debugging on dumps
+    // Storage space could be larger!!!
     memset(buf, 'A', sizeof(buf));
     task_dump = (struct dynsec_task_dump *)buf;
     task_dump->hdr.size = sizeof(buf);
@@ -1204,13 +1238,6 @@ int parse_args(int argc, char *const *argv)
 
         case 'k': {
             kmod_search_str = optarg;
-            // could easily change this to search for minor in misc_devices
-            major_num = find_device_major("/proc/devices", kmod_search_str);
-
-            if (major_num <= 0) {
-                printf("major:%d %s\n", major_num, kmod_search_str);
-                return -1;
-            }
             break;
         }
 
@@ -1345,11 +1372,16 @@ int main(int argc, char *const *argv)
         return 1;
     }
 
-    fd = create_chrdev(major_num, minor_num, kmod_search_str);
+    fd = create_chrdev(major_num, minor_num, kmod_name);
     if (fd < 0) {
-        fprintf(stderr, "Unable to connect to %s: [%d,%d]\n",
-                kmod_search_str, major_num, minor_num);
-        exit(1);
+        fprintf(stderr, "Unable to connect to %s: [%d,%d] ret:%d\n",
+                kmod_name, major_num, minor_num, fd);
+        fd = create_chrdev(major_num, minor_num, kmod_search_str);
+    }
+    if (fd < 0) {
+        fprintf(stderr, "Unable to connect to %s: [%d,%d] ret:%d\n",
+                kmod_search_str, major_num, minor_num, fd);
+        return 255;
     }
 
     // Trace mode has some limitations
