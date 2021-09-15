@@ -189,6 +189,10 @@ static int find_device_major(const char *proc_file, const char *kmod_search_str)
 
     memset(kmod_name, 0, MAX_KMOD_NAME_LEN);
 
+    if (!fh) {
+        return -EINTR;
+    }
+
     if (!proc_file) {
         return -EINVAL;
     }
