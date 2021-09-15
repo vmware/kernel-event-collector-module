@@ -26,7 +26,7 @@ ProcessTracking *ec_sorted_tracking_table_get_process(void *data, ProcessContext
 const char *ec_process_tracking_get_proc_name(const char *path);
 
 void ec_process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
-void ec_process_tracking_set_parent_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
+void ec_process_tracking_set_temp_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
 
 // #define _REF_DEBUGGING
 #ifdef _REF_DEBUGGING

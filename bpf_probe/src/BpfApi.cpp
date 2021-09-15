@@ -16,8 +16,16 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <chrono>
 
 using namespace cb_endpoint::bpf_probe;
+using namespace std::chrono;
+
+#define DEBUG_ORDER(BLOCK)
+//#define DEBUG_ORDER(BLOCK) BLOCK while(0)
+
+#define DEBUG_HARVEST(BLOCK)
+//#define DEBUG_HARVEST(BLOCK) BLOCK while(0)
 
 BpfApi::BpfApi()
     : m_BPF(nullptr)
@@ -173,7 +181,7 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
     // Trying 1024 pages so we don't drop so many events, no dropped
     // even callback for now.
     auto result = m_BPF->open_perf_buffer(
-            "events", on_perf_submit, nullptr, static_cast<void*>(this), 1024);
+            "events", on_perf_submit, on_perf_peek, nullptr, static_cast<void*>(this), 1024);
 
     if (!result.ok())
     {
@@ -183,14 +191,118 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
     return result.ok();
 }
 
-int BpfApi::PollEvents(int timeout_ms)
+int BpfApi::PollEvents()
 {
+    // This poll cycle will read events from all CPU perf buffers and call the event callback for each event in the buffer.
+    //  Each buffer is read until empty OR until the target timestamp is reached.  The probe will continue adding events to
+    //  the queues during this process.  Since new events could be added to CPU queues that have already been read, and
+    //  to queues yet to be read.  We could collect events in this pass that are "newer" than events in the CPU queue.
+    //
+    // To account for this we collect the events in a local list, sort them, check to queues again for any missed events
+    //  which are older than the last one we have, sort them again, and finally send them to the client.
+    //
+    // We use the peek callback to stop adding events to the local list if we reach the target timestamp.  Otherwise on a
+    //  really busy system we could collect so many events from one CPU that we have dificulty knowing exactly where to
+    //  stop sending events.
+    //
+    // Note: This logic requires patches to BCC to provide the peek callback and a force perfbuffer read.
+    //
+    // This article has a good writeup of the problems.
+    //   https://kinvolk.io/blog/2018/02/timing-issues-when-using-bpf-with-virtual-cpus/
+    // Here is a reference implementation of the fix.  (I used this as a reference, but developed my own solution.)
+    //  https://github.com/iovisor/gobpf/blob/65e4048660d6c4339ebae113ac55b1af6f01305d/elf/perf.go#L147
     if (!m_BPF)
     {
         return -1;
     }
 
-    return m_BPF->poll_perf_buffer("events", timeout_ms);
+    // Do we have events waiting to be sent from a previous read cycle
+    auto events_waiting = !m_event_list.empty();
+
+    if (m_did_leave_events)
+    {
+        // We left events on a CPU queue so we need to bypass the poll
+        m_did_leave_events = false;
+        m_BPF->read_perf_buffer("events");
+    }
+    else
+    {
+        auto timeout_ms = POLL_TIMEOUT_MS;
+        if (events_waiting)
+        {
+            // We had events waiting, so force a very short sleep to give the probe the probe a chance to finish submitting
+            //  events.  Also provide a very short timeout to the poll so that we don't hold onto events for very long.
+            usleep(500);
+            timeout_ms = 1;
+        }
+        m_did_leave_events = false;
+        auto result = m_BPF->poll_perf_buffer("events", timeout_ms);
+
+        if (result < 0)
+        {
+            return result;
+        }
+    }
+
+    // Were events collected during this pass?
+    //  This can be false even if events are available in the queuue since the peek function will cause us to stop reading
+    //  events once we reach the target delta.
+    auto collected_events = (m_event_count > 0);
+
+    if (!m_event_list.empty())
+    {
+        if (collected_events)
+        {
+            // If we collected events during this cycle, than sort the list
+            m_event_list.sort();
+            m_timestamp_last  = m_event_list.back().GetEventTime();
+
+            DEBUG_HARVEST({
+                fprintf(stderr, "sorted ");
+            });
+        }
+
+        DEBUG_HARVEST({
+            #define TF(A) ((A) ? "true" : "false")
+            fprintf(stderr, "%ld w:%s c:%s l:%s\n",
+                m_event_list.size(),
+                TF(events_waiting),
+                TF(collected_events),
+                TF(m_did_leave_events));
+        });
+
+        if (!collected_events)
+        {
+            // We have decided to harvest events.  We need to loop over all events in the list and send them to the target
+            for (auto & data: m_event_list)
+            {
+                // Leave this here for future debugging
+                DEBUG_ORDER({
+                     uint64_t event_time = data.GetEventTime();
+                     static uint64_t m_last_event_time = 0;
+                     if (event_time < m_last_event_time)
+                     {
+                         auto ns = nanoseconds(m_last_event_time - event_time);
+                         auto ms = duration_cast<milliseconds>(ns);
+                         ns = ns - duration_cast<nanoseconds>(ms);
+                         fprintf(stderr, "Event out of order (%ldms %ldns)\n",
+                                     ms.count(), ns.count());
+                     }
+                     m_last_event_time = event_time;
+                });
+
+                m_eventCallbackFn(std::move(data));
+
+            }
+
+            // Erase the events that we sent
+            m_event_list.clear();
+            m_timestamp_last  = 0;
+        }
+    }
+    m_event_count = 0;
+
+    return 0;
 }
 
 bool BpfApi::GetKptrRestrict(long &kptr_restrict_value)
@@ -260,11 +372,43 @@ void BpfApi::RaiseKptrRestrict()
     }
 }
 
+bool BpfApi::OnPeek(const bpf_probe::Data data)
+{
+    // This callback allows us to inspect the next event and signal BPF to stop reading from the current CPU queue
+    //  * Always continue reading if this is the first cycle after we have cleared the list because m_timestamp_last is
+    //    not valid.
+    //  * Otherwise stop reading from this CPU if the event time is greater than the last timestamp.
+    auto keep_collecting =  (!m_timestamp_last || (data.GetEventTime() <= m_timestamp_last));
+
+    m_did_leave_events |= !keep_collecting;
+
+    return keep_collecting;
+}
+
+void BpfApi::OnEvent(bpf_probe::Data data)
+{
+    // Keep a count of the events we capture during this poll cycle
+    ++m_event_count;
+
+    // Add the event to our internal event list
+    m_event_list.emplace_back(std::move(data));
+}
+
+bool BpfApi::on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size)
+{
+    auto bpfApi = static_cast<BpfApi*>(cb_cookie);
+    if (bpfApi)
+    {
+        return bpfApi->OnPeek(static_cast<bpf_probe::data *>(data));
+    }
+    return false;
+}
+
 void BpfApi::on_perf_submit(void *cb_cookie, void *data, int data_size)
 {
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
     if (bpfApi)
     {
-        bpfApi->m_eventCallbackFn(static_cast<struct data *>(data));
+        bpfApi->OnEvent(static_cast<bpf_probe::data *>(data));
     }
 }

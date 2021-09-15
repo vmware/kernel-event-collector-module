@@ -82,12 +82,14 @@
 //   while the old version returns 0 on success.  Some of the logic we use does depend on the non-zero result
 //   (described later).
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0)
+#define FLAG_TRUNCATED_ARG_BEHAVIOR
 static long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr)
 {
 	bpf_probe_read(dst, size, unsafe_ptr);
 	return MAX_FNAME;
 }
 #else
+#define FLAG_EXTENDED_ARG_BEHAVIOR
 #define cb_bpf_probe_read_str bpf_probe_read_str
 #endif
 
@@ -242,6 +244,7 @@ static void send_event(
 	void           *data,
 	size_t          data_size)
 {
+    ((struct data*)data)->header.event_time = bpf_ktime_get_ns();
 	events.perf_submit(ctx, data, data_size);
 }
 
@@ -400,7 +403,6 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
 {
 	header->type = type;
 	header->state = state;
-	header->event_time = bpf_ktime_get_ns();
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 	if (task) {
@@ -474,6 +476,42 @@ static u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
 #define MAXARG 20
 #endif
 
+// All arguments will be capped at MAX_FNAME bytes per argument
+// (This is deliberately defined as a separate version of the function to cut down on the number
+// of instructions needed, as older kernels have stricter limitations on the max count of the probe insns)
+#ifdef FLAG_TRUNCATED_ARG_BEHAVIOR
+static void submit_all_args(struct pt_regs *ctx,
+                            const char __user *const __user *_argv,
+                            struct path_data *data)
+{
+    void *argp = NULL;
+    int index = 0;
+    
+#pragma unroll
+    for (int i = 0; i < MAXARG; i++) {
+        data->header.state = PP_ENTRY_POINT;
+        bpf_probe_read(&argp, sizeof(argp), &_argv[index++]);
+        if (!argp) {
+            // We have reached the last arg so bail out
+            goto out;
+        }
+
+        __submit_arg(ctx, argp, data);
+    }
+
+    // handle truncated argument list
+    char ellipsis[] = "...";
+    __submit_arg(ctx, (void *)ellipsis, data);
+
+out:
+    data->header.state = PP_FINALIZED;
+    send_event(ctx, (struct data*)data, sizeof(struct data));
+
+    return;
+}
+#endif
+
+#ifdef FLAG_EXTENDED_ARG_BEHAVIOR
 // PSCLNX-6764 - Improve EXEC event performance
 //  This logic should be refactored to write the multiple args into a single
 //  event buffer instead of one event per arg.
@@ -527,6 +565,7 @@ out:
 
 	return;
 }
+#endif
 
 #ifndef MAX_PATH_ITER
 #define MAX_PATH_ITER 24
