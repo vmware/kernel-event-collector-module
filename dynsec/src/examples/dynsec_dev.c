@@ -109,8 +109,6 @@ static void dump_stats(void);
 static void do_shutdown(int fd)
 {
     close(fd);
-    fd = -1;
-
     dump_stats();
 }
 
@@ -1038,6 +1036,12 @@ void read_events(int fd, const char *banned_path)
                 case DYNSEC_EVENT_TYPE_CLONE:
                 case DYNSEC_EVENT_TYPE_EXIT:
                     is_trace_event = pre_process_task_event((struct dynsec_task_umsg *)hdr);
+                    // Disconnect client to clear up kmod queue
+                    // But continue processing this last chunk of events
+                    if (shutdown) {
+                        close(fd);
+                        fd = -1;
+                    }
                     break;
                 default:
                     break;
