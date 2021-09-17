@@ -45,7 +45,8 @@ namespace bpf_probe {
         EVENT_NET_CONNECT_DNS_RESPONSE,
         EVENT_NET_CONNECT_WEB_PROXY,
         EVENT_FILE_DELETE,
-        EVENT_FILE_CLOSE
+        EVENT_FILE_CLOSE,
+        EVENT_FILE_RENAME
     };
 
     struct data_header {
@@ -111,5 +112,12 @@ namespace bpf_probe {
 
         char dns[DNS_SEGMENT_LEN];
         uint32_t name_len;
+    };
+
+    struct rename_data {
+        struct data_header header;
+
+        uint64_t old_inode, new_inode;
+        uint32_t old_device, new_device;
     };
 }}
