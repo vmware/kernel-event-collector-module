@@ -110,6 +110,7 @@ namespace bpf_probe {
             case EVENT_NET_CONNECT_WEB_PROXY: str = "NET_CONNECT_WEB_PROXY"; break;
             case EVENT_FILE_DELETE: str = "FILE_DELETE"; break;
             case EVENT_FILE_CLOSE: str = "FILE_CLOSE"; break;
+            case EVENT_FILE_RENAME: str = "FILE_RENAME"; break;
             default: break;
             }// LCOV_EXCL_END
             return str;
