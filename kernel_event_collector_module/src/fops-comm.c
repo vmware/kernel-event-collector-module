@@ -458,6 +458,8 @@ bool __ec_try_to_gain_capacity(struct list_head *tx_queue)
         LIST_HEAD(tempList);
         struct list_head *eventNode;
         uint64_t           events_to_move = qlen_pri1 / 2;
+        const unsigned int overrun_log_frequency = 1000;
+        static unsigned int overrun_count;
 
         // Update the counters to reflect that we moved some events
         //  We set the holdoff to three times what we moved
@@ -466,7 +468,11 @@ bool __ec_try_to_gain_capacity(struct list_head *tx_queue)
         atomic64_add(events_to_move, &tx_ready_pri0);
         atomic64_sub(events_to_move, &tx_ready_pri1);
 
-        TRACE(DL_WARNING, "P1 Queue Overrun detected, moving %llu events to P0.  Will holdoff for at least %llu events.", events_to_move, pri1_holdoff);
+        if (overrun_count++ % overrun_log_frequency == 0) {
+            TRACE(DL_WARNING,
+                  "P1 queue full, moving %llu events to P0.  Will holdoff for at least %llu events (count=%u).",
+                  events_to_move, pri1_holdoff, overrun_count);
+        }
 
         // We need to iterate over the P1 queue from the beginning to find the point
         //  where we want to split the queue.
