@@ -23,10 +23,40 @@
 
 #include "dynsec.h"
 
+struct prx_cache {
+    int tail;
+    int size;
+    int last_seen;
+    int max_size;
+    unsigned long long total_stored;
+    unsigned long long total_evicted;
+    unsigned long long total_fast_path_hits;
+    unsigned long long total_slow_path_hits;
+    unsigned long long total_not_found;
+#define MAX_PRX_CACHE_SZ 256
+    struct dynsec_msg_hdr **buf;
+};
+
+struct prx_cache *prx_cache_alloc(int size);
+void prx_cache_free(struct prx_cache *cache);
+bool prx_cache_enqueue(struct prx_cache *cache,
+                       const struct dynsec_msg_hdr *hdr);
+int prx_cache_find(struct prx_cache *cache,
+                   pid_t tid, uint64_t intent_req_id,
+                   struct dynsec_msg_hdr **hdr);
+void prx_cache_stats(const struct prx_cache *cache, FILE *fh);
+
+
+struct local_dynsec_event {
+    struct dynsec_msg_hdr *hdr;
+    struct dynsec_msg_hdr *intent;
+};
+
 #ifndef FMODE_EXEC
 #define FMODE_EXEC 0x20
 #endif
 
+#define MAX_VERBOSE_LEVEL 3
 static int verbosity = 0;
 static int quiet = 0;
 static int quiet_open_events = 1;
@@ -47,6 +77,8 @@ static bool debug = false;
 // 256 is much larger than the 64 bytes module names are limited to
 #define MAX_KMOD_NAME_LEN 256
 static char kmod_name[MAX_KMOD_NAME_LEN];
+static bool merge = true;
+struct prx_cache *prx_cache = NULL;
 
 unsigned int largest_read = 0;
 int max_parsed_per_read = 0;
@@ -110,6 +142,9 @@ static void do_shutdown(int fd)
 {
     close(fd);
     dump_stats();
+    prx_cache_stats(prx_cache, stderr);
+    prx_cache_free(prx_cache);
+    prx_cache = NULL;
 }
 
 static bool is_empty_trace_list(void)
@@ -192,6 +227,10 @@ static int find_device_major(const char *proc_file, const char *kmod_search_str)
     }
 
     if (!proc_file) {
+        if (fh) {
+            fclose(fh);
+            fh = NULL;
+        }
         return -EINVAL;
     }
 
@@ -210,6 +249,11 @@ static int find_device_major(const char *proc_file, const char *kmod_search_str)
             strncpy(kmod_name, buf, MAX_KMOD_NAME_LEN -1);
             break;
         }
+    }
+
+    if (fh) {
+        fclose(fh);
+        fh = NULL;
     }
 
     if (line) {
@@ -270,13 +314,14 @@ static int create_chrdev(unsigned int major_num, unsigned int minor,
     return ret;
 }
 
-void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump);
+void print_task_dump_event(int fd, struct local_dynsec_event *event);
 int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
 {
     int ret;
 #define DUMP_STORAGE_SPACE 8192
     char buf[DUMP_STORAGE_SPACE];
     struct dynsec_task_dump *task_dump;
+
 
     // Fill in storage blob with 'A' for helpful debugging on dumps
     // Storage space could be larger!!!
@@ -293,7 +338,12 @@ int request_to_dump_task(int fd, pid_t pid, uint16_t opts)
     else if (ret > 0) {
         fprintf(stderr, "ioctl(DYNSEC_IOC_TASK_DUMP) = %d\n", ret);
     } else {
-        print_task_dump_event(fd, &task_dump->umsg);
+        struct local_dynsec_event event = {
+            .hdr = (struct dynsec_msg_hdr *)&task_dump->umsg,
+            .intent = NULL,
+        };
+
+        print_task_dump_event(fd, &event);
     }
     return ret;
 }
@@ -358,16 +408,36 @@ int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
 
 
 // Prints fields that are available given bitmap
-static void print_dynsec_file(struct dynsec_file *file)
+static void print_dynsec_file(struct dynsec_file *file,
+                              struct dynsec_file *intent)
 {
+    // Regular event takes priority on DYNSEC_FILE_ATTR_INODE and
+    // DYNSEC_FILE_ATTR_PARENT_DEVICE.
     if (file->attr_mask & DYNSEC_FILE_ATTR_INODE) {
         printf(" ino:%llu uid:%u gid:%u umode:%#o size:%u", file->ino,
                 file->uid, file->gid, file->umode, file->size);
+    } else if (intent && (intent->attr_mask & DYNSEC_FILE_ATTR_INODE)) {
+        printf(" ino:%llu uid:%u gid:%u umode:%#o size:%u", intent->ino,
+                intent->uid, intent->gid, intent->umode, intent->size);
     }
     if (file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
         printf(" dev:%#x sb_magic:%#llx", file->dev, file->sb_magic);
+    } else if (intent && (intent->attr_mask & DYNSEC_FILE_ATTR_DEVICE)) {
+        printf(" i-dev:%#x i-sb_magic:%#llx", intent->dev, intent->sb_magic);
     }
-    if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
+
+    // Intent takes priority on DYNSEC_FILE_ATTR_PARENT_INODE and
+    // DYNSEC_FILE_ATTR_PARENT_DEVICE.
+    if (intent && (intent->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE)) {
+        printf(" i-parent[ino:%llu uid:%u gid:%u umode:%#o", intent->parent_ino,
+               intent->parent_uid, intent->parent_gid, intent->parent_umode);
+        if (intent->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
+            printf(" dev:%#x", intent->parent_dev);
+        }
+        printf("]");
+    } else if (intent && (intent->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE)) {
+        printf(" i-parent[dev:%#x]", intent->parent_dev);
+    } else if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_INODE) {
         printf(" parent[ino:%llu uid:%u gid:%u umode:%#o", file->parent_ino,
                file->parent_uid, file->parent_gid, file->parent_umode);
         if (file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE) {
@@ -379,11 +449,14 @@ static void print_dynsec_file(struct dynsec_file *file)
     }
 }
 
-static void print_path(const char *start, struct dynsec_file *file)
+static void print_path(const char *start, struct dynsec_file *file,
+                       const char *intent_start, struct dynsec_file *intent)
 {
     if (file->path_offset) {
         const char *path = start + file->path_offset;
         const char *path_type = "";
+        const char *intent_path = NULL;
+        const char *intent_path_type = "";
 
         if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) {
             path_type = "fullpath";
@@ -392,7 +465,29 @@ static void print_path(const char *start, struct dynsec_file *file)
         } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_RAW) {
             path_type = "rawpath";
         }
-        printf(" %s:'%s'", path_type, path);
+
+        if (intent && intent_start && intent->path_offset) {
+            intent_path = intent_start + intent->path_offset;
+            if (intent->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) {
+                intent_path_type = "i-fullpath";
+            }   else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_DENTRY) {
+                intent_path_type = "i-dentrypath";
+            } else if (file->attr_mask & DYNSEC_FILE_ATTR_PATH_RAW) {
+                intent_path_type = "i-rawpath";
+            }
+        }
+
+        // Select the intent's path if the regular event's
+        // path is weaker.
+        if (!(file->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) &&
+            intent_path && (intent->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL)) {
+            printf(" %s:'%s", intent_path_type, intent_path);
+            if (debug) {
+                printf(" %s:'%s'", path_type, path);
+            }
+        } else {
+            printf(" %s:'%s'", path_type, path);
+        }
     }
 }
 
@@ -424,9 +519,10 @@ static void print_task_ctx(struct dynsec_task_ctx *task_ctx)
     }
 }
 
-void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *banned_path)
+void print_exec_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_exec_umsg *exec_msg = (struct dynsec_exec_umsg *)event->hdr;
     const char *path = "";
     const char *ev_str = "EXEC";
     const char *start = (const char *)exec_msg;
@@ -437,13 +533,6 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
     }
 
     // Ban some matching substring
-    if (exec_msg->hdr.report_flags & DYNSEC_REPORT_STALL) {
-        if (banned_path && *banned_path && path && *path &&
-            strstr(path, banned_path)) {
-            response = DYNSEC_RESPONSE_EPERM;
-            ev_str = "EXEC DENIED:";
-        }
-    }
     if (exec_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &exec_msg->hdr, response);
 
@@ -452,17 +541,20 @@ void print_exec_event(int fd, struct dynsec_exec_umsg *exec_msg, const char *ban
     printf("%s%s: tid:%u mnt_ns:%u req_id:%llu ", ev_str, intent_str,
            exec_msg->hdr.tid, exec_msg->msg.task.mnt_ns,
            exec_msg->hdr.req_id);
-    print_dynsec_file(&exec_msg->msg.file);
-    print_path(start, &exec_msg->msg.file);
+    print_dynsec_file(&exec_msg->msg.file, NULL);
+    print_path(start, &exec_msg->msg.file, NULL, NULL);
     printf("\n");
 }
 
-void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
+void print_unlink_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_unlink_umsg *unlink_msg = (struct dynsec_unlink_umsg *)event->hdr;
+    struct dynsec_unlink_umsg *intent = NULL;
     const char *ev_str = "UNLINK";
     const char *start = (const char *)unlink_msg;
     const char *intent_str = "";
+    const char *intent_start = NULL;
 
     if (unlink_msg->hdr.event_type == DYNSEC_EVENT_TYPE_RMDIR)
         ev_str = "RMDIR";
@@ -476,6 +568,16 @@ void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
         intent_str = "-INTENT";
     }
 
+    if (event->intent) {
+        if (event->intent->event_type == DYNSEC_EVENT_TYPE_UNLINK ||
+            event->intent->event_type == DYNSEC_EVENT_TYPE_RMDIR) {
+            intent = (struct dynsec_unlink_umsg *)event->intent;
+            intent_start = (const char *)event->intent;
+        } else if (debug) {
+            fprintf(stderr, "Wrong intent type!\n");
+        }
+    }
+
     printf("%s%s: tid:%u mnt_ns:%u req_id:%llu", ev_str, intent_str,
            unlink_msg->hdr.tid, unlink_msg->msg.task.mnt_ns,
            unlink_msg->hdr.req_id);
@@ -483,16 +585,21 @@ void print_unlink_event(int fd, struct dynsec_unlink_umsg *unlink_msg)
     if (unlink_msg->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
         printf(" intent_req_id:%llu", unlink_msg->hdr.intent_req_id);
     }
-    print_dynsec_file(&unlink_msg->msg.file);
-    print_path(start, &unlink_msg->msg.file);
+    print_dynsec_file(&unlink_msg->msg.file,
+                      intent ? &intent->msg.file: NULL);
+    print_path(start, &unlink_msg->msg.file,
+               intent_start, intent ? &intent->msg.file: NULL);
     printf("\n");
 }
 
-void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
+void print_rename_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_rename_umsg *rename_msg = (struct dynsec_rename_umsg *)event->hdr;
+    struct dynsec_rename_umsg *intent = NULL;
     const char *start = (const char *)rename_msg;
     const char *intent_str = "";
+    const char *intent_start = NULL;
 
     if (rename_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &rename_msg->hdr, response);
@@ -503,6 +610,15 @@ void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
         intent_str = "-INTENT";
     }
 
+    if (event->intent) {
+        if (event->intent->event_type == DYNSEC_EVENT_TYPE_RENAME) {
+            intent = (struct dynsec_rename_umsg *)event->intent;
+            intent_start = (const char *)event->intent;
+        } else if (debug) {
+            fprintf(stderr, "Wrong intent type!\n");
+        }
+    }
+
     printf("RENAME%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
            rename_msg->hdr.tid, rename_msg->msg.task.mnt_ns,
            rename_msg->hdr.req_id);
@@ -511,21 +627,27 @@ void print_rename_event(int fd, struct dynsec_rename_umsg *rename_msg)
         printf(" intent_req_id:%llu", rename_msg->hdr.intent_req_id);
     }
     printf(" OLD{");
-    print_dynsec_file(&rename_msg->msg.old_file);
-    print_path(start, &rename_msg->msg.old_file);
+    print_dynsec_file(&rename_msg->msg.old_file,
+                      intent ? &intent->msg.old_file: NULL);
+    print_path(start, &rename_msg->msg.old_file,
+               intent_start, intent ? &intent->msg.old_file: NULL);
     printf("} -> NEW{");
-    print_dynsec_file(&rename_msg->msg.new_file);
-    print_path(start, &rename_msg->msg.new_file);
+    print_dynsec_file(&rename_msg->msg.new_file,
+                      intent ? &intent->msg.new_file: NULL);
+    print_path(start, &rename_msg->msg.new_file,
+               intent_start, intent ? &intent->msg.new_file: NULL);
     printf("}\n");
 }
 
-void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
+void print_setattr_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_setattr_umsg *setattr = (struct dynsec_setattr_umsg *)event->hdr;
+    struct dynsec_setattr_umsg *intent = NULL;
     const char *path = "";
     const char *start = (const char *)setattr;
-    const char *path_type = "";
     const char *intent_str = "";
+    const char *intent_start = NULL;
 
     if (setattr->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &setattr->hdr, response);
@@ -534,6 +656,16 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
 
     if (setattr->hdr.report_flags & DYNSEC_REPORT_INTENT) {
         intent_str = "-INTENT";
+    }
+
+    if (event->intent) {
+        // May want to compare attr_mask too?
+        if (event->intent->event_type == DYNSEC_EVENT_TYPE_SETATTR) {
+            intent = (struct dynsec_setattr_umsg *)event->intent;
+            intent_start = (const char *)event->intent;
+        } else if (debug) {
+            fprintf(stderr, "Wrong intent type!\n");
+        }
     }
 
     printf("SETATTR%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
@@ -564,20 +696,25 @@ void print_setattr_event(int fd, struct dynsec_setattr_umsg *setattr)
                     "open(O_TRUNC)" : "truncate()");
     }
 
-    print_dynsec_file(&setattr->msg.file);
-    print_path(start, &setattr->msg.file);
+    print_dynsec_file(&setattr->msg.file,
+                      intent ? &intent->msg.file: NULL);
+    print_path(start, &setattr->msg.file,
+               intent_start, intent ? &intent->msg.file: NULL);
     printf("\n");
 }
 
 
 
-void print_create_event(int fd, struct dynsec_create_umsg *create)
+void print_create_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_create_umsg *create = (struct dynsec_create_umsg *)event->hdr;
+    struct dynsec_create_umsg *intent = NULL;
     const char *path = "";
     const char *ev_str = "CREATE";
     const char *intent_str = "";
     const char *start = (const char *)create;
+    const char *intent_start = NULL;
 
     if (create->hdr.event_type == DYNSEC_EVENT_TYPE_MKDIR)
         ev_str = "MDKIR";
@@ -595,22 +732,37 @@ void print_create_event(int fd, struct dynsec_create_umsg *create)
 
     if (quiet) return;
 
+    if (event->intent) {
+        if (event->intent->event_type == DYNSEC_EVENT_TYPE_CREATE ||
+            event->intent->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
+            intent = (struct dynsec_create_umsg *)event->intent;
+            intent_start = (const char *)event->intent;
+        } else if (debug) {
+            fprintf(stderr, "Wrong intent type!\n");
+        }
+    }
+
     printf("%s%s: tid:%u mnt_ns:%u req_id:%llu", ev_str, intent_str,
            create->hdr.tid, create->msg.task.mnt_ns, create->hdr.req_id);
     if (create->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
         printf(" intent_req_id:%llu", create->hdr.intent_req_id);
     }
-    print_dynsec_file(&create->msg.file);
-    print_path(start, &create->msg.file);
+
+    print_dynsec_file(&create->msg.file,
+                      intent ? &intent->msg.file: NULL);
+    print_path(start, &create->msg.file,
+               intent_start, intent ? &intent->msg.file: NULL);
     printf("\n");
 }
 
-void print_open_event(int fd, struct dynsec_file_umsg *file)
+void print_open_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_file_umsg *file = (struct dynsec_file_umsg *)event->hdr;
     const char *path = "";
     const char *ev_str = "OPEN";
     const char *start = (const char *)file;
+    const char *intent_start = NULL;
 
     if (file->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &file->hdr, response);
@@ -632,9 +784,10 @@ void print_open_event(int fd, struct dynsec_file_umsg *file)
         file->msg.task.uid, path);
 }
 
-void print_mmap_event(int fd, struct dynsec_mmap_umsg *mmap)
+void print_mmap_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_mmap_umsg *mmap = (struct dynsec_mmap_umsg *)event->hdr;
     const char *path = "";
     const char *ev_str = "MMAP";
     const char *start = (const char *)mmap;
@@ -665,11 +818,14 @@ void print_mmap_event(int fd, struct dynsec_mmap_umsg *mmap)
            mmap->msg.task.mnt_ns, mmap->msg.file.sb_magic, mmap->msg.task.uid);
 }
 
-void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
+void print_link_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_link_umsg *link_msg = (struct dynsec_link_umsg *)event->hdr;
+    struct dynsec_link_umsg *intent = NULL;
     const char *start = (const char *)link_msg;
     const char *intent_str = "";
+    const char *intent_start = NULL;
 
     if (link_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &link_msg->hdr, response);
@@ -680,6 +836,15 @@ void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
         intent_str = "-INTENT";
     }
 
+    if (event->intent) {
+        if (event->intent->event_type == DYNSEC_EVENT_TYPE_LINK) {
+            intent = (struct dynsec_link_umsg *)event->intent;
+            intent_start = (const char *)event->intent;
+        } else if (debug) {
+            fprintf(stderr, "Wrong intent type!\n");
+        }
+    }
+
     printf("LINK%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
            link_msg->hdr.tid, link_msg->msg.task.mnt_ns,
            link_msg->hdr.req_id);
@@ -688,20 +853,27 @@ void print_link_event(int fd, struct dynsec_link_umsg *link_msg)
         printf(" intent_req_id:%llu", link_msg->hdr.intent_req_id);
     }
     printf(" OLD{");
-    print_dynsec_file(&link_msg->msg.old_file);
-    print_path(start, &link_msg->msg.old_file);
+    print_dynsec_file(&link_msg->msg.old_file,
+                      intent ? &intent->msg.old_file: NULL);
+    print_path(start, &link_msg->msg.old_file,
+               intent_start, intent ? &intent->msg.old_file: NULL);
     printf("} -> NEW{");
-    print_dynsec_file(&link_msg->msg.new_file);
-    print_path(start, &link_msg->msg.new_file);
+    print_dynsec_file(&link_msg->msg.new_file,
+                      intent ? &intent->msg.new_file: NULL);
+    print_path(start, &link_msg->msg.new_file,
+               intent_start, intent ? &intent->msg.new_file: NULL);
     printf("}\n");
 }
 
-void print_symlink_event(int fd, struct dynsec_symlink_umsg *symlink)
+void print_symlink_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_symlink_umsg *symlink = (struct dynsec_symlink_umsg *)event->hdr;
+    struct dynsec_symlink_umsg *intent = NULL;
     const char *intent_str = "";
     const char *target_path = "";
     const char *start = (const char *)symlink;
+    const char *intent_start = NULL;
 
     if (symlink->hdr.report_flags & DYNSEC_REPORT_STALL)
         respond_to_access_request(fd, &symlink->hdr, response);
@@ -715,19 +887,31 @@ void print_symlink_event(int fd, struct dynsec_symlink_umsg *symlink)
         intent_str = "-INTENT";
     }
 
+    if (event->intent) {
+        if (event->intent->event_type == DYNSEC_EVENT_TYPE_LINK) {
+            intent = (struct dynsec_symlink_umsg *)event->intent;
+            intent_start = (const char *)event->intent;
+        } else if (debug) {
+            fprintf(stderr, "Wrong intent type!\n");
+        }
+    }
+
     printf("SYMLINK%s: tid:%u mnt_ns:%u req_id:%llu", intent_str,
            symlink->hdr.tid, symlink->msg.task.mnt_ns, symlink->hdr.req_id);
     if (symlink->hdr.report_flags & DYNSEC_REPORT_INTENT_FOUND) {
         printf(" intent_req_id:%llu", symlink->hdr.intent_req_id);
     }
-    print_dynsec_file(&symlink->msg.file);
-    print_path(start, &symlink->msg.file);
+    print_dynsec_file(&symlink->msg.file,
+                      intent ? &intent->msg.file : NULL);
+    print_path(start, &symlink->msg.file,
+               intent_start, intent ? &intent->msg.file : NULL);
     printf(" -> target:'%s'\n", target_path);
 }
 
-void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
+void print_task_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_task_umsg *task_msg = (struct dynsec_task_umsg *)event->hdr;
     const char *ev_str = "EXIT";
     const char *start = (const char *)task_msg;
 
@@ -749,9 +933,10 @@ void print_task_event(int fd, struct dynsec_task_umsg *task_msg)
     printf("\n");
 }
 
-void print_ptrace_event(int fd, struct dynsec_ptrace_umsg *ptrace)
+void print_ptrace_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_ptrace_umsg *ptrace = (struct dynsec_ptrace_umsg *)event->hdr;
 
     if (ptrace->hdr.report_flags & DYNSEC_REPORT_STALL) {
         respond_to_access_request(fd, &ptrace->hdr, response);
@@ -766,9 +951,10 @@ void print_ptrace_event(int fd, struct dynsec_ptrace_umsg *ptrace)
     printf("}\n");
 }
 
-void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
+void print_signal_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_signal_umsg *signal = (struct dynsec_signal_umsg *)event->hdr;
 
     if (signal->hdr.report_flags & DYNSEC_REPORT_STALL) {
         respond_to_access_request(fd, &signal->hdr, response);
@@ -783,9 +969,10 @@ void print_signal_event(int fd, struct dynsec_signal_umsg *signal)
     printf("}\n");
 }
 
-void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump)
+void print_task_dump_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
+    struct dynsec_task_dump_umsg *task_dump = (struct dynsec_task_dump_umsg *)event->hdr;
     const char *start = (const char *)task_dump;
 
     if (task_dump->hdr.report_flags & DYNSEC_REPORT_STALL) {
@@ -796,80 +983,84 @@ void print_task_dump_event(int fd, struct dynsec_task_dump_umsg *task_dump)
 
     printf("TASK_DUMP: ");
     print_task_ctx(&task_dump->msg.task);
-    print_dynsec_file(&task_dump->msg.exec_file);
-    print_path(start, &task_dump->msg.exec_file);
+    print_dynsec_file(&task_dump->msg.exec_file, NULL);
+    print_path(start, &task_dump->msg.exec_file, NULL, NULL);
     printf("\n");
 }
 
-void print_event(int fd, struct dynsec_msg_hdr *hdr, const char *banned_path)
+void print_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
 
-    switch (hdr->event_type) {
+    if (!event || !event->hdr) {
+        return;
+    }
+
+    switch (event->hdr->event_type) {
     case DYNSEC_EVENT_TYPE_EXEC:
-        print_exec_event(fd, (struct dynsec_exec_umsg *)hdr, banned_path);
+        print_exec_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_UNLINK:
     case DYNSEC_EVENT_TYPE_RMDIR:
-        print_unlink_event(fd, (struct dynsec_unlink_umsg *)hdr);
+        print_unlink_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_RENAME:
-        print_rename_event(fd, (struct dynsec_rename_umsg *)hdr);
+        print_rename_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_SETATTR:
-        print_setattr_event(fd, (struct dynsec_setattr_umsg *)hdr);
+        print_setattr_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_CREATE:
     case DYNSEC_EVENT_TYPE_MKDIR:
-        print_create_event(fd, (struct dynsec_create_umsg *)hdr);
+        print_create_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_OPEN:
     case DYNSEC_EVENT_TYPE_CLOSE:
-        print_open_event(fd, (struct dynsec_file_umsg *)hdr);
+        print_open_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_MMAP:
-        print_mmap_event(fd, (struct dynsec_mmap_umsg *)hdr);
+        print_mmap_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_LINK:
-        print_link_event(fd, (struct dynsec_link_umsg *)hdr);
+        print_link_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_SYMLINK:
-        print_symlink_event(fd, (struct dynsec_symlink_umsg *)hdr);
+        print_symlink_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_CLONE:
     case DYNSEC_EVENT_TYPE_EXIT:
-        print_task_event(fd, (struct dynsec_task_umsg *)hdr);
+        print_task_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_PTRACE:
-        print_ptrace_event(fd, (struct dynsec_ptrace_umsg *)hdr);
+        print_ptrace_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_SIGNAL:
-        print_signal_event(fd, (struct dynsec_signal_umsg *)hdr);
+        print_signal_event(fd, event);
         break;
 
     case DYNSEC_EVENT_TYPE_TASK_DUMP:
-        print_task_dump_event(fd, (struct dynsec_task_dump_umsg *)hdr);
+        print_task_dump_event(fd, event);
         break;
 
     default:
-        if (hdr->report_flags & DYNSEC_REPORT_STALL) {
-            respond_to_access_request(fd, hdr, response);
+        if (event->hdr->report_flags & DYNSEC_REPORT_STALL) {
+            respond_to_access_request(fd, event->hdr, response);
         }
         if (quiet)
             break;
         printf("UNKNOWN: hdr->tid:%u hdr->payload:%u hdr->req_id:%llu hdr->event_type:%u\n",
-               hdr->tid, hdr->payload, hdr->req_id, hdr->event_type);
+               event->hdr->tid, event->hdr->payload, event->hdr->req_id, event->hdr->event_type);
         break;
     }
 }
@@ -1025,9 +1216,16 @@ void read_events(int fd, const char *banned_path)
 
         while (bytes_parsed < bytes_read)
         {
+            struct dynsec_msg_hdr *hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
+            struct local_dynsec_event event = {
+                .hdr = hdr,
+                .intent = NULL,
+            };
+            struct dynsec_msg_hdr *intent = NULL;
             bool is_trace_event = false;
+            bool may_print_event = true;
+
             count++;
-            hdr = (struct dynsec_msg_hdr *)(buf + bytes_parsed);
 
             if (is_tracing) {
                 is_trace_event = event_in_trace_list(hdr);
@@ -1047,7 +1245,7 @@ void read_events(int fd, const char *banned_path)
                     break;
                 }
 
-                // if (in_trace_list(hdr->tid, false)) {
+                // TODO: Add discarded set of event stats!
                 if (!is_trace_event) {
                     if (hdr->report_flags & DYNSEC_REPORT_STALL) {
                         respond_to_access_request(fd, hdr,
@@ -1055,6 +1253,36 @@ void read_events(int fd, const char *banned_path)
                     }
                     bytes_parsed += hdr->payload;
                     continue;
+                }
+            }
+
+            if ((!is_tracing || is_trace_event)) {
+                if (hdr->report_flags & DYNSEC_REPORT_INTENT) {
+                    bool inserted = prx_cache_enqueue(prx_cache, hdr);
+                    if (!inserted && debug) {
+                        fprintf(stderr, "---UNABLE to cache intent! \n");
+                    }
+
+                    if (merge && !debug) {
+                        may_print_event = false;
+                    }
+                } else if (hdr->report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+                    struct dynsec_msg_hdr *intent = NULL;
+                    int index = prx_cache_find(prx_cache, hdr->tid, hdr->intent_req_id,
+                                               &intent);
+                    if ((index < 0 || !intent) && debug) {
+                        fprintf(stderr, "---UNABLE to FIND INTENT IN CACHE: "
+                                "size:%d index:%d tail:%d last_seen:%d\n",
+                               prx_cache->size, index,
+                               prx_cache->tail, prx_cache->last_seen);
+                    }
+
+                    // Place event in event if we plan to merge
+                    if (merge) {
+                        event.intent = intent;
+                    } else {
+                        free(intent);
+                    }
                 }
             }
 
@@ -1087,7 +1315,17 @@ void read_events(int fd, const char *banned_path)
             if (hdr->payload > max_bytes_per_event) {
                 max_bytes_per_event = hdr->payload;
             }
-            print_event(fd, hdr, banned_path);
+
+            // Final operation on Event.
+            if (may_print_event) {
+                print_event(fd, &event);
+            }
+
+            // Free up intent
+            if (event.intent) {
+                free(event.intent);
+                event.intent = NULL;
+            }
 
             bytes_parsed += hdr->payload;
 
@@ -1220,7 +1458,8 @@ int parse_args(int argc, char *const *argv)
         {"dump-all", required_argument, 0, 'd'},
         {"dump-one", required_argument, 0, 'o'},
         {"exec", no_argument, 0, 'x'},
-#define OPT_STRING "zvk:qc:fp:d:o:x"
+        {"merge-intent", no_argument, 0, 'm'},
+#define OPT_STRING "zvmk:qc:fp:d:o:x"
         {NULL, 0, NULL, 0},
     };
 
@@ -1242,6 +1481,10 @@ int parse_args(int argc, char *const *argv)
         case 'q':
             quiet = 1;
             verbosity = 0;
+            break;
+
+        case 'm':
+            merge = true;
             break;
 
         case 'k': {
@@ -1323,6 +1566,10 @@ int parse_args(int argc, char *const *argv)
             printf("Unknown option: %c\n", opt);
             return -1;
         }
+
+        if (verbosity >= MAX_VERBOSE_LEVEL) {
+            quiet_open_events = 0;
+        }
     }
 
     return option_index;
@@ -1392,6 +1639,10 @@ int main(int argc, char *const *argv)
         return 255;
     }
 
+    // Theoretical max events on a read is more than a safe enough number
+    // For normal case, Number of CPUs * 2 is likely okay.
+    prx_cache = prx_cache_alloc(64);
+
     // Trace mode has some limitations
     //  - Proper exit count
     //  - Some stats may be skewed due to discarding other events
@@ -1446,6 +1697,207 @@ int main(int argc, char *const *argv)
         free(global_buf);
         global_buf = NULL;
     }
+    if (histo_reads) {
+        free(histo_reads);
+        histo_reads = NULL;
+    }
 
     return 1;
+}
+
+
+//
+// Basic PreAction Cache
+//
+struct prx_cache *prx_cache_alloc(int size)
+{
+    struct prx_cache *cache = malloc(sizeof(*cache));
+
+    if (!cache || size <= 0) {
+        return NULL;
+    }
+    if (size > MAX_PRX_CACHE_SZ) {
+        size = MAX_PRX_CACHE_SZ;
+    }
+
+    memset(cache, 0, sizeof(*cache));
+    cache->last_seen = -1;
+
+    cache->buf = malloc(sizeof(cache->buf) * size);
+    if (!cache->buf) {
+        free(cache);
+        return NULL;
+    }
+    memset(cache->buf, 0, sizeof(cache->buf) * size);
+    cache->max_size = size;
+
+    return cache;
+}
+
+void prx_cache_free(struct prx_cache *cache)
+{
+    int i;
+
+    if (!cache) {
+        return;
+    }
+
+    if (cache->buf) {
+        for (i = 0; i < cache->max_size; i++) {
+            if (cache->buf[i]) {
+                free(cache->buf[i]);
+                cache->buf[i] = NULL;
+            }
+        }
+        free(cache->buf);
+        cache->buf = NULL;
+    }
+    free(cache);
+}
+
+static bool prx_cache_is_full(const struct prx_cache *cache)
+{
+    return (cache->size == cache->max_size);
+}
+
+bool prx_cache_enqueue(struct prx_cache *cache,
+                       const struct dynsec_msg_hdr *hdr)
+{
+    if (!cache || !hdr) {
+        return false;
+    }
+
+    if (cache->buf[cache->tail]) {
+        struct dynsec_msg_hdr *tail = cache->buf[cache->tail];
+
+        cache->total_evicted += 1;
+
+        // Attempt to reuse the same allocation
+        if (tail->payload < hdr->payload) {
+
+            // Evict old entry
+            cache->buf[cache->tail] = NULL;
+            free(tail);
+
+            tail = malloc(hdr->payload);
+            if (!tail) {
+                return false;
+            }
+            cache->buf[cache->tail] = tail;
+        } else {
+            memset(tail, 'A', tail->payload);
+        }
+        memcpy(tail, hdr, hdr->payload);
+    } else {
+        cache->buf[cache->tail] = malloc(hdr->payload);
+        if (!cache->buf[cache->tail]) {
+            return false;
+        }
+
+        memcpy(cache->buf[cache->tail], hdr, hdr->payload);
+    }
+    cache->last_seen = cache->tail;
+
+    // Set Next New Tail
+    if (cache->tail + 1 == cache->max_size) {
+        cache->tail = 0;
+    } else {
+        cache->tail += 1;
+    }
+
+    if (!prx_cache_is_full(cache)) {
+        cache->size += 1;
+    }
+    cache->total_stored += 1;
+
+    return true;
+}
+
+//
+// tid - TID of event where intent_req was found
+// intent_req_id - req_id of known intent that might be in cache
+// hdr - Intent event to found in cache. Caller must free!
+// Returns:
+//   -ENOENT When not found
+//   -EINVAL on invalid params
+//   Value 0 or greater represents index found at
+//
+int prx_cache_find(struct prx_cache *cache,
+                   pid_t tid, uint64_t intent_req_id,
+                   struct dynsec_msg_hdr **hdr)
+{
+    int result = -ENOENT;
+    int index;
+
+    if (!cache || !tid || !hdr) {
+        return -EINVAL;
+    }
+
+
+    //
+    // Fast Path
+    //
+    // Check the last_seen cache first...
+    // Really is just 1 less than the current tail.
+    //
+    if (cache->last_seen >= 0 && cache->buf[cache->last_seen]) {
+        if (cache->buf[cache->last_seen]->tid == tid) {
+            if (cache->buf[cache->last_seen]->req_id == intent_req_id) {
+                result = cache->last_seen;
+
+                cache->total_fast_path_hits += 1;
+
+                *hdr = cache->buf[cache->last_seen];
+
+                cache->buf[cache->last_seen] = NULL;
+
+                // Reset the tail to not overwrite something
+                cache->tail = cache->last_seen;
+
+                // Might as well decrement last_seen
+                cache->last_seen -= 1;
+
+                return result;
+            }
+        }
+    }
+
+    // Slow Path
+    //
+    // Just iterate through everything to test "worst case" 
+    // performance scenario. Could start a smarter positon.
+    //
+    for (index = 0; index < cache->max_size; index++) {
+        if (cache->buf[index]) {
+            if (cache->buf[index]->tid == tid) {
+                if (cache->buf[index]->req_id == intent_req_id) {
+                    result = index;
+                    // Copy data over and free it???
+                    *hdr = cache->buf[index];
+                    cache->buf[index] = NULL;
+
+                    cache->total_slow_path_hits += 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (result == -ENOENT) {
+        cache->total_not_found += 1;
+    }
+
+    return result;
+}
+
+void prx_cache_stats(const struct prx_cache *cache, FILE *fh)
+{
+    if (!cache || !fh) {
+        return;
+    }
+
+    fprintf(fh, "PreAction Cache: stored:%llu not_found:%llu evicted:%llu"
+            " fast_path_hits:%llu slow_path_hits:%llu\n",
+            cache->total_stored, cache->total_not_found, cache->total_evicted,
+            cache->total_fast_path_hits, cache->total_slow_path_hits);
 }
