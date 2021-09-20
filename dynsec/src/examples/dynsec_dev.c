@@ -153,7 +153,7 @@ static bool is_empty_trace_list(void)
 
     for (i = 0; i < MAX_TRACK_PIDS; i++) {
         if (progeny[i]) {
-            if (debug)
+            if (debug && verbosity > MAX_VERBOSE_LEVEL)
                 fprintf(stderr, "NOT EMPTY: [%d]%d\n", i, progeny[i]);
             return false;
         }
@@ -168,7 +168,7 @@ static bool insert_trace_list(pid_t pid)
     for (i = 0; i < max_index; i++) {
         if (!progeny[i]) {
             progeny[i] = pid;
-            if (debug)
+            if (debug && verbosity > MAX_VERBOSE_LEVEL)
                 fprintf(stderr, "INSERT: [%d]%d\n", i, progeny[i]);
             return true;
         }
@@ -177,7 +177,7 @@ static bool insert_trace_list(pid_t pid)
     if (i == max_index && max_index < MAX_TRACK_PIDS) {
         max_index += 1;
         progeny[max_index] = pid;
-        if (debug)
+        if (debug && verbosity > MAX_VERBOSE_LEVEL)
             fprintf(stderr, "INSERT NEW MAX: [%d]%d\n", i, progeny[i]);
         return true;
     } else {
@@ -196,7 +196,7 @@ static bool in_trace_list(pid_t pid, bool remove)
         }
         if (progeny[i] == pid) {
             if (remove) {
-                if (debug)
+                if (debug && verbosity > MAX_VERBOSE_LEVEL)
                     fprintf(stderr, "REMOVING: [%d]%d\n", i, pid);
                 if (i == max_index) {
                     max_index = prev_valid;
@@ -1256,7 +1256,7 @@ void read_events(int fd, const char *banned_path)
                 }
             }
 
-            if ((!is_tracing || is_trace_event)) {
+            if (merge || debug) {
                 if (hdr->report_flags & DYNSEC_REPORT_INTENT) {
                     bool inserted = prx_cache_enqueue(prx_cache, hdr);
                     if (!inserted && debug) {
