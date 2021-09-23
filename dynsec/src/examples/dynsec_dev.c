@@ -481,7 +481,7 @@ static void print_path(const char *start, struct dynsec_file *file,
         // path is weaker.
         if (!(file->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL) &&
             intent_path && (intent->attr_mask & DYNSEC_FILE_ATTR_PATH_FULL)) {
-            printf(" %s:'%s", intent_path_type, intent_path);
+            printf(" %s:'%s'", intent_path_type, intent_path);
             if (debug) {
                 printf(" %s:'%s'", path_type, path);
             }
@@ -523,14 +523,8 @@ void print_exec_event(int fd, struct local_dynsec_event *event)
 {
     int response = DYNSEC_RESPONSE_ALLOW;
     struct dynsec_exec_umsg *exec_msg = (struct dynsec_exec_umsg *)event->hdr;
-    const char *path = "";
     const char *ev_str = "EXEC";
     const char *start = (const char *)exec_msg;
-    const char *intent_str = "";
-
-    if (exec_msg->msg.file.path_offset) {
-        path = start + exec_msg->msg.file.path_offset;
-    }
 
     // Ban some matching substring
     if (exec_msg->hdr.report_flags & DYNSEC_REPORT_STALL)
@@ -538,7 +532,7 @@ void print_exec_event(int fd, struct local_dynsec_event *event)
 
     if (quiet) return;
 
-    printf("%s%s: tid:%u mnt_ns:%u req_id:%llu ", ev_str, intent_str,
+    printf("%s: tid:%u mnt_ns:%u req_id:%llu ", ev_str,
            exec_msg->hdr.tid, exec_msg->msg.task.mnt_ns,
            exec_msg->hdr.req_id);
     print_dynsec_file(&exec_msg->msg.file, NULL);
@@ -569,8 +563,7 @@ void print_unlink_event(int fd, struct local_dynsec_event *event)
     }
 
     if (event->intent) {
-        if (event->intent->event_type == DYNSEC_EVENT_TYPE_UNLINK ||
-            event->intent->event_type == DYNSEC_EVENT_TYPE_RMDIR) {
+        if (event->intent->event_type == unlink_msg->hdr.event_type) {
             intent = (struct dynsec_unlink_umsg *)event->intent;
             intent_start = (const char *)event->intent;
         } else if (debug) {
@@ -611,7 +604,7 @@ void print_rename_event(int fd, struct local_dynsec_event *event)
     }
 
     if (event->intent) {
-        if (event->intent->event_type == DYNSEC_EVENT_TYPE_RENAME) {
+        if (event->intent->event_type == rename_msg->hdr.event_type) {
             intent = (struct dynsec_rename_umsg *)event->intent;
             intent_start = (const char *)event->intent;
         } else if (debug) {
@@ -660,7 +653,7 @@ void print_setattr_event(int fd, struct local_dynsec_event *event)
 
     if (event->intent) {
         // May want to compare attr_mask too?
-        if (event->intent->event_type == DYNSEC_EVENT_TYPE_SETATTR) {
+        if (event->intent->event_type == setattr->hdr.event_type) {
             intent = (struct dynsec_setattr_umsg *)event->intent;
             intent_start = (const char *)event->intent;
         } else if (debug) {
@@ -733,8 +726,7 @@ void print_create_event(int fd, struct local_dynsec_event *event)
     if (quiet) return;
 
     if (event->intent) {
-        if (event->intent->event_type == DYNSEC_EVENT_TYPE_CREATE ||
-            event->intent->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
+        if (event->intent->event_type == create->hdr.event_type) {
             intent = (struct dynsec_create_umsg *)event->intent;
             intent_start = (const char *)event->intent;
         } else if (debug) {
@@ -837,7 +829,7 @@ void print_link_event(int fd, struct local_dynsec_event *event)
     }
 
     if (event->intent) {
-        if (event->intent->event_type == DYNSEC_EVENT_TYPE_LINK) {
+        if (event->intent->event_type == link_msg->hdr.event_type) {
             intent = (struct dynsec_link_umsg *)event->intent;
             intent_start = (const char *)event->intent;
         } else if (debug) {
@@ -888,7 +880,7 @@ void print_symlink_event(int fd, struct local_dynsec_event *event)
     }
 
     if (event->intent) {
-        if (event->intent->event_type == DYNSEC_EVENT_TYPE_LINK) {
+        if (event->intent->event_type == symlink->hdr.event_type) {
             intent = (struct dynsec_symlink_umsg *)event->intent;
             intent_start = (const char *)event->intent;
         } else if (debug) {
@@ -930,6 +922,12 @@ void print_task_event(int fd, struct local_dynsec_event *event)
 
     printf("%s: ", ev_str);
     print_task_ctx(&task_msg->msg.task);
+    if (task_msg->hdr.event_type == DYNSEC_EVENT_TYPE_CLONE) {
+        if (task_msg->msg.exec_file.attr_mask) {
+            print_dynsec_file(&task_msg->msg.exec_file, NULL);
+            print_path(start, &task_msg->msg.exec_file, NULL, NULL);
+        }
+    }
     printf("\n");
 }
 

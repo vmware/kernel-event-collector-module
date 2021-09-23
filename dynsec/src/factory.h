@@ -132,6 +132,7 @@ struct dynsec_symlink_event {
 struct dynsec_task_event {
     struct dynsec_event event;
     struct dynsec_task_kmsg kmsg;
+    char *exec_path;
 };
 
 struct dynsec_ptrace_event {

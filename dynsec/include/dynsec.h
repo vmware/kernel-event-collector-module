@@ -32,14 +32,24 @@
 
 // Event Message Flags aka Report
 #define DYNSEC_REPORT_STALL         0x0001
+// Event provide supplemental information (not stallable)
 #define DYNSEC_REPORT_INTENT        0x0002
+// Eventually may use to prevent enqueueing events
 #define DYNSEC_REPORT_AUDIT         0x0004
+// Event did not stall due to a cache option
 #define DYNSEC_REPORT_CACHED        0x0008
+// Unused
 #define DYNSEC_REPORT_TP            0x0010
+// Event came from a the client
 #define DYNSEC_REPORT_SELF          0x0020
+// Used to determine importance on queue and wake_up usage
 #define DYNSEC_REPORT_HI_PRI        0x0040
 #define DYNSEC_REPORT_LO_PRI        0x0080
+// Unused but could provide supplemental information POST create.
+// To provide the created inode value if desired.
 #define DYNSEC_REPORT_POST          0x0100
+// Event found there was a previous intent event via intent_req_id
+// where the two event's data can be combined by client
 #define DYNSEC_REPORT_INTENT_FOUND  0x0200
 
 
@@ -310,6 +320,7 @@ struct dynsec_signal_umsg {
 // Core Task Event
 struct dynsec_task_msg {
     struct dynsec_task_ctx task;
+    struct dynsec_file exec_file;
 };
 
 struct dynsec_task_umsg {

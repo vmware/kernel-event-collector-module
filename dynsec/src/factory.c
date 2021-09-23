@@ -577,7 +577,8 @@ void free_dynsec_event(struct dynsec_event *dynsec_event)
         {
             struct dynsec_task_event *task =
                     dynsec_event_to_task(dynsec_event);
-
+            kfree(task->exec_path);
+            task->exec_path = NULL;
             kfree(task);
         }
         break;
@@ -1253,6 +1254,23 @@ static ssize_t copy_task_event(const struct dynsec_task_event *task,
         p += sizeof(task->kmsg);
     }
 
+    if (task->exec_path && task->kmsg.msg.exec_file.path_offset &&
+        task->kmsg.msg.exec_file.path_size) {
+        if (buf + copied != p) {
+            pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
+                    task->kmsg.hdr.payload, copied);
+            goto out_fail;
+        }
+
+        if (copy_to_user(p, task->exec_path,
+                         task->kmsg.msg.exec_file.path_size)) {
+            goto out_fail;
+        } else {
+            copied += task->kmsg.msg.exec_file.path_size;
+            p += task->kmsg.msg.exec_file.path_size;
+        }
+    }
+
     if (task->kmsg.hdr.payload != copied) {
         pr_info("%s:%d payload:%u != copied:%d\n", __func__, __LINE__,
                 task->kmsg.hdr.payload, copied);
@@ -1534,7 +1552,7 @@ static void __fill_in_task_ctx(const struct task_struct *task,
     task_ctx->start_time = task->start_time;
 #else
     task_ctx->start_time = (task->start_time.tv_sec * 10000000) +
-    task->start_time.tv_nsec;
+        task->start_time.tv_nsec;
 #endif
 
     if (task->in_execve) {
@@ -2086,6 +2104,9 @@ bool fill_task_free(struct dynsec_event *dynsec_event,
     return true;
 }
 
+static char *fill_in_task_exe(struct task_struct *task,
+                              struct dynsec_file *dynsec_file, gfp_t mode);
+
 bool fill_in_clone(struct dynsec_event *dynsec_event,
                    const struct task_struct *parent,
                    const struct task_struct *child,
@@ -2106,6 +2127,19 @@ bool fill_in_clone(struct dynsec_event *dynsec_event,
         clone->kmsg.msg.task.ppid = parent->tgid;
     } else {
         __fill_in_task_ctx(child, true, &clone->kmsg.msg.task);
+    }
+
+    get_task_struct((struct task_struct *)child);
+    clone->exec_path = fill_in_task_exe((struct task_struct *)child,
+                                        &clone->kmsg.msg.exec_file,
+                                        GFP_ATOMIC);
+    // Potentially defer put_task_struct to a kthread
+    // in case we end freeing the task in a kprobe or tracepoint.
+    put_task_struct((struct task_struct *)child);
+
+    if (clone->exec_path && clone->kmsg.msg.exec_file.path_size) {
+        clone->kmsg.msg.exec_file.path_offset = clone->kmsg.hdr.payload;
+        clone->kmsg.hdr.payload += clone->kmsg.msg.exec_file.path_size;
     }
 
     return true;
@@ -2605,31 +2639,32 @@ static char *fill_in_task_exe(struct task_struct *task,
 {
     struct mm_struct *mm;
     char *exe_path = NULL;
+    struct file *exe_file = NULL;
 
-    // Eventually try to handle places we can't sleep?
-    if (has_gfp_atomic(mode)) {
+    if (!task || !dynsec_file || !task->mm || !pid_alive(task)
+        || (task->flags & PF_KTHREAD)) {
         return NULL;
     }
 
-    if (!task || !dynsec_file || !task->mm || !pid_alive(task)) {
-        return NULL;
+    if (has_gfp_atomic(mode) && task->mm) {
+        exe_file = task->mm->exe_file;
+    } else {
+        mm = get_task_mm(task);
+        if (mm) {
+            exe_file = dynsec_get_mm_exe_file(mm);
+            mmput(mm);
+        }
     }
 
-    mm = get_task_mm(task);
-    if (mm) {
-        struct file *exe_file;
-
-        exe_file = dynsec_get_mm_exe_file(mm);
-        mmput(mm);
-        if (!IS_ERR_OR_NULL(exe_file)) {
-            if (dynsec_file)
-            fill_in_file_data(dynsec_file, &exe_file->f_path);
-            exe_path = dynsec_build_path_greedy(&exe_file->f_path,
-                                                dynsec_file, mode);
+    if (!IS_ERR_OR_NULL(exe_file)) {
+        fill_in_file_data(dynsec_file, &exe_file->f_path);
+        exe_path = dynsec_build_path_greedy(&exe_file->f_path,
+                                            dynsec_file, mode);
+        if (!has_gfp_atomic(mode)) {
             fput(exe_file);
-            if (IS_ERR(exe_path)) {
-                exe_path = NULL;
-            }
+        }
+        if (IS_ERR(exe_path)) {
+            exe_path = NULL;
         }
     }
     return exe_path;
