@@ -23,7 +23,8 @@ set(CMAKE_CXX_STANDARD 11)
 # We shouldn't need this but without out we lose -g. It's probably because LLVM cmake stuff is overriding flags
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
-set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
+# TODO: I think this is not needed, but I will circle back on it later.
+#set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
 
 include_directories(${PROJECT_SOURCE_DIR}/../include)
 
@@ -41,17 +42,27 @@ add_custom_command(
 
 add_custom_target(bcc_prog ALL DEPENDS ${EPBF_PROG_CPP})
 
-add_library(bpf-probe STATIC
+file(WRITE ${PROJECT_BINARY_DIR}/dummy.cpp "// A dummy file")
+add_library(llvm SHARED
+        ${PROJECT_BINARY_DIR}/dummy.cpp)
+
+add_library(bpf-probe SHARED
         BpfApi.cpp
         BpfProgram.cpp
         ${EPBF_PROG_CPP})
 add_dependencies(bpf-probe bcc_prog)
-set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
+target_link_libraries(bpf-probe PRIVATE
+         llvm
+         z dl pthread)
+set_target_properties(bpf-probe PROPERTIES
+        INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+        CXX_VISIBILITY_PRESET "default")
 
 if (NOT ${LOCAL_BUILD})
-    target_link_libraries(bpf-probe
-            CONAN_PKG::bcc
-
+    target_link_libraries(bpf-probe PRIVATE
+            CONAN_PKG::bcc)
+    target_link_libraries(llvm PUBLIC
             -Wl,--whole-archive
             CONAN_PKG::llvm
             CONAN_LIB::elfutils_elf
@@ -74,14 +85,18 @@ endif()
 
 add_executable(check_probe check_probe.cpp)
 target_link_libraries(check_probe
-        bpf-probe
-        z rt dl pthread m)
+        bpf-probe)
+set_target_properties(check_probe PROPERTIES
+        INSTALL_RPATH "$ORIGIN;$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH TRUE)
 
 add_subdirectory(tests)
 
 include(constants.cmake)
 
 install(TARGETS check_probe PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
+install(TARGETS bpf-probe PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
+install(TARGETS llvm PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
 
 
 set(CPACK_OUTPUT_FILE_PREFIX $ENV{BUILD_DIR}/install-packages)

@@ -13,8 +13,8 @@ class SHORT_NAME(CbConanFile):
     version  = "PACKAGE_VERSION"
     settings = "os", "compiler", "build_type", "arch"
     generators = "cmake"
-    requires = "LLVM_VERSION", "ELFUTILS_VERSION", "BCC_VERSION", "BOOST_VERSION"
-    build_requires = "CPPUTEST_VERSION"
+    requires = "BOOST_VERSION"
+    build_requires = "LLVM_VERSION", "ELFUTILS_VERSION", "BCC_VERSION", "CPPUTEST_VERSION"
     default_options = "Boost:shared=False", \
                       "Boost:without_program_options=False", \
                       "Boost:without_thread=False", \
@@ -91,9 +91,10 @@ class SHORT_NAME(CbConanFile):
     def package(self):
         self.copy("*.h", dst="include/bpf_probe", src="include", keep_path=True)
         self.copy("*.a", dst="lib", keep_path=False)
+        self.copy("*.so", dst="lib", keep_path=False)
         self.copy("check_probe", dst="bin", src="bin")
 
     def package_info(self):
         self.cpp_info.includedirs = ["include"]
         self.cpp_info.libdirs     = ['lib']
-        self.cpp_info.libs        = ['bpf-probe']
+        self.cpp_info.libs        = ['bpf-probe', 'llvm']
