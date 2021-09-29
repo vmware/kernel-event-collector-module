@@ -1529,8 +1529,11 @@ static void __fill_in_task_ctx(const struct task_struct *task,
     }
     task_ctx->tid = task->pid;
     task_ctx->pid = task->tgid;
+    if (check_parent && task->parent) {
+        task_ctx->ppid = task->parent->tgid;
+    }
     if (check_parent && task->real_parent) {
-        task_ctx->ppid = task->real_parent->tgid;
+        task_ctx->real_parent_id = task->real_parent->tgid;
     }
 
     // user DAC context
@@ -1602,6 +1605,8 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
         dynsec_file->gid = inode->i_gid;
 #endif
         dynsec_file->size = inode->i_size;
+        dynsec_file->count = inode->i_count;
+        dynsec_file->nlink = inode->i_nlink;
         // This is likely in accurate and should be over written
         // by either dentry or vfsmount accessed super_block
         fill_in_sb_data(dynsec_file, inode->i_sb);

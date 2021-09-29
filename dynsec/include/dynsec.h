@@ -128,6 +128,7 @@ struct dynsec_task_ctx {
     uint32_t tid;
     uint32_t pid;
     uint32_t ppid;
+    uint32_t real_parent_id;
     uint32_t uid;
     uint32_t euid;
     uint32_t gid;
@@ -171,6 +172,8 @@ struct dynsec_file {
     uint32_t uid;
     uint32_t gid;
     uint64_t size;
+    uint32_t count;
+    uint32_t nlink;
     uint64_t sb_magic;
     uint64_t parent_ino;
     uint32_t parent_dev;
