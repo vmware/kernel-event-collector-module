@@ -73,20 +73,20 @@ void ec_process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingD
     procp->shared_data = ec_process_tracking_get_shared_data_ref(shared_data, context);
 }
 
-void ec_process_tracking_set_parent_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context)
+void ec_process_tracking_set_temp_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context)
 {
     CANCEL_VOID(procp);
 
     TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s parent_shared_data %p (old %p)",
         (shared_data ? "set" : "clear"),
         shared_data,
-        procp->parent_shared_data);
+        procp->temp_shared_data);
 
     // Make sure that we release the one we are holding
-    ec_process_tracking_release_shared_data_ref(procp->parent_shared_data, context);
+    ec_process_tracking_release_shared_data_ref(procp->temp_shared_data, context);
 
     // Set the new one, and take the reference
-    procp->parent_shared_data = ec_process_tracking_get_shared_data_ref(shared_data, context);
+    procp->temp_shared_data = ec_process_tracking_get_shared_data_ref(shared_data, context);
 }
 
 void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
@@ -123,13 +123,13 @@ void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE i
     {
     case CB_EVENT_TYPE_PROCESS_EXIT:
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-        // Do nothing
-        break;
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
         // For process start events we hold a reference to the parent process
         //  (This forces an exit of the parent to be sent after the start of a child)
-        ec_event_set_process_data(event, procp->parent_shared_data, context);
+        // For process exit events we hold a reference to the child preocess
+        //  (This forces the child's exit to be sent after the parent's exit)
+        ec_event_set_process_data(event, procp->temp_shared_data, context);
         break;
     default:
         // For all other events we hold a reference to this process
@@ -143,7 +143,7 @@ CATCH_DEFAULT:
     // In some cases we expect this function to be called with a NULL event
     //  because we still need to free the parent shared data
     //  Example: This will happen if we are ignoring fork events.
-    ec_process_tracking_set_parent_shared_data(procp, NULL, context);
+    ec_process_tracking_set_temp_shared_data(procp, NULL, context);
 }
 
 char *ec_process_tracking_get_path(SharedTrackingData *shared_data)

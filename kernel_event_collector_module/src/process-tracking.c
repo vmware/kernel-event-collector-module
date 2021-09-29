@@ -211,7 +211,7 @@ ProcessTracking *ec_process_tracking_create_process(
             procp->net_dns                = 0;
         procp->is_real_start              = is_real_start;
         procp->shared_data                = NULL;
-        procp->parent_shared_data         = NULL;
+        procp->temp_shared_data           = NULL;
         procp->exec_blocked               = false;
 
         procp->posix_details.pid         = pid;
@@ -335,20 +335,25 @@ ProcessTracking *ec_process_tracking_update_process(
     // The new process we are execing was an active process in its parent. So reduce the active count of the parent
     IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&parent_shared_data->active_process_count, { was_last_active_process = true; });
 
+    // Allocate a shared data_object for the new process
+    //  We get a reference to this
+    shared_data = ec_process_tracking_alloc_shared_data(context);
+
     // If this is was the last remaining process of the exec identity we want to
     //  send an exit for it.
     //  This will catch exec-other and last fork cases.  We want to ignore a fake start however.
     if (was_last_active_process && is_real_start)
     {
+        // This will set the current proc's temp_shared_data to the new shared data of the execed proc.
+        // The exit event (for the previous exec identity/parent) will take a reference to this shared_data.
+        // This forces the new exec's exit event to wait to be queued until after previous exec's exit event.
+        ec_process_tracking_set_temp_shared_data(procp, shared_data, context);
+
         // Send the event based on the current process information.
         //  We will not delete the procp since it will be used by the new process.
         //  The shared_data will be released later
         ec_event_send_exit(procp, was_last_active_process, context);
     }
-
-    // Allocate a shared data_object for the new process
-    //  We get a reference to this
-    shared_data = ec_process_tracking_alloc_shared_data(context);
 
     TRY_DO_MSG(shared_data,
                { procp = NULL; },
@@ -397,18 +402,20 @@ ProcessTracking *ec_process_tracking_update_process(
     {
         // Hold onto a reference to our parent shared_data until the start event is sent.
         //  This will ensure the exit event of the parent is sent after this start event
-        ec_process_tracking_set_parent_shared_data(procp, parent_shared_data, context);
+        ec_process_tracking_set_temp_shared_data(procp, parent_shared_data, context);
     }
 
     ec_process_tracking_update_op_cnts(procp, event_type, action);
 
-    TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d by %d) (active: %" PRFs64 ")",
+    TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld) (active: %" PRFs64 ")",
           msg,
-          (path ? path : "<unknown>"),
+          (shared_data->path ? shared_data->path : "<unknown>"),
           pid,
           parent,
           shared_data->exec_details.pid,
+          shared_data->exec_details.start_time,
           shared_data->exec_parent_details.pid,
+          shared_data->exec_parent_details.start_time,
           (long long)atomic64_read(&shared_data->active_process_count));
 
 CATCH_DEFAULT:
@@ -657,7 +664,8 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
         }
 
         ec_process_tracking_set_shared_data(procp, NULL, context);
-        ec_process_tracking_set_parent_shared_data(procp, NULL, context);
+        // Just in case, this should have been unset by ec_process_tracking_set_event_info
+        ec_process_tracking_set_temp_shared_data(procp, NULL, context);
     }
 }
 
