@@ -25,6 +25,7 @@ void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, Pro
 ProcessTracking *ec_sorted_tracking_table_get_process(void *data, ProcessContext *context);
 const char *ec_process_tracking_get_proc_name(const char *path);
 
+SharedTrackingData *ec_process_tracking_get_temp_shared_data(ProcessTracking *procp, ProcessContext *context);
 void ec_process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
 void ec_process_tracking_set_temp_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context);
 

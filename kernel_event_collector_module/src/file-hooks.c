@@ -345,6 +345,7 @@ void __ec_do_generic_file_event(ProcessContext *context,
 {
     pid_t pid              = ec_getpid(current);
     ProcessTracking *procp = NULL;
+    SharedTrackingData *shared_data = NULL;
 
     TRY(file_data);
 
@@ -362,12 +363,12 @@ void __ec_do_generic_file_event(ProcessContext *context,
     }
 
     procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
+    shared_data = ec_process_tracking_get_shared_data(procp, context);
 
     TRY(eventType != CB_EVENT_TYPE_FILE_OPEN ||
         (procp &&
-         procp->shared_data && // this shouldnt ever be null but we got a segfault here so
-                               // i added this check for safety
-         procp->shared_data->is_interpreter));
+         shared_data &&
+         shared_data->is_interpreter));
 
     ec_event_send_file(
         procp,
@@ -379,6 +380,7 @@ void __ec_do_generic_file_event(ProcessContext *context,
         context);
 
 CATCH_DEFAULT:
+    ec_process_tracking_put_shared_data(shared_data, context);
     ec_process_tracking_put_process(procp, context);
 }
 

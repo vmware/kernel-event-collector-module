@@ -89,8 +89,11 @@ ProcessTracking *ec_process_tracking_get_process(pid_t pid, ProcessContext *cont
 }
 
 // Check whether path points at an interpreter.
-bool ec_process_tracking_is_interpreter(const char *path)
+bool ec_process_tracking_is_interpreter(SharedTrackingData *shared_data, ProcessContext *context)
 {
+    bool result = false;
+    char *path = ec_process_tracking_get_path(shared_data, context);
+
     if (path)
     {
         const char *proc_name = ec_process_tracking_get_proc_name(path);
@@ -103,12 +106,14 @@ bool ec_process_tracking_is_interpreter(const char *path)
             // does not include every filename containing 'sh' anywhere, e.g. ssh
             if (found && found == proc_name)
             {
-                return true;
+                result = true;
+                break;
             }
         }
     }
+    ec_process_tracking_put_path(path, context);
 
-    return false;
+    return result;
 }
 
 ProcessTracking *ec_process_tracking_create_process(
@@ -137,7 +142,7 @@ ProcessTracking *ec_process_tracking_create_process(
         if (parent_procp)
         {
             // Increase the reference count on the shared data (for local function)
-            shared_data = ec_process_tracking_get_shared_data_ref(parent_procp->shared_data, context);
+            shared_data = ec_process_tracking_get_shared_data(parent_procp, context);
             posix_parent_details      = parent_procp->posix_details;
             posix_grandparent_details = parent_procp->posix_parent_details;
 
@@ -182,7 +187,7 @@ ProcessTracking *ec_process_tracking_create_process(
         posix_parent_details      = shared_data->exec_details;
         posix_grandparent_details = shared_data->exec_parent_details;
 
-        shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data->path);
+        shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data, context);
     }
 
     procp = (ProcessTracking *)ec_hashtbl_alloc_generic(g_process_tracking_data.table, context);
@@ -243,19 +248,25 @@ ProcessTracking *ec_process_tracking_create_process(
         // We have recorded this in the tracking table, so mark it as active
         atomic64_inc(&shared_data->active_process_count);
 
-        TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %" PRFs64 ")",
-              msg,
-              ec_process_tracking_get_path(shared_data),
-              pid,
-              parent,
-              shared_data->exec_details.pid,
-              shared_data->exec_parent_details.pid,
-              (long long)atomic64_read(&shared_data->active_process_count));
+        if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
+        {
+            char *path = ec_process_tracking_get_path(shared_data, context);
+
+            TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %" PRFs64 ")",
+                  msg,
+                  path,
+                  pid,
+                  parent,
+                  shared_data->exec_details.pid,
+                  shared_data->exec_parent_details.pid,
+                  (long long) atomic64_read(&shared_data->active_process_count));
+            ec_process_tracking_put_path(path, context);
+        }
     }
 
 CATCH_DEFAULT:
     // Always drop the ref held by this local function
-    ec_process_tracking_release_shared_data_ref(shared_data, context);
+    ec_process_tracking_put_shared_data(shared_data, context);
 
     return procp;
 }
@@ -267,7 +278,7 @@ ProcessTracking *ec_process_tracking_update_process(
     uid_t               euid,
     uint64_t            device,
     uint64_t            inode,
-    char *path,
+    char               *path,
     bool                path_found,
     time_t              start_time,
     int                 action,
@@ -328,7 +339,7 @@ ProcessTracking *ec_process_tracking_update_process(
     }
 
     // Increase the reference count on the shared data (for local function)
-    parent_shared_data = ec_process_tracking_get_shared_data_ref(procp->shared_data, context);
+    parent_shared_data = ec_process_tracking_get_shared_data(procp, context);
 
     isExecOther = parent_shared_data->exec_details.pid == pid;
 
@@ -381,10 +392,12 @@ ProcessTracking *ec_process_tracking_update_process(
         path = taskp->comm;
     }
 
-    shared_data->path = ec_mem_cache_strdup(path, context);
-    TRY(shared_data->path);
+    path = ec_mem_cache_strdup(path, context);
 
-    shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data->path);
+    TRY(path);
+    ec_process_tracking_set_path(shared_data, path, context);
+
+    shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data, context);
 
     // Update our table entry with the new shared data
     ec_process_tracking_set_shared_data(procp, shared_data, context);
@@ -407,21 +420,25 @@ ProcessTracking *ec_process_tracking_update_process(
 
     ec_process_tracking_update_op_cnts(procp, event_type, action);
 
-    TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld) (active: %" PRFs64 ")",
-          msg,
-          (shared_data->path ? shared_data->path : "<unknown>"),
-          pid,
-          parent,
-          shared_data->exec_details.pid,
-          shared_data->exec_details.start_time,
-          shared_data->exec_parent_details.pid,
-          shared_data->exec_parent_details.start_time,
-          (long long)atomic64_read(&shared_data->active_process_count));
+    if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
+    {
+        TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld) (active: %" PRFs64 ")",
+              msg,
+              path ? path : "<unknown>",
+              pid,
+              parent,
+              shared_data->exec_details.pid,
+              shared_data->exec_details.start_time,
+              shared_data->exec_parent_details.pid,
+              shared_data->exec_parent_details.start_time,
+              (long long)atomic64_read(&shared_data->active_process_count));
+    }
 
 CATCH_DEFAULT:
     // Release the local ref held by this function
-    ec_process_tracking_release_shared_data_ref(shared_data, context);
-    ec_process_tracking_release_shared_data_ref(parent_shared_data, context);
+    ec_process_tracking_put_path(path, context);
+    ec_process_tracking_put_shared_data(shared_data, context);
+    ec_process_tracking_put_shared_data(parent_shared_data, context);
 
     return procp;
 }
@@ -466,21 +483,23 @@ ProcessTracking *ec_process_tracking_add_process(ProcessTracking *procp, Process
 
 bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context)
 {
+    bool result = false;
     bool was_last_active_process = false;
     ProcessTracking *procp = ec_process_tracking_get_process(pid, context);
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
 
-    TRY(procp);
+    TRY(procp && shared_data);
 
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&procp->shared_data->active_process_count, { was_last_active_process = true; });
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&shared_data->active_process_count, { was_last_active_process = true; });
 
     ec_event_send_exit(procp, was_last_active_process, context);
     ec_process_tracking_remove_process(procp, context);
-    ec_process_tracking_put_process(procp, context);
-    return true;
+    result = true;
 
 CATCH_DEFAULT:
+    ec_process_tracking_put_shared_data(shared_data, context);
     ec_process_tracking_put_process(procp, context);
-    return false;
+    return result;
 }
 
 ProcessTracking *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context)
@@ -602,22 +621,32 @@ void ec_process_tracking_init_shared_data(SharedTrackingData *shared_data, Proce
         shared_data->path               = NULL;
         shared_data->cmdline            = NULL;
         shared_data->is_interpreter     = false;
+
+        // TODO: Add lock here
     }
 }
 
-void ec_process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context)
+void ec_process_tracking_put_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
 {
     PCB_EVENT exit_event;
 
     CANCEL_VOID(shared_data);
 
-    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
-        __func__,
-        ec_process_tracking_get_proc_name(shared_data->path),
-        shared_data->exec_details.pid,
-        (long long)atomic64_read(&shared_data->reference_count),
-        (long long)atomic64_read(&shared_data->active_process_count),
-        shared_data);
+    #ifdef _REF_DEBUGGING
+    if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
+    {
+        char *path = ec_process_tracking_get_path(shared_data, context);
+
+        TRACE(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
+            __func__,
+            ec_process_tracking_get_proc_name(path),
+            shared_data->exec_details.pid,
+            (long long)atomic64_read(&shared_data->reference_count),
+            (long long)atomic64_read(&shared_data->active_process_count),
+            shared_data);
+        ec_process_tracking_put_path(path, context);
+    }
+    #endif
 
     // If the reference count reaches 0, then delete it
     IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&shared_data->reference_count, {
@@ -627,17 +656,17 @@ void ec_process_tracking_release_shared_data_ref(SharedTrackingData *shared_data
         // Destroy the file tracking
         ec_file_process_tree_destroy(&shared_data->tracked_files, context);
 
+
         // Free the path and commandline
-        ec_mem_cache_free_generic(shared_data->path);
-        ec_mem_cache_free_generic(shared_data->cmdline);
+        ec_process_tracking_set_path(shared_data, NULL, context);
+        ec_process_tracking_set_cmdline(shared_data, NULL, context);
 
         exit_event = (PCB_EVENT) atomic64_xchg(&shared_data->exit_event, 0);
 
         // Send the exit
         ec_event_send_last_exit(exit_event, context);
 
-        shared_data->path       = NULL;
-        shared_data->cmdline    = NULL;
+        // TODO: Add lock here
 
         // Free the shared data
         ec_mem_cache_free(&g_process_tracking_data.shared_data_cache, shared_data, context);
@@ -652,15 +681,23 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
     {
         ProcessTracking *procp = (ProcessTracking *)data;
 
-        if (g_print_proc_on_delete && procp)
+        if (g_print_proc_on_delete && procp && MAY_TRACE_LEVEL(DL_INFO))
         {
-            TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
-                                   __func__,
-                                   ec_process_tracking_get_proc_name(procp->shared_data->path),
-                                   procp->shared_data->exec_details.pid,
-                                   (long long)atomic64_read(&(procp->shared_data->reference_count)),
-                                   (long long)atomic64_read(&(procp->shared_data->active_process_count)),
-                                   procp->shared_data);
+            SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+            char *path = ec_process_tracking_get_path(shared_data, context);
+
+            if (shared_data)
+            {
+                TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
+                      __func__,
+                      ec_process_tracking_get_proc_name(path),
+                      shared_data->exec_details.pid,
+                      (long long) atomic64_read(&(shared_data->reference_count)),
+                      (long long) atomic64_read(&(shared_data->active_process_count)),
+                      shared_data);
+            }
+            ec_process_tracking_put_path(path, context);
+            ec_process_tracking_put_shared_data(shared_data, context);
         }
 
         ec_process_tracking_set_shared_data(procp, NULL, context);
@@ -673,16 +710,18 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
 // kmem cache entries that are still alive when the cache is destroyed.
 void __ec_shared_data_print_callback(void *data, ProcessContext *context)
 {
-    if (data)
+    if (data && MAY_TRACE_LEVEL(DL_INFO))
     {
-        SharedTrackingData *sdata = (SharedTrackingData *)data;
+        SharedTrackingData *shared_data = (SharedTrackingData *)data;
+        char *path = ec_process_tracking_get_path(shared_data, context);
 
         TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
               __func__,
-              ec_process_tracking_get_proc_name(sdata->path),
-              sdata->exec_details.pid,
-              (long long)atomic64_read(&(sdata->reference_count)),
-              (long long)atomic64_read(&(sdata->active_process_count)),
-              sdata);
+              ec_process_tracking_get_proc_name(path),
+              shared_data->exec_details.pid,
+              (long long)atomic64_read(&(shared_data->reference_count)),
+              (long long)atomic64_read(&(shared_data->active_process_count)),
+              shared_data);
+        ec_process_tracking_put_path(path, context);
     }
 }

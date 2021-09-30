@@ -196,6 +196,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     uid_t euid = GET_EUID();
     struct timespec start_time = {0, 0};
     ProcessTracking *procp = NULL;
+    SharedTrackingData *shared_data = NULL;
     uint64_t device = 0;
     uint64_t inode = 0;
     char *path_buffer = NULL;
@@ -284,28 +285,27 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
         if (path_found)
         {
             procp = ec_process_tracking_get_process(pid, &context);
-            if (procp)
+            shared_data = ec_process_tracking_get_shared_data(procp, &context);
+
+            if (procp && shared_data)
             {
                 // The previously set path is actually the script_path.
                 // The script will report as an open event when the interpreter opens it.
                 // The path from this call is the path of the interpreter.
+                char *_path = ec_mem_cache_strdup(path, &context);
 
-                if (procp->shared_data->path)
-                {
-                    // The last path we are called with is the one we report so free any intermediate paths
-                    ec_mem_cache_free_generic(procp->shared_data->path);
-                }
-
-                procp->shared_data->is_interpreter = true;
-                procp->shared_data->path = ec_mem_cache_strdup(path, &context);
+                shared_data->is_interpreter = true;
+                ec_process_tracking_set_path(shared_data, _path, &context);
+                ec_process_tracking_put_path(_path, &context);
 
                 // also need to update the file information
-                procp->shared_data->exec_details.inode = inode;
-                procp->shared_data->exec_details.device = device;
+                shared_data->exec_details.inode = inode;
+                shared_data->exec_details.device = device;
 
                 procp->posix_details.inode = inode;
                 procp->posix_details.device = device;
             }
+            ec_process_tracking_put_shared_data(shared_data, &context);
         }
     }
 
@@ -360,7 +360,7 @@ void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
             ec_get_cmdline_from_binprm(bprm, cmdline, PATH_MAX);
         }
 
-        ec_process_tracking_set_cmdline(procp, cmdline, &context);
+        ec_process_tracking_set_proc_cmdline(procp, cmdline, &context);
 
         ec_event_send_start(procp,
                          ec_process_tracking_should_track_user() ? uid : (uid_t)-1,

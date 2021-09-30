@@ -150,9 +150,14 @@ void ec_process_tracking_put_process(ProcessTracking *procp, ProcessContext *con
 void ec_process_tracking_remove_process(ProcessTracking *procp, ProcessContext *context);
 bool ec_is_process_tracked(pid_t pid, ProcessContext *context);
 void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context);
-void ec_process_tracking_set_cmdline(ProcessTracking *procp, char *cmdline, ProcessContext *context);
 bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context);
-char *ec_process_tracking_get_path(SharedTrackingData *shared_data);
+char *ec_process_tracking_get_path(SharedTrackingData *shared_data, ProcessContext *context);
+void ec_process_tracking_set_path(SharedTrackingData *shared_data, char *path, ProcessContext *context);
+void ec_process_tracking_put_path(char *path, ProcessContext *context);
+char *ec_process_tracking_get_cmdline(SharedTrackingData *shared_data, ProcessContext *context);
+void ec_process_tracking_set_cmdline(SharedTrackingData *shared_data, char *cmdline, ProcessContext *context);
+void ec_process_tracking_put_cmdline(char *cmdline, ProcessContext *context);
+void ec_process_tracking_set_proc_cmdline(ProcessTracking *procp, char *cmdline, ProcessContext *context);
 
 // Discovery
 void ec_process_tracking_send_process_discovery(ProcessContext *context);
@@ -160,17 +165,18 @@ void ec_process_tracking_send_process_discovery(ProcessContext *context);
 // Hook Helpers
 void ec_process_tracking_mark_as_blocked(ProcessTracking *procp);
 bool ec_process_tracking_is_blocked(ProcessTracking *procp);
-pid_t ec_process_tracking_exec_pid(ProcessTracking *procp);
+pid_t ec_process_tracking_exec_pid(ProcessTracking *procp, ProcessContext *context);
 void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context);
 ProcessTracking *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context);
+SharedTrackingData *ec_process_tracking_get_shared_data(ProcessTracking *procp, ProcessContext *context);
 SharedTrackingData *ec_process_tracking_get_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context);
-void ec_process_tracking_release_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context);
+void ec_process_tracking_put_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
 
 // Event Helper
 void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
 void ec_process_tracking_store_exit_event(ProcessTracking *procp, PCB_EVENT event, ProcessContext *context);
 bool ec_process_tracking_should_track_user(void);
-bool ec_process_tracking_has_active_process(ProcessTracking *procp);
+bool ec_process_tracking_has_active_process(ProcessTracking *procp, ProcessContext *context);
 
 // File helpers
 typedef void (*process_tracking_for_each_tree_callback)(void *tree, void *priv, ProcessContext *context);

@@ -27,7 +27,7 @@ bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, Proc
     procp = ec_process_tracking_get_process(pid, context);
 
     TRY(procp);
-    shared_data = ec_process_tracking_get_shared_data_ref(procp->shared_data, context);
+    shared_data = ec_process_tracking_get_shared_data(procp, context);
 
     if (shared_data)
     {
@@ -48,7 +48,7 @@ void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext 
 {
     if (handle)
     {
-        ec_process_tracking_release_shared_data_ref(handle->shared_data, context);
+        ec_process_tracking_put_shared_data(handle->shared_data, context);
         handle->tree = NULL;
         handle->shared_data = NULL;
     }
@@ -72,6 +72,7 @@ void ec_process_tracking_for_each_file_tree(process_tracking_for_each_tree_callb
 int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
     ProcessTracking *procp      = NULL;
+    SharedTrackingData *shared_data = NULL;
     struct for_each_priv *local_priv = NULL;
 
     // NULL when hashtbl iterator has signal a stop.
@@ -90,8 +91,17 @@ int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, voi
     }
 
     procp = (ProcessTracking *)nodep;
+    shared_data = ec_process_tracking_get_shared_data(procp, context);
     local_priv = (struct for_each_priv *)priv;
 
-    ((process_tracking_for_each_tree_callback)local_priv->callback)(procp->shared_data->tracked_files, local_priv->priv, context);
+    if (shared_data)
+    {
+        // TODO: How well is tracked_files protected
+        ((process_tracking_for_each_tree_callback) local_priv->callback)(
+            shared_data->tracked_files,
+            local_priv->priv,
+            context);
+    }
+    ec_process_tracking_put_shared_data(shared_data, context);
     return ACTION_CONTINUE;
 }
