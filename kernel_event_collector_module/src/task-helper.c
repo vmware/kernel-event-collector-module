@@ -484,7 +484,7 @@ void __ec_add_tracking_for_task(
         {
             if (__ec_get_cmdline_from_task(task, path_buffer, PATH_MAX))
             {
-                ec_process_tracking_set_cmdline(procp, path_buffer, context);
+                ec_process_tracking_set_proc_cmdline(procp, path_buffer, context);
             }
         }
     } else

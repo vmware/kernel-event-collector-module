@@ -64,7 +64,7 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
     FILE_PROCESS_VALUE *value = NULL;
     FILE_TREE_HANDLE tree_handle;
     FILE_PROCESS_KEY key = { device, inode };
-    const char *process_path = "<unknown>";
+    char *process_path = NULL;
 
     TRY(ec_process_tracking_get_file_tree(pid, &tree_handle, context));
 
@@ -105,15 +105,19 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
             //  value
             ec_file_process_put_ref(value, context);
             value = NULL;
-            if (tree_handle.shared_data)
+            if (MAY_TRACE_LEVEL(DL_INFO))
             {
-                process_path = ec_process_tracking_get_path(tree_handle.shared_data);
-            }
+                if (tree_handle.shared_data)
+                {
+                    process_path = ec_process_tracking_get_path(tree_handle.shared_data, context);
+                }
 
-            // We are racing against other threads or processes
-            // to insert a similar entry on the same rb_tree.
-            TRACE(DL_INFO, "File entry already exists: [%llu:%llu] %s pid:%u (%s)",
-                device, inode, path ? path : "(path unknown)", pid, process_path);
+                // We are racing against other threads or processes
+                // to insert a similar entry on the same rb_tree.
+                TRACE(DL_INFO, "File entry already exists: [%llu:%llu] %s pid:%u (%s)",
+                    device, inode, path ? path : "(path unknown)", pid, process_path ? process_path : "<unknown>");
+                ec_process_tracking_put_path(process_path, context);
+            }
         }
     }
 
