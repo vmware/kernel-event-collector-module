@@ -27,7 +27,7 @@ int ec_lsm_file_mmap(struct file *file,
     char *pathname         = NULL;
     uint64_t device           = 0;
     uint64_t inode            = 0;
-    ProcessTracking *procp = NULL;
+    PosixIdentity *posix_identity = NULL;
     pid_t pid              = ec_getpid(current);
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
@@ -72,9 +72,9 @@ int ec_lsm_file_mmap(struct file *file,
         ec_file_get_path(file, string_buffer, PATH_MAX, &pathname);
     }
 
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "MODLOAD", &context);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "MODLOAD", &context);
     ec_event_send_modload(
-        procp,
+        posix_identity,
         CB_EVENT_TYPE_MODULE_LOAD,
         device,
         inode,
@@ -83,7 +83,7 @@ int ec_lsm_file_mmap(struct file *file,
         &context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(posix_identity, &context);
     ec_put_path_buffer(string_buffer);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)

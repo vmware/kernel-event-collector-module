@@ -16,7 +16,7 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
 {
     bool passed = false;
 
-    ProcessTracking *procp = ec_process_tracking_create_process(
+    PosixIdentity *posix_identity = ec_process_tracking_create_process(
         200,
         100,
         200,
@@ -27,21 +27,21 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
         NULL,
         REAL_START,
         context);
-    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
 
-    ASSERT_TRY(procp && shared_data);
+    ASSERT_TRY(posix_identity && exec_identity);
 
-    atomic64_set(&shared_data->active_process_count, 0);
+    atomic64_set(&exec_identity->active_process_count, 0);
     ASSERT_TRY(!ec_process_tracking_report_exit(200, context));
-    ASSERT_TRY(atomic64_read(&shared_data->exit_event) == 0);
+    ASSERT_TRY(atomic64_read(&exec_identity->exit_event) == 0);
 
     passed = true;
 CATCH_DEFAULT:
-    ec_process_tracking_put_shared_data(shared_data, context);
-    if (procp)
+    ec_process_tracking_put_exec_identity(exec_identity, context);
+    if (posix_identity)
     {
-        ec_process_tracking_remove_process(procp, context);
-        ec_process_tracking_put_process(procp, context);
+        ec_process_tracking_remove_process(posix_identity, context);
+        ec_process_tracking_put_process(posix_identity, context);
     }
 
     return passed;

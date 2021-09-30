@@ -133,7 +133,7 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
     uid_t uid = TASK_UID(task);
     uid_t euid = TASK_EUID(task);
     struct timespec start_time = {0};
-    ProcessTracking *procp = NULL;
+    PosixIdentity *posix_identity = NULL;
 
     getnstimeofday(&start_time);
 
@@ -162,7 +162,7 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
         ec_create_process_start_by_exec_event(task->real_parent, context);
     }
 
-    procp = ec_process_tracking_create_process(
+    posix_identity = ec_process_tracking_create_process(
         pid,
         ppid,
         tid,
@@ -175,12 +175,12 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
         context);
 
     // Send the event
-    ec_event_send_start(procp,
+    ec_event_send_start(posix_identity,
                     ec_process_tracking_should_track_user() ? uid : (uid_t)-1,
                     CB_PROCESS_START_BY_FORK,
                     context);
 
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
 }
 
 // This hook happens before the exec.  It will handle both the banning case and the start case
@@ -195,8 +195,8 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     uid_t uid = GET_UID();
     uid_t euid = GET_EUID();
     struct timespec start_time = {0, 0};
-    ProcessTracking *procp = NULL;
-    SharedTrackingData *shared_data = NULL;
+    PosixIdentity *posix_identity = NULL;
+    ExecIdentity *exec_identity = NULL;
     uint64_t device = 0;
     uint64_t inode = 0;
     char *path_buffer = NULL;
@@ -260,7 +260,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     if (bprm->recursion_depth == 0)
     {
         // Update the existing process on exec
-        procp = ec_process_tracking_update_process(
+        posix_identity = ec_process_tracking_update_process(
                     pid,
                     tid,
                     uid,
@@ -284,28 +284,28 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
 
         if (path_found)
         {
-            procp = ec_process_tracking_get_process(pid, &context);
-            shared_data = ec_process_tracking_get_shared_data(procp, &context);
+            posix_identity = ec_process_tracking_get_process(pid, &context);
+            exec_identity = ec_process_tracking_get_exec_identity(posix_identity, &context);
 
-            if (procp && shared_data)
+            if (posix_identity && exec_identity)
             {
                 // The previously set path is actually the script_path.
                 // The script will report as an open event when the interpreter opens it.
                 // The path from this call is the path of the interpreter.
                 char *_path = ec_mem_cache_strdup(path, &context);
 
-                shared_data->is_interpreter = true;
-                ec_process_tracking_set_path(shared_data, _path, &context);
+                exec_identity->is_interpreter = true;
+                ec_process_tracking_set_path(exec_identity, _path, &context);
                 ec_process_tracking_put_path(_path, &context);
 
                 // also need to update the file information
-                shared_data->exec_details.inode = inode;
-                shared_data->exec_details.device = device;
+                exec_identity->exec_details.inode = inode;
+                exec_identity->exec_details.device = device;
 
-                procp->posix_details.inode = inode;
-                procp->posix_details.device = device;
+                posix_identity->posix_details.inode = inode;
+                posix_identity->posix_details.device = device;
             }
-            ec_process_tracking_put_shared_data(shared_data, &context);
+            ec_process_tracking_put_exec_identity(exec_identity, &context);
         }
     }
 
@@ -316,8 +316,8 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     {
         if (killit)
         {
-            ec_process_tracking_mark_as_blocked(procp);
-            ec_event_send_block(procp,
+            ec_process_tracking_mark_as_blocked(posix_identity);
+            ec_event_send_block(posix_identity,
                              BlockDuringProcessStartup,
                              TerminateFailureReasonNone,
                              0, // details
@@ -329,7 +329,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     }
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(posix_identity, &context);
     ec_put_path_buffer(path_buffer);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
@@ -342,7 +342,7 @@ void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
 {
     pid_t            pid     = ec_getpid(current);
     uid_t            uid     = GET_UID();
-    ProcessTracking *procp   = NULL;
+    PosixIdentity *posix_identity   = NULL;
     char *cmdline = NULL;
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
@@ -351,8 +351,8 @@ void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
 
     // If this process is not tracked, do not send an event
     // We have had issues scheduling from this hook.  (Though it should really be OK)
-    procp = ec_process_tracking_get_process(pid, &context);
-    if (procp && !ec_process_tracking_is_blocked(procp))
+    posix_identity = ec_process_tracking_get_process(pid, &context);
+    if (posix_identity && !ec_process_tracking_is_blocked(posix_identity))
     {
         cmdline = ec_get_path_buffer(&context);
         if (cmdline)
@@ -360,16 +360,16 @@ void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
             ec_get_cmdline_from_binprm(bprm, cmdline, PATH_MAX);
         }
 
-        ec_process_tracking_set_proc_cmdline(procp, cmdline, &context);
+        ec_process_tracking_set_proc_cmdline(posix_identity, cmdline, &context);
 
-        ec_event_send_start(procp,
+        ec_event_send_start(posix_identity,
                          ec_process_tracking_should_track_user() ? uid : (uid_t)-1,
                          CB_PROCESS_START_BY_EXEC,
                          &context);
     }
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(posix_identity, &context);
     ec_put_path_buffer(cmdline);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     g_original_ops_ptr->bprm_committed_creds(bprm);

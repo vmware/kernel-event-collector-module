@@ -136,11 +136,11 @@ void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessConte
         CB_EVENT_NODE *node = container_of(event, CB_EVENT_NODE, data);
 
         // If we have something stored free it now
-        ec_process_tracking_put_shared_data(node->process_data, context);
+        ec_process_tracking_put_exec_identity(node->process_data, context);
 
         // Save the process data in the event node and increase the ref
         //  We don't actually do anything with this.  We only release it later.
-        node->process_data = ec_process_tracking_get_shared_data_ref(process_data, context);
+        node->process_data = ec_process_tracking_get_exec_identity_ref(process_data, context);
     }
 }
 

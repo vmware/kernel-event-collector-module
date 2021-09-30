@@ -201,7 +201,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     struct my_siginfo info;
     int ret;
     struct list_head *pos, *safe_del;
-    ProcessTracking *procp = NULL;
+    PosixIdentity *posix_identity = NULL;
     RUNNING_BANNED_INODE_S sRunningInodesToBan;
     RUNNING_PROCESSES_TO_BAN *temp = NULL;
 
@@ -236,8 +236,8 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     {
         struct task_struct const *task = NULL;
 
-        procp = (ProcessTracking *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->procp);
-        pid = procp->pt_key.pid;
+        posix_identity = (PosixIdentity *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->posix_identity);
+        pid = posix_identity->pt_key.pid;
 
         task = ec_find_task(pid);
         if (task)
@@ -248,11 +248,11 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
                 TRACE(DL_ERROR, "%s: killed process with [%llu:%llu] pid=%d", __func__, device, ino, pid);
 
                 // Send the event
-                ec_event_send_block(procp,
+                ec_event_send_block(posix_identity,
                                  ProcessTerminatedAfterStartup,
                                  TerminateFailureReasonNone,
                                  0,
-                                 ec_process_tracking_should_track_user() ? procp->uid : (uid_t)-1,
+                                 ec_process_tracking_should_track_user() ? posix_identity->uid : (uid_t)-1,
                                  NULL,
                                  context);
                 continue;

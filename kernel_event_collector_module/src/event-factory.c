@@ -20,7 +20,7 @@ const char *ec_StartAction_ToString(int start_action)
     return "??";
 }
 
-PCB_EVENT ec_factory_alloc_event(ProcessTracking *procp,
+PCB_EVENT ec_factory_alloc_event(PosixIdentity *posix_identity,
                                  CB_INTENT_TYPE  intentType,
                                  CB_EVENT_TYPE   eventType,
                                  int             trace_level,
@@ -30,25 +30,25 @@ PCB_EVENT ec_factory_alloc_event(ProcessTracking *procp,
 {
     PCB_EVENT event = NULL;
 
-    if (procp && type_msg && MAY_TRACE_LEVEL(trace_level))
+    if (posix_identity && type_msg && MAY_TRACE_LEVEL(trace_level))
     {
-        SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
-        char *path = ec_process_tracking_get_path(shared_data, context);
+        ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
+        char *path = ec_process_tracking_get_path(exec_identity, context);
 
-        if (shared_data)
+        if (exec_identity)
         {
             TRACE(trace_level, "%s%s %s of %d by %d (reported as %d:%ld by %d)",
                   type_msg,
                   (status_msg ? status_msg : ""),
                   (path ? path : "<unknown>"),
-                  procp->posix_details.pid,
-                  procp->posix_parent_details.pid,
-                  shared_data->exec_details.pid,
-                  shared_data->exec_details.start_time,
-                  shared_data->exec_parent_details.pid);
+                  posix_identity->posix_details.pid,
+                  posix_identity->posix_parent_details.pid,
+                  exec_identity->exec_details.pid,
+                  exec_identity->exec_details.start_time,
+                  exec_identity->exec_parent_details.pid);
         }
         ec_process_tracking_put_path(path, context);
-        ec_process_tracking_put_shared_data(shared_data, context);
+        ec_process_tracking_put_exec_identity(exec_identity, context);
     }
 
     // This will return a NULL event if we are configured to not send this event type
@@ -56,28 +56,28 @@ PCB_EVENT ec_factory_alloc_event(ProcessTracking *procp,
 
     // We still call this even for a NULL event to give the process_tracking a chance
     //  to clean up any private data
-    ec_process_tracking_set_event_info(procp, intentType, eventType, event, context);
+    ec_process_tracking_set_event_info(posix_identity, intentType, eventType, event, context);
 
     return event;
 }
 
-void ec_event_send_start(ProcessTracking *procp,
+void ec_event_send_start(PosixIdentity *posix_identity,
                       uid_t            uid,
                       int              start_action,
                       ProcessContext *context)
 {
     PCB_EVENT event = NULL;
-    SharedTrackingData *shared_data = NULL;
+    ExecIdentity *exec_identity = NULL;
 
-    CANCEL_VOID(procp);
+    CANCEL_VOID(posix_identity);
 
     event = ec_factory_alloc_event(
-        procp,
+        posix_identity,
         INTENT_REPORT,
         start_action != CB_PROCESS_START_BY_FORK ? CB_EVENT_TYPE_PROCESS_START_EXEC : CB_EVENT_TYPE_PROCESS_START_FORK,
         DL_PROCESS,
         ec_StartAction_ToString(start_action),
-        (procp && procp->is_real_start ? "" : " <FAKE>"),
+        (posix_identity && posix_identity->is_real_start ? "" : " <FAKE>"),
         context);
 
     CANCEL_VOID(event);
@@ -85,12 +85,12 @@ void ec_event_send_start(ProcessTracking *procp,
     // Populate the event
     event->processStart.uid            = uid;
     event->processStart.start_action   = start_action;
-    event->processStart.observed       = procp->is_real_start;
+    event->processStart.observed       = posix_identity->is_real_start;
 
-    shared_data = ec_process_tracking_get_shared_data(procp, context);
-    if (shared_data)
+    exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
+    if (exec_identity)
     {
-        event->processStart.path = ec_process_tracking_get_cmdline(shared_data, context);// take reference
+        event->processStart.path = ec_process_tracking_get_cmdline(exec_identity, context);// take reference
         if (event->processStart.path)
         {
             event->processStart.path_size = (uint16_t)strlen(event->processStart.path) + 1;
@@ -99,7 +99,7 @@ void ec_event_send_start(ProcessTracking *procp,
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
-    ec_process_tracking_put_shared_data(shared_data, context);
+    ec_process_tracking_put_exec_identity(exec_identity, context);
 }
 
 void ec_event_send_last_exit(PCB_EVENT        event,
@@ -119,7 +119,7 @@ void ec_event_send_last_exit(PCB_EVENT        event,
     ec_send_event(event, context);
 }
 
-void ec_event_send_exit(ProcessTracking *procp,
+void ec_event_send_exit(PosixIdentity *posix_identity,
                      bool             was_last_active_process,
                      ProcessContext  *context)
 {
@@ -127,7 +127,7 @@ void ec_event_send_exit(ProcessTracking *procp,
     //  the event because we may not be sending exits for all forks
     char      *status_msg           = "";
     PCB_EVENT  event                = ec_factory_alloc_event(
-        procp,
+        posix_identity,
 	INTENT_REPORT,
         was_last_active_process ? CB_EVENT_TYPE_PROCESS_LAST_EXIT : CB_EVENT_TYPE_PROCESS_EXIT,
         0,              // No message will be printed
@@ -146,7 +146,7 @@ void ec_event_send_exit(ProcessTracking *procp,
             status_msg = "<SEND> ";
         } else
         {
-            ec_process_tracking_store_exit_event(procp, event, context);
+            ec_process_tracking_store_exit_event(posix_identity, event, context);
             status_msg = "<HOLD-LAST> ";
         }
     } else
@@ -154,28 +154,28 @@ void ec_event_send_exit(ProcessTracking *procp,
         status_msg = "<IGNORED> ";
     }
 
-    if (procp && MAY_TRACE_LEVEL(DL_PROCESS))
+    if (posix_identity && MAY_TRACE_LEVEL(DL_PROCESS))
     {
-        SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
-        char *path = ec_process_tracking_get_path(shared_data, context);
+        ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
+        char *path = ec_process_tracking_get_path(exec_identity, context);
 
-        if (shared_data)
+        if (exec_identity)
         {
             TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
                   status_msg,
                   (path ? path : "<unknown>"),
-                  procp->posix_details.pid,
-                  procp->posix_parent_details.pid,
-                  shared_data->exec_details.pid,
-                  shared_data->exec_details.start_time,
-                  shared_data->exec_parent_details.pid);
+                  posix_identity->posix_details.pid,
+                  posix_identity->posix_parent_details.pid,
+                  exec_identity->exec_details.pid,
+                  exec_identity->exec_details.start_time,
+                  exec_identity->exec_parent_details.pid);
         }
         ec_process_tracking_put_path(path, context);
-        ec_process_tracking_put_shared_data(shared_data, context);
+        ec_process_tracking_put_exec_identity(exec_identity, context);
     }
 }
 
-void ec_event_send_block(ProcessTracking *procp,
+void ec_event_send_block(PosixIdentity *posix_identity,
                      uint32_t          type,
                      uint32_t          reason,
                      uint32_t          details,
@@ -185,7 +185,7 @@ void ec_event_send_block(ProcessTracking *procp,
 {
     size_t path_size = 0;
     PCB_EVENT event = ec_factory_alloc_event(
-        procp,
+        posix_identity,
 	INTENT_REPORT,
         CB_EVENT_TYPE_PROCESS_BLOCKED,
         DL_PROCESS,
@@ -218,7 +218,7 @@ void ec_event_send_block(ProcessTracking *procp,
 #define MSG_SIZE   200
 
 void ec_event_send_file(
-    ProcessTracking *procp,
+    PosixIdentity *posix_identity,
     CB_EVENT_TYPE    event_type,
     CB_INTENT_TYPE   intent,
     uint64_t         device,
@@ -244,7 +244,7 @@ void ec_event_send_file(
     }
 
     event = ec_factory_alloc_event(
-        procp,
+        posix_identity,
         intent,
         event_type,
         DL_FILE,
@@ -272,7 +272,7 @@ void ec_event_send_file(
 }
 
 void ec_event_send_modload(
-    ProcessTracking *procp,
+    PosixIdentity *posix_identity,
     CB_EVENT_TYPE    event_type,
     uint64_t         device,
     uint64_t         inode,
@@ -291,9 +291,9 @@ void ec_event_send_modload(
     // send a modload for that because we already send the process-start. eventuallly we
     // may want to make this case work if we decide to send modloads for the current elf
     // load, but for now we just drop it. We identify this case by seeing that no process
-    // exec event for the current procp has been sent yet, because the exec event is
+    // exec event for the current posix_identity has been sent yet, because the exec event is
     // responsible for freeing the parent shared data.
-    CANCEL_VOID(!procp->temp_shared_data);
+    CANCEL_VOID(!posix_identity->temp_exec_identity);
 
     if (MAY_TRACE_LEVEL(DL_MODLOAD))
     {
@@ -307,7 +307,7 @@ void ec_event_send_modload(
     }
 
     event = ec_factory_alloc_event(
-        procp,
+        posix_identity,
 	INTENT_REPORT,
         event_type,
         DL_MODLOAD,
@@ -336,7 +336,7 @@ void ec_event_send_modload(
 }
 
 void ec_event_send_net_proxy(
-    ProcessTracking *procp,
+    PosixIdentity *posix_identity,
     char            *msg,
     CB_EVENT_TYPE    net_event_type,
     CB_SOCK_ADDR     *localAddr,
@@ -348,7 +348,7 @@ void ec_event_send_net_proxy(
     ProcessContext   *context)
 {
     PCB_EVENT event = ec_factory_alloc_event(
-        procp,
+        posix_identity,
 	INTENT_REPORT,
         net_event_type,
         0,              // No message will be printed
@@ -383,7 +383,7 @@ void ec_event_send_net_proxy(
 }
 
 void ec_event_send_net(
-    ProcessTracking *procp,
+    PosixIdentity *posix_identity,
     char            *msg,
     CB_EVENT_TYPE    net_event_type,
     CB_SOCK_ADDR     *localAddr,
@@ -393,7 +393,7 @@ void ec_event_send_net(
     ProcessContext   *context)
 {
     return ec_event_send_net_proxy(
-        procp,
+        posix_identity,
         msg,
         net_event_type,
         localAddr,

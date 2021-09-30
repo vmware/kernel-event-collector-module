@@ -18,7 +18,7 @@ typedef struct pt_table_key {
 
 // List struct for use by RUNNING_BANNED_INODE_S
 typedef struct processes_to_ban {
-    void *procp; // Pointer for the process tracking element to ban
+    void *posix_identity; // Pointer for the process tracking element to ban
     struct list_head list;
 } RUNNING_PROCESSES_TO_BAN;
 
@@ -29,7 +29,7 @@ typedef struct running_banned_inode_info_s {
     RUNNING_PROCESSES_TO_BAN BanList;
 } RUNNING_BANNED_INODE_S;
 
-typedef struct shared_tracking_data {
+typedef struct exec_identity {
     ProcessDetails    exec_details;
     ProcessDetails    exec_parent_details;
     ProcessDetails    exec_grandparent_details;
@@ -58,14 +58,14 @@ typedef struct shared_tracking_data {
     // when the final process exits AND all outstanding events for the process have been read by the agent.
     // It is stored as an atomic so we can replace the pointer atomically
     atomic64_t        exit_event;
-} SharedTrackingData;
+} ExecIdentity;
 
 typedef struct file_tree_handle {
     CB_RBTREE *tree;
-    SharedTrackingData *shared_data;
+    ExecIdentity *exec_identity;
 } FILE_TREE_HANDLE;
 
-typedef struct process_tracking {
+typedef struct posix_identity {
     HashTableNode     pt_link;
     PT_TBL_KEY        pt_key;
 
@@ -107,18 +107,18 @@ typedef struct process_tracking {
 
     uint64_t    childproc_cnt;
 
-    SharedTrackingData *shared_data;
+    ExecIdentity *exec_identity;
 
-    // This holds a temporary pointer to the shared_data that will be referenced by the next event created for
+    // This holds a temporary pointer to the exec_identity that will be referenced by the next event created for
     // this proc. This is only used when creating events as a result of process execs.
-    SharedTrackingData *temp_shared_data;
+    ExecIdentity *temp_exec_identity;
 
-} ProcessTracking;
+} PosixIdentity;
 
 bool ec_process_tracking_initialize(ProcessContext *context);
 void ec_process_tracking_shutdown(ProcessContext *context);
 
-ProcessTracking *ec_process_tracking_create_process(
+PosixIdentity *ec_process_tracking_create_process(
         pid_t               pid,
         pid_t               parent,
         pid_t               tid,
@@ -129,7 +129,7 @@ ProcessTracking *ec_process_tracking_create_process(
         struct task_struct *taskp,
         bool                is_real_start,
         ProcessContext *context);
-ProcessTracking *ec_process_tracking_update_process(
+PosixIdentity *ec_process_tracking_update_process(
         pid_t               pid,
         pid_t               tid,
         uid_t               uid,
@@ -145,38 +145,38 @@ ProcessTracking *ec_process_tracking_update_process(
         bool                is_real_start,
         ProcessContext *context);
 
-ProcessTracking *ec_process_tracking_get_process(pid_t pid, ProcessContext *context);
-void ec_process_tracking_put_process(ProcessTracking *procp, ProcessContext *context);
-void ec_process_tracking_remove_process(ProcessTracking *procp, ProcessContext *context);
+PosixIdentity *ec_process_tracking_get_process(pid_t pid, ProcessContext *context);
+void ec_process_tracking_put_process(PosixIdentity *posix_identity, ProcessContext *context);
+void ec_process_tracking_remove_process(PosixIdentity *posix_identity, ProcessContext *context);
 bool ec_is_process_tracked(pid_t pid, ProcessContext *context);
 void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context);
 bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context);
-char *ec_process_tracking_get_path(SharedTrackingData *shared_data, ProcessContext *context);
-void ec_process_tracking_set_path(SharedTrackingData *shared_data, char *path, ProcessContext *context);
+char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *context);
+void ec_process_tracking_set_path(ExecIdentity *exec_identity, char *path, ProcessContext *context);
 void ec_process_tracking_put_path(char *path, ProcessContext *context);
-char *ec_process_tracking_get_cmdline(SharedTrackingData *shared_data, ProcessContext *context);
-void ec_process_tracking_set_cmdline(SharedTrackingData *shared_data, char *cmdline, ProcessContext *context);
+char *ec_process_tracking_get_cmdline(ExecIdentity *exec_identity, ProcessContext *context);
+void ec_process_tracking_set_cmdline(ExecIdentity *exec_identity, char *cmdline, ProcessContext *context);
 void ec_process_tracking_put_cmdline(char *cmdline, ProcessContext *context);
-void ec_process_tracking_set_proc_cmdline(ProcessTracking *procp, char *cmdline, ProcessContext *context);
+void ec_process_tracking_set_proc_cmdline(PosixIdentity *posix_identity, char *cmdline, ProcessContext *context);
 
 // Discovery
 void ec_process_tracking_send_process_discovery(ProcessContext *context);
 
 // Hook Helpers
-void ec_process_tracking_mark_as_blocked(ProcessTracking *procp);
-bool ec_process_tracking_is_blocked(ProcessTracking *procp);
-pid_t ec_process_tracking_exec_pid(ProcessTracking *procp, ProcessContext *context);
+void ec_process_tracking_mark_as_blocked(PosixIdentity *posix_identity);
+bool ec_process_tracking_is_blocked(PosixIdentity *posix_identity);
+pid_t ec_process_tracking_exec_pid(PosixIdentity *posix_identity, ProcessContext *context);
 void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context);
-ProcessTracking *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context);
-SharedTrackingData *ec_process_tracking_get_shared_data(ProcessTracking *procp, ProcessContext *context);
-SharedTrackingData *ec_process_tracking_get_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context);
-void ec_process_tracking_put_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
+PosixIdentity *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context);
+ExecIdentity *ec_process_tracking_get_exec_identity(PosixIdentity *posix_identity, ProcessContext *context);
+ExecIdentity *ec_process_tracking_get_exec_identity_ref(ExecIdentity *exec_identity, ProcessContext *context);
+void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
 
 // Event Helper
-void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
-void ec_process_tracking_store_exit_event(ProcessTracking *procp, PCB_EVENT event, ProcessContext *context);
+void ec_process_tracking_set_event_info(PosixIdentity *posix_identity, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
+void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVENT event, ProcessContext *context);
 bool ec_process_tracking_should_track_user(void);
-bool ec_process_tracking_has_active_process(ProcessTracking *procp, ProcessContext *context);
+bool ec_process_tracking_has_active_process(PosixIdentity *posix_identity, ProcessContext *context);
 
 // File helpers
 typedef void (*process_tracking_for_each_tree_callback)(void *tree, void *priv, ProcessContext *context);
@@ -184,7 +184,7 @@ bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, Proc
 void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext *context);
 void ec_process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback callback, void *priv, ProcessContext *context);
 
-// List of interpreters. The SharedTrackingData::is_interpreter flag
+// List of interpreters. The ExecIdentity::is_interpreter flag
 // is set for any process whose path contains a name in this list.
 extern char **g_interpreter_names;
 extern int    g_interpreter_names_count;

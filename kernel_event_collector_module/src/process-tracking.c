@@ -13,12 +13,12 @@
 #include "path-buffers.h"
 #include "cb-spinlock.h"
 
-void ec_hashtbl_delete_callback(void *procp, ProcessContext *context);
-void __ec_shared_data_print_callback(void *data, ProcessContext *context);
+void ec_hashtbl_delete_callback(void *posix_identity, ProcessContext *context);
+void __ec_exec_identity_print_callback(void *data, ProcessContext *context);
 
-SharedTrackingData *ec_process_tracking_alloc_shared_data(ProcessContext *context);
-void ec_process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context);
-ProcessTracking *ec_process_tracking_add_process(ProcessTracking *procp, ProcessContext *context);
+ExecIdentity *ec_process_tracking_alloc_exec_identity(ProcessContext *context);
+void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
+PosixIdentity *ec_process_tracking_add_process(PosixIdentity *posix_identity, ProcessContext *context);
 
 process_tracking_data g_process_tracking_data = { 0, };
 
@@ -45,17 +45,17 @@ bool ec_process_tracking_initialize(ProcessContext *context)
     g_process_tracking_data.table = ec_hashtbl_init_generic(
                                                     context,
                                                     8192,
-                                                    sizeof(ProcessTracking),
+                                                    sizeof(PosixIdentity),
                                                     CB_PT_CACHE_OBJ_SZ,
                                                     "pt_cache",
                                                     sizeof(PT_TBL_KEY),
-                                                    offsetof(ProcessTracking, pt_key),
-                                                    offsetof(ProcessTracking, pt_link),
-                                                    offsetof(ProcessTracking, reference_count),
+                                                    offsetof(PosixIdentity, pt_key),
+                                                    offsetof(PosixIdentity, pt_link),
+                                                    offsetof(PosixIdentity, reference_count),
                                                     ec_hashtbl_delete_callback);
     TRY(g_process_tracking_data.table);
 
-    TRY(ec_mem_cache_create(&g_process_tracking_data.shared_data_cache, "pt_shared_data_cache", sizeof(SharedTrackingData), context));
+    TRY(ec_mem_cache_create(&g_process_tracking_data.exec_identity_cache, "pt_exec_identity_cache", sizeof(ExecIdentity), context));
 
     return true;
 
@@ -74,25 +74,25 @@ void ec_process_tracking_shutdown(ProcessContext *context)
         g_process_tracking_data.table = NULL;
     }
 
-    ec_mem_cache_destroy(&g_process_tracking_data.shared_data_cache, context, __ec_shared_data_print_callback);
+    ec_mem_cache_destroy(&g_process_tracking_data.exec_identity_cache, context, __ec_exec_identity_print_callback);
 
     g_print_proc_on_delete = false;
 }
 
-ProcessTracking *ec_process_tracking_get_process(pid_t pid, ProcessContext *context)
+PosixIdentity *ec_process_tracking_get_process(pid_t pid, ProcessContext *context)
 {
     PT_TBL_KEY key = { pid };
 
-    ProcessTracking *procp = ((ProcessTracking *)ec_hashtbl_get_generic(g_process_tracking_data.table, &key, context));
+    PosixIdentity *posix_identity = ((PosixIdentity *)ec_hashtbl_get_generic(g_process_tracking_data.table, &key, context));
 
-    return procp;
+    return posix_identity;
 }
 
 // Check whether path points at an interpreter.
-bool ec_process_tracking_is_interpreter(SharedTrackingData *shared_data, ProcessContext *context)
+bool ec_process_tracking_is_interpreter(ExecIdentity *exec_identity, ProcessContext *context)
 {
     bool result = false;
-    char *path = ec_process_tracking_get_path(shared_data, context);
+    char *path = ec_process_tracking_get_path(exec_identity, context);
 
     if (path)
     {
@@ -116,7 +116,7 @@ bool ec_process_tracking_is_interpreter(SharedTrackingData *shared_data, Process
     return result;
 }
 
-ProcessTracking *ec_process_tracking_create_process(
+PosixIdentity *ec_process_tracking_create_process(
         pid_t               pid,
         pid_t               parent,
         pid_t               tid,
@@ -128,9 +128,9 @@ ProcessTracking *ec_process_tracking_create_process(
         bool                is_real_start,
         ProcessContext *context)
 {
-    ProcessTracking    *procp        = NULL;
-    SharedTrackingData *shared_data  = NULL;
-    ProcessTracking    *parent_procp = NULL;
+    PosixIdentity    *posix_identity        = NULL;
+    ExecIdentity *exec_identity  = NULL;
+    PosixIdentity    *parent_posix_identity = NULL;
     char               *msg          = (is_real_start ? "" : "<FAKE> ");
     ProcessDetails      posix_parent_details      = { 0 };
     ProcessDetails      posix_grandparent_details = { 0 };
@@ -138,95 +138,95 @@ ProcessTracking *ec_process_tracking_create_process(
     // If this start is a fork we need to pull the shared struct from the parent
     if (action == CB_PROCESS_START_BY_FORK)
     {
-        parent_procp = ec_process_tracking_get_process(parent, context);
-        if (parent_procp)
+        parent_posix_identity = ec_process_tracking_get_process(parent, context);
+        if (parent_posix_identity)
         {
             // Increase the reference count on the shared data (for local function)
-            shared_data = ec_process_tracking_get_shared_data(parent_procp, context);
-            posix_parent_details      = parent_procp->posix_details;
-            posix_grandparent_details = parent_procp->posix_parent_details;
+            exec_identity = ec_process_tracking_get_exec_identity(parent_posix_identity, context);
+            posix_parent_details      = parent_posix_identity->posix_details;
+            posix_grandparent_details = parent_posix_identity->posix_parent_details;
 
-            ec_process_tracking_put_process(parent_procp, context);
+            ec_process_tracking_put_process(parent_posix_identity, context);
         }
     }
 
-    // We don't have a shared_data object from our parent, so create one now.  This
+    // We don't have a exec_identity object from our parent, so create one now.  This
     //  will happen in three cases.
     //  1. We observed some event on this process
     //  2. We saw a fork, but the parent is not tracked
     //  3. We saw an exec on this process
-    if (!shared_data)
+    if (!exec_identity)
     {
         struct task_struct *parent_task  = (taskp       ? taskp->real_parent : NULL);
         struct task_struct *gparent_task = (parent_task ? parent_task->real_parent : NULL);
 
         // TODO: We really need to build my parent
         // This gives us a local reference
-        shared_data = ec_process_tracking_alloc_shared_data(context);
-        if (!shared_data)
+        exec_identity = ec_process_tracking_alloc_exec_identity(context);
+        if (!exec_identity)
         {
             return NULL;
         }
 
-        shared_data->exec_details.pid                = parent;
-        shared_data->exec_details.start_time         = start_time;
-        ec_get_devinfo_from_task(taskp, &shared_data->exec_details.device, &shared_data->exec_details.inode);
+        exec_identity->exec_details.pid                = parent;
+        exec_identity->exec_details.start_time         = start_time;
+        ec_get_devinfo_from_task(taskp, &exec_identity->exec_details.device, &exec_identity->exec_details.inode);
 
-        shared_data->exec_parent_details.pid         = (gparent_task ? ec_getpid(gparent_task) : 1);
-        shared_data->exec_parent_details.start_time  = ec_get_null_time();
-        ec_get_devinfo_from_task(parent_task, &shared_data->exec_details.device, &shared_data->exec_details.inode);
+        exec_identity->exec_parent_details.pid         = (gparent_task ? ec_getpid(gparent_task) : 1);
+        exec_identity->exec_parent_details.start_time  = ec_get_null_time();
+        ec_get_devinfo_from_task(parent_task, &exec_identity->exec_details.device, &exec_identity->exec_details.inode);
 
-        shared_data->exec_grandparent_details.pid         = 0;
-        shared_data->exec_grandparent_details.device      = 0;
-        shared_data->exec_grandparent_details.inode       = 0;
-        shared_data->exec_grandparent_details.start_time  = ec_get_null_time();
+        exec_identity->exec_grandparent_details.pid         = 0;
+        exec_identity->exec_grandparent_details.device      = 0;
+        exec_identity->exec_grandparent_details.inode       = 0;
+        exec_identity->exec_grandparent_details.start_time  = ec_get_null_time();
 
-        shared_data->path_found   = false;
-        shared_data->exec_count   = 1;
+        exec_identity->path_found   = false;
+        exec_identity->exec_count   = 1;
 
-        posix_parent_details      = shared_data->exec_details;
-        posix_grandparent_details = shared_data->exec_parent_details;
+        posix_parent_details      = exec_identity->exec_details;
+        posix_grandparent_details = exec_identity->exec_parent_details;
 
-        shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data, context);
+        exec_identity->is_interpreter = ec_process_tracking_is_interpreter(exec_identity, context);
     }
 
-    procp = (ProcessTracking *)ec_hashtbl_alloc_generic(g_process_tracking_data.table, context);
-    if (procp)
+    posix_identity = (PosixIdentity *)ec_hashtbl_alloc_generic(g_process_tracking_data.table, context);
+    if (posix_identity)
     {
-        procp->pt_key.pid                 = pid;
-        procp->tid                        = tid;
-        procp->uid                        = uid;
-        procp->euid                       = euid;
-        procp->action                     = action;
-        procp->process_op_cnt             =
-            procp->process_create         =
-            procp->process_create_by_fork =
-            procp->process_create_by_exec =
-            procp->childproc_cnt          =
-            procp->file_op_cnt            =
-            procp->file_map_exec          =
-            procp->file_create            =
-            procp->file_delete            =
-            procp->file_open              =
-            procp->file_write             =
-            procp->file_close             =
-            procp->net_op_cnt             =
-            procp->net_connect            =
-            procp->net_accept             =
-            procp->net_dns                = 0;
-        procp->is_real_start              = is_real_start;
-        procp->shared_data                = NULL;
-        procp->temp_shared_data           = NULL;
-        procp->exec_blocked               = false;
+        posix_identity->pt_key.pid                 = pid;
+        posix_identity->tid                        = tid;
+        posix_identity->uid                        = uid;
+        posix_identity->euid                       = euid;
+        posix_identity->action                     = action;
+        posix_identity->process_op_cnt             =
+            posix_identity->process_create         =
+            posix_identity->process_create_by_fork =
+            posix_identity->process_create_by_exec =
+            posix_identity->childproc_cnt          =
+            posix_identity->file_op_cnt            =
+            posix_identity->file_map_exec          =
+            posix_identity->file_create            =
+            posix_identity->file_delete            =
+            posix_identity->file_open              =
+            posix_identity->file_write             =
+            posix_identity->file_close             =
+            posix_identity->net_op_cnt             =
+            posix_identity->net_connect            =
+            posix_identity->net_accept             =
+            posix_identity->net_dns                = 0;
+        posix_identity->is_real_start              = is_real_start;
+        posix_identity->exec_identity                = NULL;
+        posix_identity->temp_exec_identity           = NULL;
+        posix_identity->exec_blocked               = false;
 
-        procp->posix_details.pid         = pid;
-        procp->posix_details.device      = shared_data->exec_details.device;
-        procp->posix_details.inode       = shared_data->exec_details.inode;
-        procp->posix_details.start_time  = start_time;
+        posix_identity->posix_details.pid         = pid;
+        posix_identity->posix_details.device      = exec_identity->exec_details.device;
+        posix_identity->posix_details.inode       = exec_identity->exec_details.inode;
+        posix_identity->posix_details.start_time  = start_time;
 
-        procp->posix_parent_details      = posix_parent_details;
-        procp->posix_grandparent_details = posix_grandparent_details;
-        atomic64_set(&procp->reference_count, 1);
+        posix_identity->posix_parent_details      = posix_parent_details;
+        posix_identity->posix_grandparent_details = posix_grandparent_details;
+        atomic64_set(&posix_identity->reference_count, 1);
 
         g_process_tracking_data.op_cnt += 1;
         g_process_tracking_data.create += 1;
@@ -239,39 +239,39 @@ ProcessTracking *ec_process_tracking_create_process(
             g_process_tracking_data.create_by_exec += 1;
         }
 
-        ec_process_tracking_set_shared_data(procp, shared_data, context);
+        ec_process_tracking_set_exec_identity(posix_identity, exec_identity, context);
 
-        procp = ec_process_tracking_add_process(procp, context);
-        TRY(procp);
+        posix_identity = ec_process_tracking_add_process(posix_identity, context);
+        TRY(posix_identity);
 
 
         // We have recorded this in the tracking table, so mark it as active
-        atomic64_inc(&shared_data->active_process_count);
+        atomic64_inc(&exec_identity->active_process_count);
 
         if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
         {
-            char *path = ec_process_tracking_get_path(shared_data, context);
+            char *path = ec_process_tracking_get_path(exec_identity, context);
 
             TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %" PRFs64 ")",
                   msg,
                   path,
                   pid,
                   parent,
-                  shared_data->exec_details.pid,
-                  shared_data->exec_parent_details.pid,
-                  (long long) atomic64_read(&shared_data->active_process_count));
+                  exec_identity->exec_details.pid,
+                  exec_identity->exec_parent_details.pid,
+                  (long long) atomic64_read(&exec_identity->active_process_count));
             ec_process_tracking_put_path(path, context);
         }
     }
 
 CATCH_DEFAULT:
     // Always drop the ref held by this local function
-    ec_process_tracking_put_shared_data(shared_data, context);
+    ec_process_tracking_put_exec_identity(exec_identity, context);
 
-    return procp;
+    return posix_identity;
 }
 
-ProcessTracking *ec_process_tracking_update_process(
+PosixIdentity *ec_process_tracking_update_process(
     pid_t               pid,
     pid_t               tid,
     uid_t               uid,
@@ -287,17 +287,17 @@ ProcessTracking *ec_process_tracking_update_process(
     bool                is_real_start,
     ProcessContext     *context)
 {
-    ProcessTracking    *procp              = NULL;
-    SharedTrackingData *shared_data        = NULL;
-    SharedTrackingData *parent_shared_data = NULL;
+    PosixIdentity    *posix_identity              = NULL;
+    ExecIdentity *exec_identity        = NULL;
+    ExecIdentity *parent_exec_identity = NULL;
     pid_t               parent             = ec_getppid(taskp);
     struct task_struct *parent_task        = (taskp       ? taskp->real_parent : NULL);
     char               *msg                = "";
     bool isExecOther = false;
     bool was_last_active_process = false;
 
-    procp = ec_process_tracking_get_process(pid, context);
-    if (!procp)
+    posix_identity = ec_process_tracking_get_process(pid, context);
+    if (!posix_identity)
     {
         msg = "<FAKE> ";
 
@@ -317,7 +317,7 @@ ProcessTracking *ec_process_tracking_update_process(
         }
 
         // This will use the comm instead of a path
-        procp = ec_process_tracking_create_process(
+        posix_identity = ec_process_tracking_create_process(
                 pid,
                 parent,
                 tid,
@@ -329,7 +329,7 @@ ProcessTracking *ec_process_tracking_update_process(
                 FAKE_START,
                 context);
 
-        if (!procp)
+        if (!posix_identity)
         {
             TRACE(DL_PROC_TRACKING, "TRACK-UPD <FAKE> FAILED to create tracking entry for %d by %d",
                     pid,
@@ -339,53 +339,53 @@ ProcessTracking *ec_process_tracking_update_process(
     }
 
     // Increase the reference count on the shared data (for local function)
-    parent_shared_data = ec_process_tracking_get_shared_data(procp, context);
+    parent_exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
 
-    isExecOther = parent_shared_data->exec_details.pid == pid;
+    isExecOther = parent_exec_identity->exec_details.pid == pid;
 
     // The new process we are execing was an active process in its parent. So reduce the active count of the parent
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&parent_shared_data->active_process_count, { was_last_active_process = true; });
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&parent_exec_identity->active_process_count, { was_last_active_process = true; });
 
     // Allocate a shared data_object for the new process
     //  We get a reference to this
-    shared_data = ec_process_tracking_alloc_shared_data(context);
+    exec_identity = ec_process_tracking_alloc_exec_identity(context);
 
     // If this is was the last remaining process of the exec identity we want to
     //  send an exit for it.
     //  This will catch exec-other and last fork cases.  We want to ignore a fake start however.
     if (was_last_active_process && is_real_start)
     {
-        // This will set the current proc's temp_shared_data to the new shared data of the execed proc.
-        // The exit event (for the previous exec identity/parent) will take a reference to this shared_data.
+        // This will set the current proc's temp_exec_identity to the new shared data of the execed proc.
+        // The exit event (for the previous exec identity/parent) will take a reference to this exec_identity.
         // This forces the new exec's exit event to wait to be queued until after previous exec's exit event.
-        ec_process_tracking_set_temp_shared_data(procp, shared_data, context);
+        ec_process_tracking_set_temp_exec_identity(posix_identity, exec_identity, context);
 
         // Send the event based on the current process information.
-        //  We will not delete the procp since it will be used by the new process.
-        //  The shared_data will be released later
-        ec_event_send_exit(procp, was_last_active_process, context);
+        //  We will not delete the posix_identity since it will be used by the new process.
+        //  The exec_identity will be released later
+        ec_event_send_exit(posix_identity, was_last_active_process, context);
     }
 
-    TRY_DO_MSG(shared_data,
-               { procp = NULL; },
+    TRY_DO_MSG(exec_identity,
+               { posix_identity = NULL; },
                DL_WARNING, "%s: error allocating shared data for pid[%d]\n", __func__, pid);
 
     // reported data changes generations during exec
-    shared_data->exec_grandparent_details = parent_shared_data->exec_parent_details;
-    shared_data->exec_parent_details      = parent_shared_data->exec_details;
+    exec_identity->exec_grandparent_details = parent_exec_identity->exec_parent_details;
+    exec_identity->exec_parent_details      = parent_exec_identity->exec_details;
 
 
-    shared_data->exec_details.pid         = pid;
-    shared_data->exec_details.device      = device;
-    shared_data->exec_details.inode       = inode;
-    shared_data->exec_details.start_time  = start_time;
+    exec_identity->exec_details.pid         = pid;
+    exec_identity->exec_details.device      = device;
+    exec_identity->exec_details.inode       = inode;
+    exec_identity->exec_details.start_time  = start_time;
 
-    shared_data->path_found               = path_found;
-    shared_data->exec_count               = (!isExecOther ? 1 : parent_shared_data->exec_count + 1);
+    exec_identity->path_found               = path_found;
+    exec_identity->exec_count               = (!isExecOther ? 1 : parent_exec_identity->exec_count + 1);
 
-    procp->posix_details.inode            = inode;
-    procp->posix_details.device           = device;
-    procp->posix_details.inode            = inode;
+    posix_identity->posix_details.inode            = inode;
+    posix_identity->posix_details.device           = device;
+    posix_identity->posix_details.inode            = inode;
 
     if (!path && ec_is_task_valid(taskp))
     {
@@ -395,30 +395,30 @@ ProcessTracking *ec_process_tracking_update_process(
     path = ec_mem_cache_strdup(path, context);
 
     TRY(path);
-    ec_process_tracking_set_path(shared_data, path, context);
+    ec_process_tracking_set_path(exec_identity, path, context);
 
-    shared_data->is_interpreter = ec_process_tracking_is_interpreter(shared_data, context);
+    exec_identity->is_interpreter = ec_process_tracking_is_interpreter(exec_identity, context);
 
     // Update our table entry with the new shared data
-    ec_process_tracking_set_shared_data(procp, shared_data, context);
+    ec_process_tracking_set_exec_identity(posix_identity, exec_identity, context);
 
     // Mark us as an active process
-    atomic64_inc(&shared_data->active_process_count);
+    atomic64_inc(&exec_identity->active_process_count);
 
-    procp->tid            = tid;
-    procp->uid            = uid;
-    procp->euid           = euid;
-    procp->action         = action;
-    procp->is_real_start  = is_real_start;
+    posix_identity->tid            = tid;
+    posix_identity->uid            = uid;
+    posix_identity->euid           = euid;
+    posix_identity->action         = action;
+    posix_identity->is_real_start  = is_real_start;
 
     if (is_real_start)
     {
-        // Hold onto a reference to our parent shared_data until the start event is sent.
+        // Hold onto a reference to our parent exec_identity until the start event is sent.
         //  This will ensure the exit event of the parent is sent after this start event
-        ec_process_tracking_set_temp_shared_data(procp, parent_shared_data, context);
+        ec_process_tracking_set_temp_exec_identity(posix_identity, parent_exec_identity, context);
     }
 
-    ec_process_tracking_update_op_cnts(procp, event_type, action);
+    ec_process_tracking_update_op_cnts(posix_identity, event_type, action);
 
     if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
     {
@@ -427,93 +427,93 @@ ProcessTracking *ec_process_tracking_update_process(
               path ? path : "<unknown>",
               pid,
               parent,
-              shared_data->exec_details.pid,
-              shared_data->exec_details.start_time,
-              shared_data->exec_parent_details.pid,
-              shared_data->exec_parent_details.start_time,
-              (long long)atomic64_read(&shared_data->active_process_count));
+              exec_identity->exec_details.pid,
+              exec_identity->exec_details.start_time,
+              exec_identity->exec_parent_details.pid,
+              exec_identity->exec_parent_details.start_time,
+              (long long)atomic64_read(&exec_identity->active_process_count));
     }
 
 CATCH_DEFAULT:
     // Release the local ref held by this function
     ec_process_tracking_put_path(path, context);
-    ec_process_tracking_put_shared_data(shared_data, context);
-    ec_process_tracking_put_shared_data(parent_shared_data, context);
+    ec_process_tracking_put_exec_identity(exec_identity, context);
+    ec_process_tracking_put_exec_identity(parent_exec_identity, context);
 
-    return procp;
+    return posix_identity;
 }
 
-void ec_process_tracking_put_process(ProcessTracking *procp, ProcessContext *context)
+void ec_process_tracking_put_process(PosixIdentity *posix_identity, ProcessContext *context)
 {
-    if (procp)
+    if (posix_identity)
     {
-        ec_hashtbl_put_generic(g_process_tracking_data.table, procp, context);
+        ec_hashtbl_put_generic(g_process_tracking_data.table, posix_identity, context);
     }
 }
 
-void ec_process_tracking_remove_process(ProcessTracking *procp, ProcessContext *context)
+void ec_process_tracking_remove_process(PosixIdentity *posix_identity, ProcessContext *context)
 {
-    if (procp)
+    if (posix_identity)
     {
         g_process_tracking_data.op_cnt += 1;
         g_process_tracking_data.exit += 1;
 
         TRACE(DL_PROC_TRACKING, "TRACK-DEL pid=%d opcnt=%llu create=%llu exit=%llu",
-               procp->posix_details.pid,
+               posix_identity->posix_details.pid,
                g_process_tracking_data.op_cnt,
                g_process_tracking_data.create,
                g_process_tracking_data.exit);
 
         // In the exec-other and some pid wrap cases this entry may not exist in
         //  hash table.  In this case, it will be a no-op.
-        ec_hashtbl_del_generic(g_process_tracking_data.table, procp, context);
+        ec_hashtbl_del_generic(g_process_tracking_data.table, posix_identity, context);
     }
 }
 
-ProcessTracking *ec_process_tracking_add_process(ProcessTracking *procp, ProcessContext *context)
+PosixIdentity *ec_process_tracking_add_process(PosixIdentity *posix_identity, ProcessContext *context)
 {
-    if (ec_hashtbl_add_generic(g_process_tracking_data.table, procp, context) < 0)
+    if (ec_hashtbl_add_generic(g_process_tracking_data.table, posix_identity, context) < 0)
     {
-        // This will free the procp regardless of the current ref count
-        ec_hashtbl_free_generic(g_process_tracking_data.table, procp, context);
-        procp = NULL;
+        // This will free the posix_identity regardless of the current ref count
+        ec_hashtbl_free_generic(g_process_tracking_data.table, posix_identity, context);
+        posix_identity = NULL;
     }
-    return procp;
+    return posix_identity;
 }
 
 bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context)
 {
     bool result = false;
     bool was_last_active_process = false;
-    ProcessTracking *procp = ec_process_tracking_get_process(pid, context);
-    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+    PosixIdentity *posix_identity = ec_process_tracking_get_process(pid, context);
+    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
 
-    TRY(procp && shared_data);
+    TRY(posix_identity && exec_identity);
 
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&shared_data->active_process_count, { was_last_active_process = true; });
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->active_process_count, { was_last_active_process = true; });
 
-    ec_event_send_exit(procp, was_last_active_process, context);
-    ec_process_tracking_remove_process(procp, context);
+    ec_event_send_exit(posix_identity, was_last_active_process, context);
+    ec_process_tracking_remove_process(posix_identity, context);
     result = true;
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_shared_data(shared_data, context);
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_exec_identity(exec_identity, context);
+    ec_process_tracking_put_process(posix_identity, context);
     return result;
 }
 
-ProcessTracking *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context)
+PosixIdentity *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context)
 {
-    ProcessTracking *procp = NULL;
+    PosixIdentity *posix_identity = NULL;
 
-    procp = ec_process_tracking_get_process(pid, context);
-    if (!procp)
+    posix_identity = ec_process_tracking_get_process(pid, context);
+    if (!posix_identity)
     {
         TRACE(DL_INFO, "%s pid=%d not tracked", msg, pid);
         ec_create_process_start_by_exec_event(current, context);
-        procp = ec_process_tracking_get_process(pid, context);
+        posix_identity = ec_process_tracking_get_process(pid, context);
     }
-    return procp;
+    return posix_identity;
 }
 
 void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context)
@@ -528,7 +528,7 @@ void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessCont
 
     char *path = NULL;
     bool path_found = false;
-    ProcessTracking *procp = NULL;
+    PosixIdentity *posix_identity = NULL;
     char *path_buffer = NULL;
 
     CANCEL_VOID_MSG(task, DL_WARNING, "cannot create process start with null task");
@@ -572,7 +572,7 @@ void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessCont
 
     ec_get_devinfo_from_task(task, &device, &inode);
 
-    procp = ec_process_tracking_update_process(
+    posix_identity = ec_process_tracking_update_process(
         pid,
         tid,
         uid,
@@ -591,77 +591,77 @@ void ec_create_process_start_by_exec_event(struct task_struct *task, ProcessCont
     ec_put_path_buffer(path_buffer);
     path = path_buffer = NULL;
 
-    CANCEL_VOID(procp);
+    CANCEL_VOID(posix_identity);
 
-    ec_event_send_start(procp,
+    ec_event_send_start(posix_identity,
                     ec_process_tracking_should_track_user() ? uid : (uid_t)-1,
                     CB_PROCESS_START_BY_EXEC,
                     context);
 
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
 }
 
-SharedTrackingData *ec_process_tracking_alloc_shared_data(ProcessContext *context)
+ExecIdentity *ec_process_tracking_alloc_exec_identity(ProcessContext *context)
 {
-    SharedTrackingData *shared_data = NULL;
+    ExecIdentity *exec_identity = NULL;
 
-    shared_data = (SharedTrackingData *)ec_mem_cache_alloc(&g_process_tracking_data.shared_data_cache, context);
-    ec_process_tracking_init_shared_data(shared_data, context);
-    return ec_process_tracking_get_shared_data_ref(shared_data, context);
+    exec_identity = (ExecIdentity *)ec_mem_cache_alloc(&g_process_tracking_data.exec_identity_cache, context);
+    ec_process_tracking_init_exec_identity(exec_identity, context);
+    return ec_process_tracking_get_exec_identity_ref(exec_identity, context);
 }
 
-void ec_process_tracking_init_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
+void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
 {
-    if (shared_data)
+    if (exec_identity)
     {
-        ec_file_process_tree_init(&shared_data->tracked_files, context);
-        atomic64_set(&shared_data->reference_count, 0);
-        atomic64_set(&shared_data->active_process_count, 0);
-        atomic64_set(&shared_data->exit_event, 0);
-        shared_data->path               = NULL;
-        shared_data->cmdline            = NULL;
-        shared_data->is_interpreter     = false;
+        ec_file_process_tree_init(&exec_identity->tracked_files, context);
+        atomic64_set(&exec_identity->reference_count, 0);
+        atomic64_set(&exec_identity->active_process_count, 0);
+        atomic64_set(&exec_identity->exit_event, 0);
+        exec_identity->path               = NULL;
+        exec_identity->cmdline            = NULL;
+        exec_identity->is_interpreter     = false;
 
         // TODO: Add lock here
     }
 }
 
-void ec_process_tracking_put_shared_data(SharedTrackingData *shared_data, ProcessContext *context)
+void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
 {
     PCB_EVENT exit_event;
 
-    CANCEL_VOID(shared_data);
+    CANCEL_VOID(exec_identity);
 
     #ifdef _REF_DEBUGGING
     if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
     {
-        char *path = ec_process_tracking_get_path(shared_data, context);
+        char *path = ec_process_tracking_get_path(exec_identity, context);
 
-        TRACE(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
+        TRACE(DL_PROC_TRACKING, "    %s: %s %d exec_identity Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
             __func__,
             ec_process_tracking_get_proc_name(path),
-            shared_data->exec_details.pid,
-            (long long)atomic64_read(&shared_data->reference_count),
-            (long long)atomic64_read(&shared_data->active_process_count),
-            shared_data);
+            exec_identity->exec_details.pid,
+            (long long)atomic64_read(&exec_identity->reference_count),
+            (long long)atomic64_read(&exec_identity->active_process_count),
+            exec_identity);
         ec_process_tracking_put_path(path, context);
     }
     #endif
 
     // If the reference count reaches 0, then delete it
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&shared_data->reference_count, {
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->reference_count, {
         // Notify the file tracking logic that this process has exited and any open files should be purged.
-        ec_check_open_file_list_on_exit(shared_data->tracked_files, context);
+        ec_check_open_file_list_on_exit(exec_identity->tracked_files, context);
 
         // Destroy the file tracking
-        ec_file_process_tree_destroy(&shared_data->tracked_files, context);
+        ec_file_process_tree_destroy(&exec_identity->tracked_files, context);
 
 
         // Free the path and commandline
-        ec_process_tracking_set_path(shared_data, NULL, context);
-        ec_process_tracking_set_cmdline(shared_data, NULL, context);
+        ec_process_tracking_set_path(exec_identity, NULL, context);
+        ec_process_tracking_set_cmdline(exec_identity, NULL, context);
 
-        exit_event = (PCB_EVENT) atomic64_xchg(&shared_data->exit_event, 0);
+        exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
 
         // Send the exit
         ec_event_send_last_exit(exit_event, context);
@@ -669,7 +669,7 @@ void ec_process_tracking_put_shared_data(SharedTrackingData *shared_data, Proces
         // TODO: Add lock here
 
         // Free the shared data
-        ec_mem_cache_free(&g_process_tracking_data.shared_data_cache, shared_data, context);
+        ec_mem_cache_free(&g_process_tracking_data.exec_identity_cache, exec_identity, context);
     });
 }
 
@@ -679,49 +679,49 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
 {
     if (data)
     {
-        ProcessTracking *procp = (ProcessTracking *)data;
+        PosixIdentity *posix_identity = (PosixIdentity *)data;
 
-        if (g_print_proc_on_delete && procp && MAY_TRACE_LEVEL(DL_INFO))
+        if (g_print_proc_on_delete && posix_identity && MAY_TRACE_LEVEL(DL_INFO))
         {
-            SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
-            char *path = ec_process_tracking_get_path(shared_data, context);
+            ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
+            char *path = ec_process_tracking_get_path(exec_identity, context);
 
-            if (shared_data)
+            if (exec_identity)
             {
-                TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
+                TRACE(DL_INFO, "    %s: %s %d exec_identity Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
                       __func__,
                       ec_process_tracking_get_proc_name(path),
-                      shared_data->exec_details.pid,
-                      (long long) atomic64_read(&(shared_data->reference_count)),
-                      (long long) atomic64_read(&(shared_data->active_process_count)),
-                      shared_data);
+                      exec_identity->exec_details.pid,
+                      (long long) atomic64_read(&(exec_identity->reference_count)),
+                      (long long) atomic64_read(&(exec_identity->active_process_count)),
+                      exec_identity);
             }
             ec_process_tracking_put_path(path, context);
-            ec_process_tracking_put_shared_data(shared_data, context);
+            ec_process_tracking_put_exec_identity(exec_identity, context);
         }
 
-        ec_process_tracking_set_shared_data(procp, NULL, context);
+        ec_process_tracking_set_exec_identity(posix_identity, NULL, context);
         // Just in case, this should have been unset by ec_process_tracking_set_event_info
-        ec_process_tracking_set_temp_shared_data(procp, NULL, context);
+        ec_process_tracking_set_temp_exec_identity(posix_identity, NULL, context);
     }
 }
 
 // Note: This function is used as a callback by the cb-mem-cache to print any
 // kmem cache entries that are still alive when the cache is destroyed.
-void __ec_shared_data_print_callback(void *data, ProcessContext *context)
+void __ec_exec_identity_print_callback(void *data, ProcessContext *context)
 {
     if (data && MAY_TRACE_LEVEL(DL_INFO))
     {
-        SharedTrackingData *shared_data = (SharedTrackingData *)data;
-        char *path = ec_process_tracking_get_path(shared_data, context);
+        ExecIdentity *exec_identity = (ExecIdentity *)data;
+        char *path = ec_process_tracking_get_path(exec_identity, context);
 
-        TRACE(DL_INFO, "    %s: %s %d shared_data Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
+        TRACE(DL_INFO, "    %s: %s %d exec_identity Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
               __func__,
               ec_process_tracking_get_proc_name(path),
-              shared_data->exec_details.pid,
-              (long long)atomic64_read(&(shared_data->reference_count)),
-              (long long)atomic64_read(&(shared_data->active_process_count)),
-              shared_data);
+              exec_identity->exec_details.pid,
+              (long long)atomic64_read(&(exec_identity->reference_count)),
+              (long long)atomic64_read(&(exec_identity->active_process_count)),
+              exec_identity);
         ec_process_tracking_put_path(path, context);
     }
 }

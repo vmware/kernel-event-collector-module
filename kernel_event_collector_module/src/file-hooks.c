@@ -344,8 +344,8 @@ void __ec_do_generic_file_event(ProcessContext *context,
                                 CB_EVENT_TYPE   eventType)
 {
     pid_t pid              = ec_getpid(current);
-    ProcessTracking *procp = NULL;
-    SharedTrackingData *shared_data = NULL;
+    PosixIdentity *posix_identity = NULL;
+    ExecIdentity *exec_identity = NULL;
 
     TRY(file_data);
 
@@ -362,16 +362,16 @@ void __ec_do_generic_file_event(ProcessContext *context,
         }
     }
 
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
-    shared_data = ec_process_tracking_get_shared_data(procp, context);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
+    exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
 
     TRY(eventType != CB_EVENT_TYPE_FILE_OPEN ||
-        (procp &&
-         shared_data &&
-         shared_data->is_interpreter));
+        (posix_identity &&
+         exec_identity &&
+         exec_identity->is_interpreter));
 
     ec_event_send_file(
-        procp,
+        posix_identity,
         eventType,
         intent,
         file_data->device,
@@ -380,8 +380,8 @@ void __ec_do_generic_file_event(ProcessContext *context,
         context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_shared_data(shared_data, context);
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_exec_identity(exec_identity, context);
+    ec_process_tracking_put_process(posix_identity, context);
 }
 
 void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
@@ -392,7 +392,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     char *pathname      = NULL;
     pid_t               pid           = ec_getpid(current);
     bool                doClose       = false;
-    ProcessTracking *procp         = NULL;
+    PosixIdentity *posix_identity         = NULL;
 
     CANCEL_VOID(!ec_banning_IgnoreProcess(context, pid));
 
@@ -407,8 +407,8 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     CANCEL_VOID(!ec_is_excluded_file(device, inode));
 
     // Check to see if the process is tracked already
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
-    CANCEL_VOID(procp);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
+    CANCEL_VOID(posix_identity);
 
     fileProcess = ec_file_process_status(device, inode, pid, context);
     if (fileProcess && fileProcess->status == OPENED)
@@ -494,7 +494,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             if (!fileProcess->isSpecialFile)
             {
                 ec_event_send_file(
-                    procp,
+                    posix_identity,
                     eventType,
                     INTENT_REPORT,
                     device,
@@ -510,7 +510,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
         else if (eventType == CB_EVENT_TYPE_FILE_CLOSE)
         {
             ec_event_send_file(
-                procp,
+                posix_identity,
                 eventType,
                 INTENT_REPORT,
                 device,
@@ -527,7 +527,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
 
 CATCH_DEFAULT:
     ec_file_process_put_ref(fileProcess, context);
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
     if (doClose)
     {
         ec_file_process_status_close(device, inode, pid, context);

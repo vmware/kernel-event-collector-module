@@ -430,7 +430,7 @@ void __ec_add_tracking_for_task(
     char               *path_buffer,
     ProcessContext     *context)
 {
-    ProcessTracking *procp;
+    PosixIdentity *posix_identity;
     char *path = NULL;
     bool             path_found = false;
 
@@ -464,7 +464,7 @@ void __ec_add_tracking_for_task(
         uint64_t inode;
 
         ec_get_devinfo_from_task(task, &device, &inode);
-        procp = ec_process_tracking_update_process(
+        posix_identity = ec_process_tracking_update_process(
                 ec_getpid(task),
                 ec_gettid(task),
                 TASK_UID(task),
@@ -480,16 +480,16 @@ void __ec_add_tracking_for_task(
                 FAKE_START,
                 context);
 
-        if (procp && path_buffer)
+        if (posix_identity && path_buffer)
         {
             if (__ec_get_cmdline_from_task(task, path_buffer, PATH_MAX))
             {
-                ec_process_tracking_set_proc_cmdline(procp, path_buffer, context);
+                ec_process_tracking_set_proc_cmdline(posix_identity, path_buffer, context);
             }
         }
     } else
     {
-        procp = ec_process_tracking_create_process(
+        posix_identity = ec_process_tracking_create_process(
                 ec_getpid(task),
                 ec_getppid(task),
                 ec_gettid(task),
@@ -502,5 +502,5 @@ void __ec_add_tracking_for_task(
                 context);
     }
 
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
 }

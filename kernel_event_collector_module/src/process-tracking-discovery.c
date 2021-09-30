@@ -42,16 +42,16 @@ CATCH_DEFAULT:
 
 void __ec_send_process_discovery(void *data, void *priv, ProcessContext *context)
 {
-    ProcessTracking *procp = ec_sorted_tracking_table_get_process(data, context);
+    PosixIdentity *posix_identity = ec_sorted_tracking_table_get_process(data, context);
 
-    TRY(procp);
+    TRY(posix_identity);
 
-    ec_event_send_start(procp,
-                    ec_process_tracking_should_track_user() ? procp->uid : (uid_t)-1,
+    ec_event_send_start(posix_identity,
+                    ec_process_tracking_should_track_user() ? posix_identity->uid : (uid_t)-1,
                     CB_PROCESS_START_BY_DISCOVER,
                     context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
     return;
 }

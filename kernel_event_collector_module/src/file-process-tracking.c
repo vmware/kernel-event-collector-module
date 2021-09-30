@@ -107,9 +107,9 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
             value = NULL;
             if (MAY_TRACE_LEVEL(DL_INFO))
             {
-                if (tree_handle.shared_data)
+                if (tree_handle.exec_identity)
                 {
-                    process_path = ec_process_tracking_get_path(tree_handle.shared_data, context);
+                    process_path = ec_process_tracking_get_path(tree_handle.exec_identity, context);
                 }
 
                 // We are racing against other threads or processes

@@ -388,7 +388,7 @@ LOCAL int my_socket_recvmsg_hook_counted(ProcessContext *context, struct socket 
     u16               family;
     CB_SOCK_ADDR      localAddr;
     CB_SOCK_ADDR      remoteAddr;
-    ProcessTracking  *procp = NULL;
+    PosixIdentity  *posix_identity = NULL;
     uint16_t          proto = 0;
     pid_t             pid   = ec_getpid(current);
     int               xcode = 0;
@@ -416,10 +416,10 @@ LOCAL int my_socket_recvmsg_hook_counted(ProcessContext *context, struct socket 
         ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
-    TRY(procp);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
+    TRY(posix_identity);
 
-    pid = ec_process_tracking_exec_pid(procp, context);
+    pid = ec_process_tracking_exec_pid(posix_identity, context);
 
     TRY(!ec_banning_IgnoreProcess(context, pid));
 
@@ -444,7 +444,7 @@ LOCAL int my_socket_recvmsg_hook_counted(ProcessContext *context, struct socket 
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
     TRY(track_connection(context, pid, &localAddr, &remoteAddr, proto, CONN_IN));
 
-    ec_event_send_net(procp,
+    ec_event_send_net(posix_identity,
                    "RECV",
                    CB_EVENT_TYPE_NET_ACCEPT,
                    &localAddr,
@@ -454,7 +454,7 @@ LOCAL int my_socket_recvmsg_hook_counted(ProcessContext *context, struct socket 
                    context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
     ec_mem_cache_free_generic(cmsg_kernel);
     cmsg_kernel = NULL;
     return xcode;
@@ -1084,7 +1084,7 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int s
     u16               family;
     CB_SOCK_ADDR      localAddr;
     CB_SOCK_ADDR      remoteAddr;
-    ProcessTracking  *procp         = NULL;
+    PosixIdentity  *posix_identity         = NULL;
     pid_t             pid           = ec_getpid(current);
     int               xcode         = 0;
 
@@ -1117,10 +1117,10 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int s
         ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "SEND", &context);
-    TRY(procp);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "SEND", &context);
+    TRY(posix_identity);
 
-    pid = ec_process_tracking_exec_pid(procp, &context);
+    pid = ec_process_tracking_exec_pid(posix_identity, &context);
 
     TRY(!ec_banning_IgnoreProcess(&context, pid));
 
@@ -1131,7 +1131,7 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int s
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
     TRY(__ec_track_connection(&context, pid, &localAddr, &remoteAddr, sock->sk->sk_protocol, CONN_OUT));
 
-    ec_event_send_net(procp,
+    ec_event_send_net(posix_identity,
                    "SEND",
                    CB_EVENT_TYPE_NET_CONNECT_PRE,
                    &localAddr,
@@ -1141,7 +1141,7 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int s
                    &context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(posix_identity, &context);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return xcode;
 }
@@ -1151,7 +1151,7 @@ int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *soc
     u16               family;
     CB_SOCK_ADDR      localAddr;
     CB_SOCK_ADDR      remoteAddr;
-    ProcessTracking  *procp         = NULL;
+    PosixIdentity  *posix_identity         = NULL;
     uint16_t          proto = 0;
     pid_t             pid   = ec_getpid(current);
     int               xcode = 0;
@@ -1179,10 +1179,10 @@ int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *soc
         ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
-    TRY(procp);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
+    TRY(posix_identity);
 
-    pid = ec_process_tracking_exec_pid(procp, context);
+    pid = ec_process_tracking_exec_pid(posix_identity, context);
 
     TRY(!ec_banning_IgnoreProcess(context, pid));
 
@@ -1208,7 +1208,7 @@ int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *soc
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
     TRY(__ec_track_connection(context, pid, &localAddr, &remoteAddr, proto, CONN_IN));
 
-    ec_event_send_net(procp,
+    ec_event_send_net(posix_identity,
                    "RECV",
                    CB_EVENT_TYPE_NET_ACCEPT,
                    &localAddr,
@@ -1218,7 +1218,7 @@ int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *soc
                    context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_process(posix_identity, context);
     ec_mem_cache_free_generic(cmsg_kernel);
     cmsg_kernel = NULL;
     return xcode;
@@ -1276,7 +1276,7 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
     int                  xcode;
     CB_SOCK_ADDR         localAddr;
     CB_SOCK_ADDR         remoteAddr;
-    ProcessTracking      *procp        = NULL;
+    PosixIdentity      *posix_identity        = NULL;
     pid_t                pid           = ec_getpid(current);
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
@@ -1300,10 +1300,10 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
         ec_print_address("Isolate Connection", sock->sk, &localAddr.sa_addr, &remoteAddr.sa_addr);
     });
 
-    procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "CONNECT", &context);
-    TRY(procp);
+    posix_identity = ec_get_procinfo_and_create_process_start_if_needed(pid, "CONNECT", &context);
+    TRY(posix_identity);
 
-    pid = ec_process_tracking_exec_pid(procp, &context);
+    pid = ec_process_tracking_exec_pid(posix_identity, &context);
 
     TRY(!ec_banning_IgnoreProcess(&context, pid));
 
@@ -1328,7 +1328,7 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
     //  If it is a tracked connection, update the time and skip sending an event (return value of false)
     TRY(__ec_track_connection(&context, pid, &localAddr, &remoteAddr, sock->sk->sk_protocol, CONN_OUT));
 
-    ec_event_send_net(procp,
+    ec_event_send_net(posix_identity,
                    "CONNECT",
                    CB_EVENT_TYPE_NET_CONNECT_PRE,
                    &localAddr,
@@ -1338,7 +1338,7 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
                    &context);
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_process(procp, &context);
+    ec_process_tracking_put_process(posix_identity, &context);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return xcode;
 }
