@@ -52,7 +52,8 @@ bool ec_process_tracking_initialize(ProcessContext *context)
                                                     offsetof(PosixIdentity, pt_key),
                                                     offsetof(PosixIdentity, pt_link),
                                                     offsetof(PosixIdentity, reference_count),
-                                                    ec_hashtbl_delete_callback);
+                                                    ec_hashtbl_delete_callback,
+                                                    NULL);
     TRY(g_process_tracking_data.table);
 
     TRY(ec_mem_cache_create(&g_process_tracking_data.exec_identity_cache, "pt_exec_identity_cache", sizeof(ExecIdentity), context));

@@ -46,6 +46,7 @@ bool ec_banning_initialize(ProcessContext *context)
                                            offsetof(BanningEntry, key),
                                            offsetof(BanningEntry, link),
                                            HASHTBL_DISABLE_REF_COUNT,
+                                           NULL,
                                            NULL);
 
     if (!g_banning_table)

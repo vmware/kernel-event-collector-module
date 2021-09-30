@@ -606,6 +606,7 @@ bool ec_network_tracking_initialize(ProcessContext *context)
                                              offsetof(NET_TBL_NODE, key),
                                              offsetof(NET_TBL_NODE, link),
                                              HASHTBL_DISABLE_REF_COUNT,
+                                             NULL,
                                              NULL);
     TRY(s_net_hash_table);
 

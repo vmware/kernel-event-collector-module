@@ -28,6 +28,9 @@
 //
 typedef void (*hashtbl_delete_cb)(void *datap, ProcessContext *context);
 
+// Optionally get a handle pointer
+typedef void *(*hashtbl_handle_cb)(void *datap, ProcessContext *context);
+
 typedef struct hashbtl_bkt {
     uint64_t lock;
     struct hlist_head head;
@@ -48,6 +51,7 @@ typedef struct hashtbl {
     int refcount_offset;
     size_t base_size;
     hashtbl_delete_cb delete_callback;
+    hashtbl_handle_cb handle_callback;
 } HashTbl;
 
 typedef struct hash_table_node {
@@ -64,7 +68,8 @@ HashTbl *ec_hashtbl_init_generic(ProcessContext *context,
                               uint64_t numberOfBuckets, uint64_t datasize,
                               uint64_t sizehint, const char *hashtble_name, int key_len,
                               int key_offset, int node_offset, int refcount_offset,
-                              hashtbl_delete_cb delete_callback);
+                              hashtbl_delete_cb delete_callback,
+                              hashtbl_handle_cb handle_callback);
 void *ec_hashtbl_alloc_generic(HashTbl *tblp, ProcessContext *context);
 int ec_hashtbl_add_generic(HashTbl *tblp, void *datap, ProcessContext *context);
 
@@ -80,6 +85,7 @@ void *ec_hashtbl_del_by_key_generic(HashTbl *tblp, void *key, ProcessContext *co
 void ec_hashtbl_del_generic(HashTbl *tblp, void *datap, ProcessContext *context);
 
 void *ec_hashtbl_get_generic(HashTbl *tblp, void *key, ProcessContext *context);
+void *ec_hashtbl_get_generic_ref(HashTbl *tblp, void *datap, ProcessContext *context);
 
 // Decrements reference count and frees datap if reference count is 0
 // Only for reference counted hash tables

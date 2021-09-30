@@ -104,7 +104,8 @@ HashTbl *ec_hashtbl_init_generic(ProcessContext *context,
                               int key_offset,
                               int node_offset,
                               int refcount_offset,
-                              hashtbl_delete_cb delete_callback)
+                              hashtbl_delete_cb delete_callback,
+                              hashtbl_handle_cb handle_callback)
 {
     unsigned int i;
     HashTbl *hashTblp = NULL;
@@ -155,6 +156,7 @@ HashTbl *ec_hashtbl_init_generic(ProcessContext *context,
     hashTblp->refcount_offset = refcount_offset;
     hashTblp->base_size   = tableSize + sizeof(HashTbl);
     hashTblp->delete_callback = delete_callback;
+    hashTblp->handle_callback = handle_callback;
 
     if (cache_elem_size)
     {
@@ -485,14 +487,35 @@ void *ec_hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *conte
     nodep = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
     if (nodep)
     {
-        datap = __ec_get_datap(hashTblp, nodep);
-
-        if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-        {
-            atomic64_inc(__ec_get_refcountp(hashTblp, datap));
-        }
+        datap = ec_hashtbl_get_generic_ref(
+            hashTblp,
+            __ec_get_datap(hashTblp, nodep),
+            context);
     }
     ec_hashtbl_bkt_read_unlock(bucketp, context);
+
+    return datap;
+}
+
+void *ec_hashtbl_get_generic_ref(HashTbl *hashTblp, void *datap, ProcessContext *context)
+{
+    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
+    {
+        atomic64_inc(__ec_get_refcountp(hashTblp, datap));
+    }
+    if (hashTblp->handle_callback)
+    {
+        void *handle = hashTblp->handle_callback(datap, context);
+
+        if (!handle)
+        {
+            // If we failed to get a handle, we want to release the reference and return NULL
+            ec_hashtbl_put_generic(hashTblp, datap, context);
+        }
+
+        // We want to return the handle
+        datap = handle;
+    }
 
     return datap;
 }
