@@ -15,11 +15,35 @@
 
 extern struct timespec ec_get_current_timespec(void);
 
+#define MAX_GFP_STACK    10
+
+DECLARE_PER_CPU(atomic64_t, module_inuse);
+
+typedef struct hook_tracking {
+    const char      *hook_name;
+    atomic64_t       count;
+    atomic64_t       last_enter_time;
+    atomic64_t       last_pid;
+    struct list_head list;
+}                           HookTracking;
+
 #define __HOOK_TRACKING_INITIALIZER() {           \
     .hook_name = __func__,                        \
     .count     = ATOMIC64_INIT(0),        \
     .list      = LIST_HEAD_INIT(hook_tracking.list),   \
 }
+
+typedef struct process_context {
+    gfp_t            gfp_mode[MAX_GFP_STACK];
+    int              stack_index;
+    pid_t            pid;
+    bool             allow_wake_up;
+    bool             allow_send_events;
+    struct list_head list;
+    bool             decr_active_call_count_on_exit;
+    atomic64_t       *percpu_module_inuse;
+    HookTracking     *hook_tracking;
+} ProcessContext;
 
 #define __CONTEXT_INITIALIZER(NAME, MODE, PID) {                               \
     .gfp_mode              = { (MODE), },                                      \
@@ -28,11 +52,9 @@ extern struct timespec ec_get_current_timespec(void);
     .allow_wake_up         = true,                                             \
     .allow_send_events     = true,                                             \
     .decr_active_call_count_on_exit = false,                                   \
+    .percpu_module_inuse   = &__get_cpu_var(module_inuse),                     \
     .hook_tracking         = &hook_tracking                                    \
 }
-
-
-#define MAX_GFP_STACK    10
 
 #define CB_ATOMIC        (GFP_ATOMIC | GFP_NOWAIT)
 
@@ -82,23 +104,4 @@ extern struct timespec ec_get_current_timespec(void);
         } \
     } while (0)
 // checkpatch-ignore: SUSPECT_CODE_INDENT
-
-typedef struct hook_tracking {
-    const char      *hook_name;
-    atomic64_t       count;
-    atomic64_t       last_enter_time;
-    atomic64_t       last_pid;
-    struct list_head list;
-} HookTracking;
-
-typedef struct process_context {
-    gfp_t            gfp_mode[MAX_GFP_STACK];
-    int              stack_index;
-    pid_t            pid;
-    bool             allow_wake_up;
-    bool             allow_send_events;
-    struct list_head list;
-    bool             decr_active_call_count_on_exit;
-    HookTracking     *hook_tracking;
-} ProcessContext;
 

@@ -550,7 +550,7 @@ asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t cou
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
     // Do the actual write first.  This way if the type is changed we will detect it later.
     ret = ec_orig_sys_write(fd, buf, count);
@@ -572,6 +572,7 @@ CATCH_DEFAULT:
         fput(file);
     }
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+
     return ret;
 }
 

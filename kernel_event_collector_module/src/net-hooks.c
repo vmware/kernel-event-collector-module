@@ -479,7 +479,7 @@ int ec_lsm_socket_recvmsg(struct socket *sock, struct my_user_msghdr *msg, int s
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     xcode = g_original_ops_ptr->socket_recvmsg(sock, msg, size, flags);
@@ -1014,7 +1014,7 @@ int ec_lsm_socket_post_create(struct socket *sock, int family, int type, int pro
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
@@ -1053,7 +1053,7 @@ int ec_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
@@ -1091,7 +1091,7 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int s
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
@@ -1244,7 +1244,7 @@ int ec_socket_recvmsg(struct socket *sock, struct my_user_msghdr *msg, int size,
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     xcode = g_original_ops_ptr->socket_recvmsg(sock, msg, size, flags);
@@ -1282,7 +1282,7 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
 
     DECLARE_ATOMIC_CONTEXT(context, pid);
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
@@ -1352,9 +1352,10 @@ CATCH_DEFAULT:
 //
 void ec_inet_conn_established(struct sock *sk, struct sk_buff *skb)
 {
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
     u16 family = sk->sk_family;
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
     /* handle mapped IPv4 packets arriving via IPv6 sockets */
     if ((family == PF_INET6 && skb->protocol == htons(ETH_P_IPV6))
@@ -1367,7 +1368,7 @@ void ec_inet_conn_established(struct sock *sk, struct sk_buff *skb)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     g_original_ops_ptr->inet_conn_established(sk, skb);
 #endif  //}
-    MODULE_PUT();
+    MODULE_PUT(&context);
 }
 
 //
@@ -1385,7 +1386,7 @@ int ec_lsm_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct reques
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // This will always be called anyway, so just do it first.
@@ -1491,7 +1492,7 @@ asmlinkage long ec_sys_recvmsg(int fd, struct my_user_msghdr __user *msg, unsign
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
     sock = sockfd_lookup(fd, &xcode);
 
@@ -1605,7 +1606,7 @@ CATCH_DEFAULT:
         sock->sk->sk_rcvtimeo = sk_rcvtimeo;
         sockfd_put(sock);
     }
-    MODULE_PUT();
+    MODULE_PUT(&context);
 
     return xcode;
 }
@@ -1677,7 +1678,7 @@ asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
     if (!ec_prsock_buflen)
         bugbuf.buffer = NULL;
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
     sock = sockfd_lookup(fd, &xcode);
 
@@ -1820,7 +1821,7 @@ CATCH_DEFAULT:
         sock->sk->sk_rcvtimeo = sk_rcvtimeo;
         sockfd_put(sock);
     }
-    MODULE_PUT();
+    MODULE_PUT(&context);
     if (bugbuf.buffer) {
         pr_err("(used=%u avail=%d) xcode=0x%x: %s\n",
             bugbuf.used, bugbuf.avail, xcode, bugbuf.buffer);
@@ -1875,7 +1876,7 @@ asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
     sock = sockfd_lookup(fd, &xcode);
 
@@ -1989,7 +1990,7 @@ CATCH_DEFAULT:
         sock->sk->sk_rcvtimeo = sk_rcvtimeo;
         sockfd_put(sock);
     }
-    MODULE_PUT();
+    MODULE_PUT(&context);
     return xcode;
 }
 

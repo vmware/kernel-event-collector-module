@@ -67,9 +67,11 @@ extern uint32_t g_max_queue_size_pri2;
 // 'module_used' tracks usage of our hook functions and blocks module unload but not disable.
 // 'g_module_state_info.module_active_call_count' tracks usage of code that requires
 // the module to be in an enabled state and blocks disable but not unload.
-extern atomic64_t module_used;
-#define MODULE_GET()  atomic64_inc_return(&module_used)
-#define MODULE_PUT()  ATOMIC64_DEC__CHECK_NEG(&module_used)
+//#define MODULE_GET()  atomic64_inc_return(&module_used)
+//#define MODULE_PUT()  ATOMIC64_DEC__CHECK_NEG(&module_used)
+
+#define MODULE_GET(context)  atomic64_inc((context)->percpu_module_inuse)
+#define MODULE_PUT(context)  ATOMIC64_DEC__CHECK_NEG((context)->percpu_module_inuse)
 
 typedef enum {
     ModuleStateEnabled = 1,
@@ -131,14 +133,14 @@ do {                                                                            
 
 #define MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)  \
 do {                                                                                             \
-   MODULE_GET();                                                                                 \
+   MODULE_GET(CONTEXT);                                                                          \
    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO((CONTEXT), pass_through_label);                   \
 }                                                                                                \
 while (false)
 
 #define MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(CONTEXT, pass_through_label)         \
 do {                                                                                \
-   MODULE_GET();                                                                    \
+   MODULE_GET(CONTEXT);                                                             \
    IF_MODULE_DISABLED_GOTO((CONTEXT), pass_through_label);                          \
 }                                                                                   \
 while (false)
@@ -156,11 +158,10 @@ while (false)
 #define MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(CONTEXT)               \
 do {                                                                      \
   FINISH_MODULE_DISABLE_CHECK(CONTEXT);                                   \
-  MODULE_PUT();                                                           \
+  MODULE_PUT(CONTEXT);                                                    \
 }                                                                         \
 while (false)
 // checkpatch-no-ignore: SUSPECT_CODE_INDENT,MACRO_WITH_FLOW_CONTROL
-
 
 //-------------------------------------------------
 

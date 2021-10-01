@@ -207,7 +207,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, pid);
 
-    MODULE_GET();
+    MODULE_GET(&context);
 
     // get time as early in the function as possible
     getnstimeofday(&start_time);
