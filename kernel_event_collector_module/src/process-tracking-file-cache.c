@@ -21,14 +21,14 @@ bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *tree_handle,
 
     TRY(tree_handle);
     tree_handle->tree = NULL;
-    tree_handle->exec_identity = NULL;
+    memset(&tree_handle->exec_handle, 0, sizeof(ExecHandle));
 
     process_handle = ec_process_tracking_get_handle(pid, context);
     TRY(process_handle);
 
     // This holds onto a exec_identity ref
-    tree_handle->exec_identity = ec_process_tracking_get_exec_identity_ref(ec_process_exec_identity(process_handle), context);
-    tree_handle->tree        = ec_process_exec_identity(process_handle)->tracked_files;
+    ec_process_exec_handle_clone(ec_process_exec_handle(process_handle), &tree_handle->exec_handle, context);
+    tree_handle->tree = ec_process_exec_identity(process_handle)->tracked_files;
 
     ec_process_tracking_put_handle(process_handle, context);
 
@@ -42,9 +42,9 @@ void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *tree_handle, ProcessCon
 {
     if (tree_handle)
     {
-        ec_process_tracking_put_exec_identity(tree_handle->exec_identity, context);
+        ec_process_tracking_put_exec_handle(&tree_handle->exec_handle, context);
         tree_handle->tree = NULL;
-        tree_handle->exec_identity = NULL;
+        memset(&tree_handle->exec_handle, 0, sizeof(ExecHandle));
     }
 }
 

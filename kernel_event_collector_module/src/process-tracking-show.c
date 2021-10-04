@@ -46,14 +46,12 @@ void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *co
     const char          *proc_name    = NULL;
     struct task_struct  const *task   = NULL;
     uint64_t             shared_count = 0;
-    char                *path         = NULL;
 
     TRY(process_handle && seq_file);
 
     task = ec_find_task(ec_process_posix_identity(process_handle)->posix_details.pid);
 
-    path = ec_process_tracking_get_path(ec_process_exec_identity(process_handle), context);
-    proc_name = ec_process_tracking_get_proc_name(path);
+    proc_name = ec_process_tracking_get_proc_name(ec_process_path(process_handle));
 
     shared_count = atomic64_read(&ec_process_exec_identity(process_handle)->reference_count);
 
@@ -69,7 +67,6 @@ void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *co
                   (ec_is_task_alive(task) ? "yes" : "no"));
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_path(path, context);
     ec_process_tracking_put_handle(process_handle, context);
     return;
 }

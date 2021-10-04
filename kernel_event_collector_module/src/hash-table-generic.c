@@ -752,3 +752,64 @@ void ec_hashtbl_write_bkt_unlock(HashTableBkt *bkt, ProcessContext *context)
     }
 }
 
+HashTableBkt *__ec_hashtbl_find_bucket(HashTbl *hashTblp, void *key)
+{
+    u32 hash;
+    uint64_t bucket_indx;
+
+    if (!hashTblp || !key)
+    {
+        return NULL;
+    }
+
+    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
+    {
+        return NULL;
+    }
+
+    hash = ec_hashtbl_hash_key(hashTblp, key);
+    bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
+
+    return &(hashTblp->tablePtr[bucket_indx]);
+}
+
+void ec_hashtbl_read_lock(HashTbl *hashTblp, void *key, ProcessContext *context)
+{
+    HashTableBkt *bucketp = __ec_hashtbl_find_bucket(hashTblp, key);
+
+    if (bucketp)
+    {
+        ec_hashtbl_bkt_read_lock(bucketp, context);
+    }
+}
+
+void ec_hashtbl_read_unlock(HashTbl *hashTblp, void *key, ProcessContext *context)
+{
+    HashTableBkt *bucketp = __ec_hashtbl_find_bucket(hashTblp, key);
+
+    if (bucketp)
+    {
+        ec_hashtbl_bkt_read_unlock(bucketp, context);
+    }
+}
+
+void ec_hashtbl_write_lock(HashTbl *hashTblp, void *key, ProcessContext *context)
+{
+    HashTableBkt *bucketp = __ec_hashtbl_find_bucket(hashTblp, key);
+
+    if (bucketp)
+    {
+        ec_hashtbl_bkt_write_lock(bucketp, context);
+    }
+}
+
+void ec_hashtbl_write_unlock(HashTbl *hashTblp, void *key, ProcessContext *context)
+{
+    HashTableBkt *bucketp = __ec_hashtbl_find_bucket(hashTblp, key);
+
+    if (bucketp)
+    {
+        ec_hashtbl_bkt_write_unlock(bucketp, context);
+    }
+}
+

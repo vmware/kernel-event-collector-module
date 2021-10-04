@@ -293,8 +293,8 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
                 char *_path = ec_mem_cache_strdup(path, &context);
 
                 ec_process_exec_identity(process_handle)->is_interpreter = true;
-                ec_process_tracking_set_path(ec_process_exec_identity(process_handle), _path, &context);
-                ec_process_tracking_put_path(_path, &context);
+                ec_process_tracking_set_path(process_handle, _path, &context);
+                ec_mem_cache_put_generic(_path);
 
                 // also need to update the file information
                 ec_process_exec_identity(process_handle)->exec_details.inode = inode;

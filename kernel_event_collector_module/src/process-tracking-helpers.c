@@ -3,6 +3,7 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "process-tracking-private.h"
+#include "cb-spinlock.h"
 #include "cb-test.h"
 #include "priv.h"
 
@@ -43,13 +44,20 @@ CATCH_DEFAULT:
     return result;
 }
 
-void ec_process_tracking_set_cmdline(ExecIdentity *exec_identity, char *cmdline, ProcessContext *context)
+void ec_process_tracking_set_cmdline(ExecHandle *exec_handle, char *cmdline, ProcessContext *context)
 {
-    if (exec_identity)
+    if (exec_handle)
     {
-        // TODO: Add lock
-        ec_process_tracking_put_cmdline(exec_identity->cmdline, context);
-        exec_identity->cmdline = (cmdline ? ec_mem_cache_get_generic(cmdline, context) : NULL);
+        ExecIdentity *exec_identity = ec_exec_identity(exec_handle);
+
+        ec_write_lock(&exec_identity->string_lock, context);
+        ec_mem_cache_put_generic(exec_identity->cmdline);
+        exec_identity->cmdline = ec_mem_cache_get_generic(cmdline, context);
+        ec_write_unlock(&exec_identity->string_lock, context);
+
+        // No need to be locked while doing this
+        ec_mem_cache_put_generic(exec_handle->cmdline);
+        exec_handle->cmdline = ec_mem_cache_get_generic(cmdline, context);
     }
 }
 
@@ -59,16 +67,11 @@ char *ec_process_tracking_get_cmdline(ExecIdentity *exec_identity, ProcessContex
 
     if (exec_identity)
     {
-        // TODO: Add lock here
-
+        ec_read_lock(&exec_identity->string_lock, context);
         cmdline = ec_mem_cache_get_generic(exec_identity->cmdline, context);
+        ec_read_unlock(&exec_identity->string_lock, context);
     }
     return cmdline;
-}
-
-void ec_process_tracking_put_cmdline(char *cmdline, ProcessContext *context)
-{
-    ec_mem_cache_put_generic(cmdline);
 }
 
 void ec_process_tracking_set_proc_cmdline(ProcessHandle *process_handle, char *cmdline, ProcessContext *context)
@@ -78,7 +81,7 @@ void ec_process_tracking_set_proc_cmdline(ProcessHandle *process_handle, char *c
     // Duplicate the command line for storage
     cmdline = ec_mem_cache_strdup(cmdline, context);
 
-    ec_process_tracking_set_cmdline(ec_process_exec_identity(process_handle), cmdline, context);
+    ec_process_tracking_set_cmdline(ec_process_exec_handle(process_handle), cmdline, context);
 
     ec_mem_cache_put_generic(cmdline);
 }
@@ -115,8 +118,7 @@ ExecIdentity *ec_process_tracking_get_exec_identity(PosixIdentity *posix_identit
 
     if (posix_identity)
     {
-        // TODO: Add lock here
-
+        // This should be called while holding the bucket lock
         exec_identity = ec_process_tracking_get_exec_identity_ref(posix_identity->exec_identity, context);
     }
 
@@ -127,7 +129,10 @@ void ec_process_posix_identity_set_exec_identity(PosixIdentity *posix_identity, 
 {
     CANCEL_VOID(posix_identity);
 
-    // TODO: Add lock here
+    // Note: This function may be called while holding the hash-table bucket lock.
+    //  1. During the update call we explicitly lock the bucket
+    //  2. During the create call we do not lock because the posix entry is not inserted
+    //  3. During the delete call we do not lock because it is the last reference
 
     // Make sure that we release the one we are holding
     ec_process_tracking_put_exec_identity(posix_identity->exec_identity, context);
@@ -140,8 +145,13 @@ void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecId
 {
     if (process_handle && exec_identity)
     {
-        ec_process_tracking_put_exec_identity(ec_process_exec_identity(process_handle), context);
-        ec_exec_handle_set_exec_identity(&process_handle->exec_handle, exec_identity, context);
+        // We need to lock the hash table to change the data here
+        ec_hashtbl_write_lock(g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+        ec_process_posix_identity_set_exec_identity(ec_process_posix_identity(process_handle), exec_identity, context);
+        ec_hashtbl_write_unlock(g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+
+        // Updating the handle does not need to be done while locked
+        ec_process_exec_handle_set_exec_identity(&process_handle->exec_handle, exec_identity, context);
     }
 }
 
@@ -156,9 +166,10 @@ ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessCon
         // This takes ownership of the reference provided by the hash table
         process_handle->posix_identity = posix_identity;
         memset(&process_handle->exec_handle, 0, sizeof(process_handle->exec_handle));
-        ec_exec_handle_set_exec_identity(&process_handle->exec_handle, ec_process_tracking_get_exec_identity(posix_identity, context), context);
+        ec_process_exec_handle_set_exec_identity(&process_handle->exec_handle, posix_identity->exec_identity, context);
 
-        TRY(process_handle->exec_handle.identity && process_handle->exec_handle.path && process_handle->exec_handle.cmdline);
+        // Path and cmdline are allowed to be NULL, and should be tested accordingly
+        TRY(process_handle->exec_handle.identity);
     }
     return process_handle;
 
@@ -181,20 +192,33 @@ void ec_process_tracking_put_exec_handle(ExecHandle *exec_handle, ProcessContext
 {
     if (exec_handle)
     {
-        ec_process_tracking_put_path(exec_handle->path, context);
-        ec_process_tracking_put_cmdline(exec_handle->cmdline, context);
+        ec_mem_cache_put_generic(exec_handle->path);
+        ec_mem_cache_put_generic(exec_handle->cmdline);
         ec_process_tracking_put_exec_identity(exec_handle->identity, context);
+
+        memset(exec_handle, 0, sizeof(ExecHandle));
     }
 }
 
-void ec_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdentity *exec_identity, ProcessContext *context)
+void ec_process_exec_handle_clone(ExecHandle *from, ExecHandle *to, ProcessContext *context)
+{
+    ec_process_tracking_put_exec_handle(to, context);
+
+    if (from)
+    {
+        // Note: I do not want to call ec_process_exec_handle_set_exec_identity here because I want to clone the current
+        //  handle and not get pointers from from->identity
+        to->identity = ec_process_tracking_get_exec_identity_ref(from->identity, context);
+        to->path = ec_mem_cache_get_generic(from->path, context);
+        to->cmdline = ec_mem_cache_get_generic(from->cmdline, context);
+    }
+}
+
+void ec_process_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdentity *exec_identity, ProcessContext *context)
 {
     if (exec_handle)
     {
-        ec_process_tracking_put_path(exec_handle->path, context);
-        ec_process_tracking_put_cmdline(exec_handle->cmdline, context);
-        ec_process_tracking_put_exec_identity(exec_handle->identity, context);
-
+        ec_process_tracking_put_exec_handle(exec_handle, context);
 
         exec_handle->identity = ec_process_tracking_get_exec_identity_ref(exec_identity, context);
         exec_handle->path = ec_process_tracking_get_path(exec_identity, context);
@@ -202,59 +226,35 @@ void ec_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdentity *exe
     }
 }
 
-ExecIdentity *ec_process_tracking_get_temp_exec_identity(PosixIdentity *posix_identity, ProcessContext *context)
+ExecHandle *ec_process_tracking_get_temp_exec_handle(ProcessHandle *process_handle, ProcessContext *context)
 {
-    ExecIdentity *exec_identity = NULL;
-
-    TRY(posix_identity);
-
-    // TODO: Add lock here
-
-    exec_identity = ec_process_tracking_get_exec_identity_ref(posix_identity->temp_exec_identity, context);
-
-CATCH_DEFAULT:
-    return exec_identity;
+    return process_handle ? &ec_process_posix_identity(process_handle)->temp_exec_handle : NULL;
 }
 
-void ec_process_tracking_set_temp_exec_identity(PosixIdentity *posix_identity, ExecIdentity *exec_identity, ProcessContext *context)
+void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, ExecHandle *exec_handle, ProcessContext *context)//PosixIdentity *posix_identity, ExecIdentity *exec_identity
 {
-    CANCEL_VOID(posix_identity);
+    CANCEL_VOID(process_handle);
 
-    // TODO: Add lock here
+    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s temp_exec_identity", (exec_handle ? "set" : "clear"));
 
-    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s parent_exec_identity %p (old %p)",
-        (exec_identity ? "set" : "clear"),
-        exec_identity,
-        posix_identity->temp_exec_identity);
-
-    // Make sure that we release the one we are holding
-    ec_process_tracking_put_exec_identity(posix_identity->temp_exec_identity, context);
-
-    // Set the new one, and take the reference
-    posix_identity->temp_exec_identity = ec_process_tracking_get_exec_identity_ref(exec_identity, context);
+    ec_process_exec_handle_clone(exec_handle, &ec_process_posix_identity(process_handle)->temp_exec_handle, context);
 }
 
-void ec_process_tracking_set_event_info(PosixIdentity *posix_identity, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
+void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
 {
-    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
-    ExecIdentity *temp_exec_identity = NULL;
+    TRY(process_handle && event);
 
-    TRY(posix_identity && event && exec_identity);
-
-    event->procInfo.all_process_details.array[FORK]             = posix_identity->posix_details;
-    event->procInfo.all_process_details.array[FORK_PARENT]      = posix_identity->posix_parent_details;
-    event->procInfo.all_process_details.array[FORK_GRANDPARENT] = posix_identity->posix_grandparent_details;
-    event->procInfo.all_process_details.array[EXEC]             = exec_identity->exec_details;
-    event->procInfo.all_process_details.array[EXEC_PARENT]      = exec_identity->exec_parent_details;
-    event->procInfo.all_process_details.array[EXEC_GRANDPARENT] = exec_identity->exec_grandparent_details;
+    event->procInfo.all_process_details.array[FORK]             = ec_process_posix_identity(process_handle)->posix_details;
+    event->procInfo.all_process_details.array[FORK_PARENT]      = ec_process_posix_identity(process_handle)->posix_parent_details;
+    event->procInfo.all_process_details.array[FORK_GRANDPARENT] = ec_process_posix_identity(process_handle)->posix_grandparent_details;
+    event->procInfo.all_process_details.array[EXEC]             = ec_process_exec_identity(process_handle)->exec_details;
+    event->procInfo.all_process_details.array[EXEC_PARENT]      = ec_process_exec_identity(process_handle)->exec_parent_details;
+    event->procInfo.all_process_details.array[EXEC_GRANDPARENT] = ec_process_exec_identity(process_handle)->exec_grandparent_details;
 
 
-    event->procInfo.path_found      = exec_identity->path_found;
-    event->procInfo.path            = ec_process_tracking_get_path(exec_identity, context);// hold reference
-    if (event->procInfo.path)
-    {
-        event->procInfo.path_size    = strlen(event->procInfo.path) + 1;
-    }
+    event->procInfo.path_found      = ec_process_exec_identity(process_handle)->path_found;
+    event->procInfo.path            = ec_mem_cache_get_generic(ec_process_path(process_handle), context);// hold reference
+    event->procInfo.path_size       = ec_mem_cache_get_size_generic(event->procInfo.path);
 
     // We need to ensure that user-space does not get any exit events for a
     //  process until all events for that process are already collected.
@@ -276,14 +276,17 @@ void ec_process_tracking_set_event_info(PosixIdentity *posix_identity, CB_INTENT
         //  (This forces an exit of the parent to be sent after the start of a child)
         // For process exit events we hold a reference to the child preocess
         //  (This forces the child's exit to be sent after the parent's exit)
-
-
-        temp_exec_identity = ec_process_tracking_get_temp_exec_identity(posix_identity, context);
-        ec_event_set_process_data(event, temp_exec_identity, context);
+        ec_event_set_process_data(
+            event,
+            ec_exec_identity(&ec_process_posix_identity(process_handle)->temp_exec_handle),
+            context);
         break;
     default:
         // For all other events we hold a reference to this process
-        ec_event_set_process_data(event, exec_identity, context);
+        ec_event_set_process_data(
+            event,
+            ec_process_exec_identity(process_handle),
+            context);
         break;
     }
 
@@ -293,9 +296,7 @@ CATCH_DEFAULT:
     // In some cases we expect this function to be called with a NULL event
     //  because we still need to free the parent shared data
     //  Example: This will happen if we are ignoring fork events.
-    ec_process_tracking_set_temp_exec_identity(posix_identity, NULL, context);
-    ec_process_tracking_put_exec_identity(exec_identity, context);
-    ec_process_tracking_put_exec_identity(temp_exec_identity, context);
+    ec_process_tracking_set_temp_exec_handle(process_handle, NULL, context);
 }
 
 char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *context)
@@ -304,20 +305,26 @@ char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *
 
     if (exec_identity)
     {
-        // TODO: Add lock
+        ec_read_lock(&exec_identity->string_lock, context);
         path = ec_mem_cache_get_generic(exec_identity->path, context);
+        ec_read_unlock(&exec_identity->string_lock, context);
     }
 
     return path;
 }
 
-void ec_process_tracking_set_path(ExecIdentity *exec_identity, char *path, ProcessContext *context)
+void ec_process_tracking_set_path(ProcessHandle *process_handle, char *path, ProcessContext *context)
 {
-     if (exec_identity)
+     if (process_handle)
      {
-         // TODO: Add lock
-         ec_process_tracking_put_path(exec_identity->path, context);
-         exec_identity->path = (path ? ec_mem_cache_get_generic(path, context) : NULL);
+         ec_write_lock(&ec_process_exec_identity(process_handle)->string_lock, context);
+         ec_mem_cache_put_generic(ec_process_exec_identity(process_handle)->path);
+         ec_process_exec_identity(process_handle)->path = ec_mem_cache_get_generic(path, context);
+         ec_write_unlock(&ec_process_exec_identity(process_handle)->string_lock, context);
+
+         // We do not need to be locked to update the handle
+         ec_mem_cache_put_generic(ec_process_exec_handle(process_handle)->path);
+         ec_process_exec_handle(process_handle)->path = ec_mem_cache_get_generic(path, context);
      }
 }
 
@@ -491,4 +498,29 @@ PosixIdentity *ec_process_posix_identity(ProcessHandle *process_handle)
 ExecIdentity *ec_process_exec_identity(ProcessHandle *process_handle)
 {
     return process_handle ? process_handle->exec_handle.identity : NULL;
+}
+
+ExecHandle *ec_process_exec_handle(ProcessHandle *process_handle)
+{
+    return process_handle ? &process_handle->exec_handle : NULL;
+}
+
+char *ec_process_path(ProcessHandle *process_handle)
+{
+    return process_handle ? process_handle->exec_handle.path : NULL;
+}
+
+char *ec_process_cmdline(ProcessHandle *process_handle)
+{
+    return process_handle ? process_handle->exec_handle.cmdline : NULL;
+}
+
+ExecIdentity *ec_exec_identity(ExecHandle *exec_handle)
+{
+    return exec_handle ? exec_handle->identity : NULL;
+}
+
+char *ec_exec_path(ExecHandle *exec_handle)
+{
+    return exec_handle ? exec_handle->path : NULL;
 }

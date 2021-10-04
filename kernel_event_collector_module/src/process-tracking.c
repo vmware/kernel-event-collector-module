@@ -91,10 +91,10 @@ ProcessHandle *ec_process_tracking_get_handle(pid_t pid, ProcessContext *context
 }
 
 // Check whether path points at an interpreter.
-bool ec_process_tracking_is_interpreter(ExecIdentity *exec_identity, ProcessContext *context)
+bool ec_process_tracking_is_interpreter(ExecHandle *exec_handle, ProcessContext *context)
 {
     bool result = false;
-    char *path = ec_process_tracking_get_path(exec_identity, context);
+    char *path = ec_exec_path(exec_handle);
 
     if (path)
     {
@@ -113,7 +113,6 @@ bool ec_process_tracking_is_interpreter(ExecIdentity *exec_identity, ProcessCont
             }
         }
     }
-    ec_process_tracking_put_path(path, context);
 
     return result;
 }
@@ -130,10 +129,10 @@ ProcessHandle *ec_process_tracking_create_process(
         bool                is_real_start,
         ProcessContext     *context)
 {
-    ProcessHandle *process_handle    = NULL;
-    PosixIdentity    *posix_identity        = NULL;
-    ExecIdentity *exec_identity  = NULL;
-    char               *msg          = (is_real_start ? "" : "<FAKE> ");
+    ProcessHandle      *process_handle            = NULL;
+    ExecHandle          exec_handle               = { 0 };
+    PosixIdentity      *posix_identity            = NULL;
+    char               *msg                       = (is_real_start ? "" : "<FAKE> ");
     ProcessDetails      posix_parent_details      = { 0 };
     ProcessDetails      posix_grandparent_details = { 0 };
 
@@ -146,7 +145,7 @@ ProcessHandle *ec_process_tracking_create_process(
         if (parent_handle)
         {
             // Increase the reference count on the shared data (for local function)
-            exec_identity = ec_process_tracking_get_exec_identity_ref(ec_process_exec_identity(parent_handle), context);
+            ec_process_exec_handle_clone(ec_process_exec_handle(parent_handle), &exec_handle, context);
             posix_parent_details      = ec_process_posix_identity(parent_handle)->posix_details;
             posix_grandparent_details = ec_process_posix_identity(parent_handle)->posix_parent_details;
 
@@ -159,8 +158,9 @@ ProcessHandle *ec_process_tracking_create_process(
     //  1. We observed some event on this process
     //  2. We saw a fork, but the parent is not tracked
     //  3. We saw an exec on this process
-    if (!exec_identity)
+    if (!ec_exec_identity(&exec_handle))
     {
+        ExecIdentity       *exec_identity = NULL;
         struct task_struct *parent_task  = (taskp       ? taskp->real_parent : NULL);
         struct task_struct *gparent_task = (parent_task ? parent_task->real_parent : NULL);
 
@@ -191,7 +191,13 @@ ProcessHandle *ec_process_tracking_create_process(
         posix_parent_details      = exec_identity->exec_details;
         posix_grandparent_details = exec_identity->exec_parent_details;
 
-        exec_identity->is_interpreter = ec_process_tracking_is_interpreter(exec_identity, context);
+        ec_process_exec_handle_set_exec_identity(&exec_handle, exec_identity, context);
+
+        // Call this after setting the handle
+        exec_identity->is_interpreter = ec_process_tracking_is_interpreter(&exec_handle, context);
+
+        // Release the reference to the exec_identity here
+        ec_process_tracking_put_exec_identity(exec_identity, context);
     }
 
     posix_identity = (PosixIdentity *)ec_hashtbl_alloc_generic(g_process_tracking_data.table, context);
@@ -219,13 +225,13 @@ ProcessHandle *ec_process_tracking_create_process(
             posix_identity->net_accept             =
             posix_identity->net_dns                = 0;
         posix_identity->is_real_start              = is_real_start;
-        posix_identity->exec_identity                = NULL;
-        posix_identity->temp_exec_identity           = NULL;
+        posix_identity->exec_identity              = NULL;
         posix_identity->exec_blocked               = false;
+        memset(&posix_identity->temp_exec_handle, 0, sizeof(posix_identity->temp_exec_handle));
 
         posix_identity->posix_details.pid         = pid;
-        posix_identity->posix_details.device      = exec_identity->exec_details.device;
-        posix_identity->posix_details.inode       = exec_identity->exec_details.inode;
+        posix_identity->posix_details.device      = ec_exec_identity(&exec_handle)->exec_details.device;
+        posix_identity->posix_details.inode       = ec_exec_identity(&exec_handle)->exec_details.inode;
         posix_identity->posix_details.start_time  = start_time;
 
         posix_identity->posix_parent_details      = posix_parent_details;
@@ -243,7 +249,8 @@ ProcessHandle *ec_process_tracking_create_process(
             g_process_tracking_data.create_by_exec += 1;
         }
 
-        ec_process_posix_identity_set_exec_identity(posix_identity, exec_identity, context);
+        // We do not lock the tracking table at this point because it is not inserted yet
+        ec_process_posix_identity_set_exec_identity(posix_identity, ec_exec_identity(&exec_handle), context);
 
         process_handle = ec_process_tracking_add_process(posix_identity, context);
         TRY(process_handle);
@@ -254,23 +261,20 @@ ProcessHandle *ec_process_tracking_create_process(
 
         if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
         {
-            char *path = ec_process_tracking_get_path(ec_process_exec_identity(process_handle), context);
-
             TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %" PRFs64 ")",
                   msg,
-                  path,
+                  ec_process_path(process_handle),
                   pid,
                   parent,
                   ec_process_exec_identity(process_handle)->exec_details.pid,
                   ec_process_exec_identity(process_handle)->exec_parent_details.pid,
                   (long long) atomic64_read(&ec_process_exec_identity(process_handle)->active_process_count));
-            ec_process_tracking_put_path(path, context);
         }
     }
 
 CATCH_DEFAULT:
     // Always drop the ref held by this local function
-    ec_process_tracking_put_exec_identity(exec_identity, context);
+    ec_process_tracking_put_exec_handle(&exec_handle, context);
 
     return process_handle;
 }
@@ -291,13 +295,13 @@ ProcessHandle *ec_process_tracking_update_process(
     bool                is_real_start,
     ProcessContext     *context)
 {
-    ProcessHandle *process_handle      = NULL;
-    ExecIdentity *exec_identity        = NULL;
-    ExecIdentity *parent_exec_identity = NULL;
-    pid_t               parent             = ec_getppid(taskp);
-    struct task_struct *parent_task        = (taskp       ? taskp->real_parent : NULL);
-    char               *msg                = "";
-    bool isExecOther = false;
+    ProcessHandle      *process_handle      = NULL;
+    ExecIdentity       *exec_identity       = NULL;
+    ExecHandle          parent_exec_handle  = { 0 };
+    pid_t               parent              = ec_getppid(taskp);
+    struct task_struct *parent_task         = (taskp ? taskp->real_parent : NULL);
+    char               *msg                 = "";
+    bool                isExecOther         = false;
     bool was_last_active_process = false;
 
     process_handle = ec_process_tracking_get_handle(pid, context);
@@ -342,33 +346,17 @@ ProcessHandle *ec_process_tracking_update_process(
         }
     }
 
-    // Increase the reference count on the shared data (for local function)
-    parent_exec_identity = ec_process_tracking_get_exec_identity_ref(ec_process_exec_identity(process_handle), context);
+    // Increase the reference count on the exec_identity (for local function)
+    ec_process_exec_handle_clone(ec_process_exec_handle(process_handle), &parent_exec_handle, context);
 
-    isExecOther = parent_exec_identity->exec_details.pid == pid;
+    isExecOther = ec_exec_identity(&parent_exec_handle)->exec_details.pid == pid;
 
     // The new process we are execing was an active process in its parent. So reduce the active count of the parent
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&parent_exec_identity->active_process_count, { was_last_active_process = true; });
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&ec_exec_identity(&parent_exec_handle)->active_process_count, { was_last_active_process = true; });
 
     // Allocate a shared data_object for the new process
     //  We get a reference to this
     exec_identity = ec_process_tracking_alloc_exec_identity(context);
-
-    // If this is was the last remaining process of the exec identity we want to
-    //  send an exit for it.
-    //  This will catch exec-other and last fork cases.  We want to ignore a fake start however.
-    if (was_last_active_process && is_real_start)
-    {
-        // This will set the current proc's temp_exec_identity to the new shared data of the execed proc.
-        // The exit event (for the previous exec identity/parent) will take a reference to this exec_identity.
-        // This forces the new exec's exit event to wait to be queued until after previous exec's exit event.
-        ec_process_tracking_set_temp_exec_identity(ec_process_posix_identity(process_handle), exec_identity, context);
-
-        // Send the event based on the current process information.
-        //  We will not delete the posix_identity since it will be used by the new process.
-        //  The exec_identity will be released later
-        ec_event_send_exit(process_handle, was_last_active_process, context);
-    }
 
     TRY_DO_MSG(exec_identity,
                {
@@ -378,8 +366,8 @@ ProcessHandle *ec_process_tracking_update_process(
                DL_WARNING, "%s: error allocating shared data for pid[%d]\n", __func__, pid);
 
     // reported data changes generations during exec
-    exec_identity->exec_grandparent_details = parent_exec_identity->exec_parent_details;
-    exec_identity->exec_parent_details      = parent_exec_identity->exec_details;
+    exec_identity->exec_grandparent_details = ec_exec_identity(&parent_exec_handle)->exec_parent_details;
+    exec_identity->exec_parent_details      = ec_exec_identity(&parent_exec_handle)->exec_details;
 
 
     exec_identity->exec_details.pid         = pid;
@@ -388,30 +376,50 @@ ProcessHandle *ec_process_tracking_update_process(
     exec_identity->exec_details.start_time  = start_time;
 
     exec_identity->path_found               = path_found;
-    exec_identity->exec_count               = (!isExecOther ? 1 : parent_exec_identity->exec_count + 1);
-
-    ec_process_posix_identity(process_handle)->posix_details.inode   = inode;
-    ec_process_posix_identity(process_handle)->posix_details.device  = device;
-    ec_process_posix_identity(process_handle)->posix_details.inode   = inode;
+    exec_identity->exec_count               = (!isExecOther ? 1 : ec_exec_identity(&parent_exec_handle)->exec_count + 1);
 
     if (!path && ec_is_task_valid(taskp))
     {
         path = taskp->comm;
     }
 
-    path = ec_mem_cache_strdup(path, context);
+    exec_identity->path = ec_mem_cache_strdup(path, context);
 
-    TRY(path);
-    ec_process_tracking_set_path(exec_identity, path, context);
+    // If this is was the last remaining process of the exec identity we want to
+    //  send an exit for it.
+    //  This will catch exec-other and last fork cases.  We want to ignore a fake start however.
+    if (was_last_active_process && is_real_start)
+    {
+        ExecHandle temp_exec_handle   = { 0 };
 
-    exec_identity->is_interpreter = ec_process_tracking_is_interpreter(exec_identity, context);
+        ec_process_exec_handle_set_exec_identity(&temp_exec_handle, exec_identity, context);
 
-    // Update our table entry with the new shared data
-    ec_process_posix_identity_set_exec_identity(ec_process_posix_identity(process_handle), exec_identity, context);
+        // This will set the current proc's temp_exec_identity to the new shared data of the execed proc.
+        // The exit event (for the previous exec identity/parent) will take a reference to this exec_identity.
+        // This forces the new exec's exit event to wait to be queued until after previous exec's exit event.
+        ec_process_tracking_set_temp_exec_handle(process_handle, &temp_exec_handle, context);
+
+        // Send the event based on the current process information.
+        //  We will not delete the posix_identity since it will be used by the new process.
+        //  The exec_identity will be released later
+        ec_event_send_exit(process_handle, was_last_active_process, context);
+
+        ec_process_tracking_put_exec_handle(&temp_exec_handle, context);
+    }
+
+    // Update our table entry with the new exec_identity
+    //  This will lock the hashtable to prevent any data racing
     ec_process_tracking_set_exec_identity(process_handle, exec_identity, context);
+
+    // This needs the updated exec_handle
+    exec_identity->is_interpreter = ec_process_tracking_is_interpreter(ec_process_exec_handle(process_handle), context);
 
     // Mark us as an active process
     atomic64_inc(&exec_identity->active_process_count);
+
+    ec_process_posix_identity(process_handle)->posix_details.inode   = inode;
+    ec_process_posix_identity(process_handle)->posix_details.device  = device;
+    ec_process_posix_identity(process_handle)->posix_details.inode   = inode;
 
     ec_process_posix_identity(process_handle)->tid            = tid;
     ec_process_posix_identity(process_handle)->uid            = uid;
@@ -423,7 +431,7 @@ ProcessHandle *ec_process_tracking_update_process(
     {
         // Hold onto a reference to our parent exec_identity until the start event is sent.
         //  This will ensure the exit event of the parent is sent after this start event
-        ec_process_tracking_set_temp_exec_identity(ec_process_posix_identity(process_handle), parent_exec_identity, context);
+        ec_process_tracking_set_temp_exec_handle(process_handle, &parent_exec_handle, context);
     }
 
     ec_process_tracking_update_op_cnts(ec_process_posix_identity(process_handle), event_type, action);
@@ -432,7 +440,7 @@ ProcessHandle *ec_process_tracking_update_process(
     {
         TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld) (active: %" PRFs64 ")",
               msg,
-              path ? path : "<unknown>",
+              ec_process_path(process_handle) ? ec_process_path(process_handle) : "<unknown>",
               pid,
               parent,
               exec_identity->exec_details.pid,
@@ -444,9 +452,8 @@ ProcessHandle *ec_process_tracking_update_process(
 
 CATCH_DEFAULT:
     // Release the local ref held by this function
-    ec_process_tracking_put_path(path, context);
     ec_process_tracking_put_exec_identity(exec_identity, context);
-    ec_process_tracking_put_exec_identity(parent_exec_identity, context);
+    ec_process_tracking_put_exec_handle(&parent_exec_handle, context);
 
     return process_handle;
 }
@@ -624,6 +631,7 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
         atomic64_set(&exec_identity->reference_count, 0);
         atomic64_set(&exec_identity->active_process_count, 0);
         atomic64_set(&exec_identity->exit_event, 0);
+        ec_spinlock_init(&exec_identity->string_lock, context);
         exec_identity->path               = NULL;
         exec_identity->cmdline            = NULL;
         exec_identity->is_interpreter     = false;
@@ -663,9 +671,12 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
         ec_file_process_tree_destroy(&exec_identity->tracked_files, context);
 
 
+        // Free the lock
+        ec_spinlock_destroy(&exec_identity->string_lock, context);
+
         // Free the path and commandline
-        ec_process_tracking_set_path(exec_identity, NULL, context);
-        ec_process_tracking_set_cmdline(exec_identity, NULL, context);
+        ec_mem_cache_put_generic(exec_identity->path);
+        ec_mem_cache_put_generic(exec_identity->cmdline);
 
         exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
 
@@ -706,9 +717,11 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
             ec_process_tracking_put_exec_identity(exec_identity, context);
         }
 
+        // We do not need to lock here because it is done in the delete callback (from the last reference)
         ec_process_posix_identity_set_exec_identity(posix_identity, NULL, context);
+
         // Just in case, this should have been unset by ec_process_tracking_set_event_info
-        ec_process_tracking_set_temp_exec_identity(posix_identity, NULL, context);
+        ec_process_tracking_put_exec_handle(&posix_identity->temp_exec_handle, context);
     }
 }
 

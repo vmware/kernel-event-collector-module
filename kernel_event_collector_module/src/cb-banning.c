@@ -202,7 +202,6 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     struct my_siginfo info;
     int ret;
     struct list_head *pos, *safe_del;
-    ProcessHandle *process_handle = NULL;
     RUNNING_BANNED_INODE_S sRunningInodesToBan;
     RUNNING_PROCESSES_TO_BAN *temp = NULL;
 
@@ -236,8 +235,8 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     list_for_each(pos, &sRunningInodesToBan.BanList.list)
     {
         struct task_struct const *task = NULL;
+        ProcessHandle *process_handle = (ProcessHandle *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->process_handle);
 
-        process_handle = (ProcessHandle *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->process_handle);
         if (process_handle)
         {
             pid = ec_process_posix_identity(process_handle)->pt_key.pid;
@@ -270,6 +269,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     list_for_each_safe(pos, safe_del, &sRunningInodesToBan.BanList.list)
     {
         temp = list_entry(pos, RUNNING_PROCESSES_TO_BAN, list);
+        ec_process_tracking_put_handle(temp->process_handle, context);
         list_del(pos);
         ec_mem_cache_free_generic(temp);
     }

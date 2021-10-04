@@ -34,6 +34,8 @@ typedef struct exec_identity {
     ProcessDetails    exec_parent_details;
     ProcessDetails    exec_grandparent_details;
 
+
+    uint64_t          string_lock;
     char             *path;
     char             *cmdline;
     bool              path_found;
@@ -69,7 +71,7 @@ typedef struct ExecIdentity_handle {
 
 typedef struct file_tree_handle {
     CB_RBTREE *tree;
-    ExecIdentity *exec_identity;
+    ExecHandle exec_handle;
 } FILE_TREE_HANDLE;
 
 typedef struct posix_identity {
@@ -116,15 +118,15 @@ typedef struct posix_identity {
 
     ExecIdentity   *exec_identity;
 
-    // This holds a temporary pointer to the exec_identity that will be referenced by the next event created for
+    // This holds a temporary handle to the exec_identity that will be referenced by the next event created for
     // this proc. This is only used when creating events as a result of process execs.
-    ExecIdentity   *temp_exec_identity;
+    ExecHandle      temp_exec_handle;
 
 } PosixIdentity;
 
 // This handle holds reference counts to the posix_identity
 typedef struct process_handle {
-    PosixIdentity          *posix_identity;
+    PosixIdentity  *posix_identity;
     ExecHandle      exec_handle;
 } ProcessHandle;
 
@@ -159,47 +161,51 @@ ProcessHandle *ec_process_tracking_update_process(
         ProcessContext     *context);
 
 ProcessHandle *ec_process_tracking_get_handle(pid_t pid, ProcessContext *context);
-void ec_process_tracking_put_handle(ProcessHandle *handle, ProcessContext *context);
-void ec_process_tracking_remove_process(ProcessHandle *handle, ProcessContext *context);
+void ec_process_tracking_put_handle(ProcessHandle *process_handle, ProcessContext *context);
+void ec_process_tracking_remove_process(ProcessHandle *process_handle, ProcessContext *context);
 bool ec_is_process_tracked(pid_t pid, ProcessContext *context);
 void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context);
 bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context);
 char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *context);
-void ec_process_tracking_set_path(ExecIdentity *exec_identity, char *path, ProcessContext *context);
-void ec_process_tracking_put_path(char *path, ProcessContext *context);
+void ec_process_tracking_set_path(ProcessHandle *process_handle, char *path, ProcessContext *context);
 char *ec_process_tracking_get_cmdline(ExecIdentity *exec_identity, ProcessContext *context);
-void ec_process_tracking_set_cmdline(ExecIdentity *exec_identity, char *cmdline, ProcessContext *context);
-void ec_process_tracking_put_cmdline(char *cmdline, ProcessContext *context);
-void ec_process_tracking_set_proc_cmdline(ProcessHandle *handle, char *cmdline, ProcessContext *context);
+void ec_process_tracking_set_cmdline(ExecHandle *exec_handle, char *cmdline, ProcessContext *context);
+void ec_process_tracking_set_proc_cmdline(ProcessHandle *process_handle, char *cmdline, ProcessContext *context);
 
 // Discovery
 void ec_process_tracking_send_process_discovery(ProcessContext *context);
 
 // Hook Helpers
-void ec_process_tracking_mark_as_blocked(ProcessHandle *handle);
-bool ec_process_tracking_is_blocked(ProcessHandle *handle);
-pid_t ec_process_tracking_exec_pid(ProcessHandle *handle, ProcessContext *context);
+void ec_process_tracking_mark_as_blocked(ProcessHandle *process_handle);
+bool ec_process_tracking_is_blocked(ProcessHandle *process_handle);
+pid_t ec_process_tracking_exec_pid(ProcessHandle *process_handle, ProcessContext *context);
 ProcessHandle *ec_create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context);
 ProcessHandle *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, const char *msg, ProcessContext *context);
 ExecIdentity *ec_process_tracking_get_exec_identity(PosixIdentity *posix_identity, ProcessContext *context);
 ExecIdentity *ec_process_tracking_get_exec_identity_ref(ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_put_exec_handle(ExecHandle *exec_handle, ProcessContext *context);
+void ec_process_exec_handle_clone(ExecHandle *from, ExecHandle *to, ProcessContext *context);
 
 // Event Helper
-void ec_process_tracking_set_event_info(PosixIdentity *posix_identity, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
+void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
 void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVENT event, ProcessContext *context);
 bool ec_process_tracking_should_track_user(void);
 bool ec_process_tracking_has_active_process(PosixIdentity *posix_identity, ProcessContext *context);
 
 // File helpers
 typedef void (*process_tracking_for_each_tree_callback)(void *tree, void *priv, ProcessContext *context);
-bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, ProcessContext *context);
-void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext *context);
+bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *process_handle, ProcessContext *context);
+void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *process_handle, ProcessContext *context);
 void ec_process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback callback, void *priv, ProcessContext *context);
 
-PosixIdentity *ec_process_posix_identity(ProcessHandle *handle);
-ExecIdentity *ec_process_exec_identity(ProcessHandle *handle);
+PosixIdentity *ec_process_posix_identity(ProcessHandle *process_handle);
+ExecIdentity *ec_process_exec_identity(ProcessHandle *process_handle);
+ExecHandle *ec_process_exec_handle(ProcessHandle *process_handle);
+char *ec_process_path(ProcessHandle *process_handle);
+char *ec_process_cmdline(ProcessHandle *process_handle);
+ExecIdentity *ec_exec_identity(ExecHandle *exec_handle);
+char *ec_exec_path(ExecHandle *exec_handle);
 
 // List of interpreters. The ExecIdentity::is_interpreter flag
 // is set for any process whose path contains a name in this list.

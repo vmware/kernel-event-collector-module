@@ -109,6 +109,11 @@ bool ec_hashtbl_write_bkt_lock(HashTbl *hashTblp, void *key, void **datap, HashT
                                ProcessContext *context);
 void ec_hashtbl_write_bkt_unlock(HashTableBkt *bkt, ProcessContext *context);
 
+void ec_hashtbl_read_lock(HashTbl *hashTblp, void *key, ProcessContext *context);
+void ec_hashtbl_read_unlock(HashTbl *hashTblp, void *key, ProcessContext *context);
+void ec_hashtbl_write_lock(HashTbl *hashTblp, void *key, ProcessContext *context);
+void ec_hashtbl_write_unlock(HashTbl *hashTblp, void *key, ProcessContext *context);
+
 // Do not call this directly unless you wrap around ec_hashtbl_write_bkt_lock
 int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
 

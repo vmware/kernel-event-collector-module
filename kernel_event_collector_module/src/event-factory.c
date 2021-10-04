@@ -33,19 +33,15 @@ PCB_EVENT ec_factory_alloc_event(
 
     if (process_handle && type_msg && MAY_TRACE_LEVEL(trace_level))
     {
-        char *path = ec_process_tracking_get_path(ec_process_exec_identity(process_handle), context);
-
         TRACE(trace_level, "%s%s %s of %d by %d (reported as %d:%ld by %d)",
               type_msg,
               (status_msg ? status_msg : ""),
-              (path ? path : "<unknown>"),
+              (ec_process_path(process_handle) ? ec_process_path(process_handle) : "<unknown>"),
               ec_process_posix_identity(process_handle)->posix_details.pid,
               ec_process_posix_identity(process_handle)->posix_parent_details.pid,
               ec_process_exec_identity(process_handle)->exec_details.pid,
               ec_process_exec_identity(process_handle)->exec_details.start_time,
               ec_process_exec_identity(process_handle)->exec_parent_details.pid);
-
-        ec_process_tracking_put_path(path, context);
     }
 
     // This will return a NULL event if we are configured to not send this event type
@@ -53,7 +49,7 @@ PCB_EVENT ec_factory_alloc_event(
 
     // We still call this even for a NULL event to give the process_tracking a chance
     //  to clean up any private data
-    ec_process_tracking_set_event_info(ec_process_posix_identity(process_handle), intentType, eventType, event, context);
+    ec_process_tracking_set_event_info(process_handle, intentType, eventType, event, context);
 
     return event;
 }
@@ -84,14 +80,8 @@ void ec_event_send_start(
     event->processStart.start_action   = start_action;
     event->processStart.observed       = ec_process_posix_identity(process_handle)->is_real_start;
 
-    if (ec_process_exec_identity(process_handle))
-    {
-        event->processStart.path = ec_process_tracking_get_cmdline(ec_process_exec_identity(process_handle), context);// take reference
-        if (event->processStart.path)
-        {
-            event->processStart.path_size = (uint16_t)strlen(event->processStart.path) + 1;
-        }
-    }
+    event->processStart.path  = ec_mem_cache_get_generic(ec_process_cmdline(process_handle), context);// take reference
+    event->processStart.path_size = ec_mem_cache_get_size_generic(event->processStart.path);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
@@ -152,18 +142,14 @@ void ec_event_send_exit(
 
     if (MAY_TRACE_LEVEL(DL_PROCESS))
     {
-        char *path = ec_process_tracking_get_path(ec_process_exec_identity(process_handle), context);
-
         TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
               status_msg,
-              (path ? path : "<unknown>"),
+              (ec_process_path(process_handle) ? ec_process_path(process_handle) : "<unknown>"),
               ec_process_posix_identity(process_handle)->posix_details.pid,
               ec_process_posix_identity(process_handle)->posix_parent_details.pid,
               ec_process_exec_identity(process_handle)->exec_details.pid,
               ec_process_exec_identity(process_handle)->exec_details.start_time,
               ec_process_exec_identity(process_handle)->exec_parent_details.pid);
-
-        ec_process_tracking_put_path(path, context);
     }
 }
 
@@ -286,7 +272,7 @@ void ec_event_send_modload(
     // load, but for now we just drop it. We identify this case by seeing that no process
     // exec event for the current posix_identity has been sent yet, because the exec event is
     // responsible for freeing the parent shared data.
-    CANCEL_VOID(process_handle && !ec_process_posix_identity(process_handle)->temp_exec_identity);
+    CANCEL_VOID(process_handle && !ec_exec_identity(&ec_process_posix_identity(process_handle)->temp_exec_handle));
 
     if (MAY_TRACE_LEVEL(DL_MODLOAD))
     {
