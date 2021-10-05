@@ -501,7 +501,7 @@ static void print_task_ctx(struct dynsec_task_ctx *task_ctx)
            '?' : '+', task_ctx->start_time
     );
     if (task_ctx->tid != task_ctx->pid) {
-        printf(" tid:%u");
+        printf(" tid:%u", task_ctx->tid);
     }
     printf(" pid:%u ppid:%u mnt_ns:%u ctx:%#x",
            task_ctx->pid, task_ctx->ppid,
