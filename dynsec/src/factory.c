@@ -1605,7 +1605,7 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
         dynsec_file->gid = inode->i_gid;
 #endif
         dynsec_file->size = inode->i_size;
-        dynsec_file->count = inode->i_count;
+        dynsec_file->count = atomic_read(&inode->i_count);
         dynsec_file->nlink = inode->i_nlink;
         // This is likely in accurate and should be over written
         // by either dentry or vfsmount accessed super_block
