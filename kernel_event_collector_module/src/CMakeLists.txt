@@ -117,5 +117,7 @@ set(SOURCE_FILES drvmain.c
         tests/module-state-tests.c
         tests/stall-tests.c)
 
+file(GLOB HEADER_FILES *.h ../include/*.h tests/*.h)
+
 do_build_kernel_module()
 do_post_build_kernel_module()
