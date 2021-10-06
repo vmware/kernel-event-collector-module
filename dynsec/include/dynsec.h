@@ -141,6 +141,9 @@ struct dynsec_task_ctx {
 #define DYNSEC_TASK_IMPRECISE_START_TIME    0x0004
 #define DYNSEC_TASK_HAS_MNT_NS              0x0008
     uint16_t extra_ctx;
+
+#define DYNSEC_TASK_COMM_LEN   16
+    char     comm[DYNSEC_TASK_COMM_LEN];
 };
 
 struct dynsec_blob {
