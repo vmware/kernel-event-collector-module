@@ -62,7 +62,9 @@ module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 
 INIT_CB_RESOLVED_SYMS();
+
 DEFINE_PER_CPU(atomic64_t, module_inuse);
+DEFINE_PER_CPU(atomic64_t, module_active_inuse);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
@@ -298,7 +300,8 @@ void __exit ec_cleanup(void)
         uint64_t l_module_inuse = 0;
         unsigned int cpu;
 
-        for_each_possible_cpu(cpu) {
+        for_each_possible_cpu(cpu)
+        {
             l_module_inuse += atomic64_read(&per_cpu(module_inuse, cpu));
         }
 
@@ -388,8 +391,13 @@ int ec_disable_module(ProcessContext *context)
     while (true)
     {
         uint64_t l_active_call_count = 0;
+        unsigned int cpu;
 
-        l_active_call_count = atomic64_read(&g_module_state_info.module_active_call_count);
+        for_each_possible_cpu(cpu)
+        {
+            l_active_call_count += atomic64_read(&per_cpu(module_active_inuse, cpu));
+        }
+
         if (l_active_call_count != 0)
         {
             // Reduce how often we print a message about active hooks

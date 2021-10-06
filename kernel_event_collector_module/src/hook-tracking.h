@@ -16,6 +16,6 @@
 // This makes the assumption that these macros are not used recursively.
 bool ec_hook_tracking_initialize(ProcessContext *context);
 void ec_hook_tracking_shutdown(ProcessContext *context);
-void ec_hook_tracking_add_entry(ProcessContext *context);
+void ec_hook_tracking_add_entry(ProcessContext *context, const char *hook_name);
 void ec_hook_tracking_del_entry(ProcessContext *context);
 int ec_hook_tracking_print_active(ProcessContext *context);

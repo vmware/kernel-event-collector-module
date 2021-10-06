@@ -8,6 +8,7 @@
 bool __init test__begin_finish_macros(ProcessContext *context)
 {
     bool passed = false;
+    unsigned int cpu;
 
     // Initially we're enabled...
     g_module_state_info.module_state = ModuleStateEnabled;
@@ -34,7 +35,10 @@ CATCH_DISABLED:
     // This will warn if the active call count is wrong
     FINISH_MODULE_DISABLE_CHECK(context);
 
-    ASSERT_TRY(atomic64_read(&g_module_state_info.module_active_call_count) == 0);
+    for_each_possible_cpu(cpu)
+    {
+        ASSERT_TRY(atomic64_read(&per_cpu(module_active_inuse, cpu)) == 0);
+    }
     passed = true;
 
 CATCH_DEFAULT:
@@ -51,19 +55,19 @@ bool __init test__hook_tracking_add_del(ProcessContext *context)
     // ignore the passed in context for this test
     DECLARE_NON_ATOMIC_CONTEXT(test_context, current_pid);
 
-    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->count) == 0);
+    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 0);
 
-    ec_hook_tracking_add_entry(&test_context);
+    ec_hook_tracking_add_entry(&test_context, __func__);
 
-    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->count) == 1);
-    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->last_pid) == current_pid);
+    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 1);
+    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->last_pid) == current_pid);
 
     // This is here to exercise this code since there's no easy way to force it to run.
     ec_hook_tracking_print_active(&test_context);
 
     ec_hook_tracking_del_entry(&test_context);
 
-    ASSERT_TRY(atomic64_read(&test_context.hook_tracking->count) == 0);
+    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 0);
 
     passed = true;
 

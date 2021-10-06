@@ -4,7 +4,6 @@
 
 #pragma once
 
-
 // checkpatch-ignore: COMPLEX_MACRO
 
 #include <linux/types.h>
@@ -17,7 +16,29 @@ extern struct timespec ec_get_current_timespec(void);
 
 #define MAX_GFP_STACK    10
 
+// Counters that track usage of hook functions are implemented as per-cpu variables. This reduces contention between
+// CPUs. Each CPU has its own set of counters and when we enter a hook we pick up the counters for the CPU we are
+// currently running on. We then use that set of counters until we leave the hook. This prevents the counters from
+// being a bottleneck, in the case where multiple CPUs need to access the same counter simultaneously.
+
+// Counter for hooks in use by the module
 DECLARE_PER_CPU(atomic64_t, module_inuse);
+
+// Counter for hooks in use by the enabled module
+DECLARE_PER_CPU(atomic64_t, module_active_inuse);
+
+// Get the per-cpu pointer. Disabling preemption while getting the percpu pointer ensures we stay on the same CPU
+// while getting the pointer. Seems safer but might not be necessary since all we really need is the CPU ID.
+static inline void *_safe_percpu_ptr(void *pointer)
+{
+    void *percpu;
+
+    preempt_disable();
+    percpu = this_cpu_ptr(pointer);
+    preempt_enable();
+
+    return percpu;
+}
 
 typedef struct hook_tracking {
     const char      *hook_name;
@@ -25,13 +46,7 @@ typedef struct hook_tracking {
     atomic64_t       last_enter_time;
     atomic64_t       last_pid;
     struct list_head list;
-}                           HookTracking;
-
-#define __HOOK_TRACKING_INITIALIZER() {           \
-    .hook_name = __func__,                        \
-    .count     = ATOMIC64_INIT(0),        \
-    .list      = LIST_HEAD_INIT(hook_tracking.list),   \
-}
+} HookTracking;
 
 typedef struct process_context {
     gfp_t            gfp_mode[MAX_GFP_STACK];
@@ -42,7 +57,8 @@ typedef struct process_context {
     struct list_head list;
     bool             decr_active_call_count_on_exit;
     atomic64_t       *percpu_module_inuse;
-    HookTracking     *hook_tracking;
+    atomic64_t       *percpu_module_active_inuse;
+    HookTracking     *percpu_hook_tracking;
 } ProcessContext;
 
 #define __CONTEXT_INITIALIZER(NAME, MODE, PID) {                               \
@@ -52,19 +68,20 @@ typedef struct process_context {
     .allow_wake_up         = true,                                             \
     .allow_send_events     = true,                                             \
     .decr_active_call_count_on_exit = false,                                   \
-    .percpu_module_inuse   = &__get_cpu_var(module_inuse),                     \
-    .hook_tracking         = &hook_tracking                                    \
+    .percpu_module_inuse = _safe_percpu_ptr(&module_inuse),                    \
+    .percpu_module_active_inuse = _safe_percpu_ptr(&module_active_inuse),      \
+    .percpu_hook_tracking = _safe_percpu_ptr(&hook_tracking)                   \
 }
 
 #define CB_ATOMIC        (GFP_ATOMIC | GFP_NOWAIT)
 
-#define DECLARE_ATOMIC_CONTEXT(name, pid)           \
-    static HookTracking hook_tracking = __HOOK_TRACKING_INITIALIZER(); \
-    ProcessContext name = __CONTEXT_INITIALIZER(name, CB_ATOMIC, pid)
+#define DECLARE_CONTEXT(name, mode, pid)                               \
+    static DEFINE_PER_CPU(HookTracking, hook_tracking);                \
+    ProcessContext name = __CONTEXT_INITIALIZER(name, mode, pid)
 
-#define DECLARE_NON_ATOMIC_CONTEXT(name, pid)                                  \
-    static HookTracking hook_tracking = __HOOK_TRACKING_INITIALIZER(); \
-    ProcessContext name = __CONTEXT_INITIALIZER(name, GFP_KERNEL, pid)
+#define DECLARE_ATOMIC_CONTEXT(name, pid) DECLARE_CONTEXT(name, CB_ATOMIC, pid)
+
+#define DECLARE_NON_ATOMIC_CONTEXT(name, pid) DECLARE_CONTEXT(name, GFP_KERNEL, pid)
 
 #define DISABLE_WAKE_UP(context)                                               \
     (context)->allow_wake_up = false

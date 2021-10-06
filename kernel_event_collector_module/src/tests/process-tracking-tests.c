@@ -10,8 +10,10 @@
 // same pid. We warn on 3.10 because we don't expect to see this scenario.
 // This test verifies:
 //      - ec_process_tracking_report_exit handling of active_process_count < 0
-//      - on 2.32 the extra exit event is ignored
 //      - on 3.10 a warning is issued
+//
+// After the switch to the probe exit hook, the double-exit problem should not be possible anymore, which is
+// what this test was originally written for.
 bool __init test__proc_track_report_double_exit(ProcessContext *context)
 {
     bool passed = false;
@@ -31,7 +33,7 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
     ASSERT_TRY(handle);
 
     atomic64_set(&ec_process_exec_identity(handle)->active_process_count, 0);
-    ASSERT_TRY(!ec_process_tracking_report_exit(200, context));
+    ASSERT_TRY(ec_process_tracking_report_exit(200, context));
     ASSERT_TRY(atomic64_read(&ec_process_exec_identity(handle)->exit_event) == 0);
 
     passed = true;
