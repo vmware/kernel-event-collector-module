@@ -1564,6 +1564,8 @@ static void __fill_in_task_ctx(const struct task_struct *task,
     if (task->mm) {
         task_ctx->extra_ctx |= DYNSEC_TASK_HAS_MM;
     }
+    BUILD_BUG_ON(DYNSEC_TASK_COMM_LEN != TASK_COMM_LEN);
+    memcpy(task_ctx->comm, task->comm, DYNSEC_TASK_COMM_LEN);
 
 // #if defined(RHEL_MAJOR) && RHEL_MAJOR == 8
 //    task_ctx->self_exec_id = task->task_struct_rh->self_exec_id;
