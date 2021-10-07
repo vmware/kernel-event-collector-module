@@ -127,7 +127,7 @@ lib.dynsec_client_connect.argtypes = [
 def dynsec_client_connect(client, verbosity=0, debug=0, is_tracing=False):
     return lib.dynsec_client_connect(client, 0, 0, False)
 
-lib.dynsec_client_read_events.restype = None
+lib.dynsec_client_read_events.restype = ctypes.c_int
 lib.dynsec_client_read_events.argtypes = [ctypes.POINTER(dynsec_client)]
 def dynsec_client_read_events(client):
     return lib.dynsec_client_read_events(client)

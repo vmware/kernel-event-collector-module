@@ -57,7 +57,7 @@ struct client_device {
 struct client_tracking {
     int verbosity;
     int debug;
-    bool shutdown;
+    volatile bool shutdown;
     bool follow_progeny;
 
     bool is_tracing;
@@ -100,6 +100,16 @@ struct dynsec_client {
 };
 
 
+#pragma pack(push, 1)
+struct dynsec_task_dump_data {
+    struct dynsec_task_dump data;
+// Enough space for two paths even though there's just one
+#define MAX_BLOB_STORAGE_SIZE (1 << 13)
+    char blob[MAX_BLOB_STORAGE_SIZE];
+};
+#pragma pack(pop)
+
+
 extern void dynsec_client_register(struct dynsec_client *client,
                         uint32_t default_cache_flags,
                         const struct dynsec_client_ops *ops,
@@ -110,10 +120,21 @@ extern void dynsec_client_shutdown(struct dynsec_client *client);
 extern int dynsec_client_connect(struct dynsec_client *client,
                           int verbosity, int debug, bool is_tracing);
 
-extern void dynsec_client_read_events(struct dynsec_client *client);
+extern bool dynsec_client_is_connected(struct dynsec_client *client);
+
+extern int dynsec_client_read_events(struct dynsec_client *client);
 
 extern void dynsec_client_reset(struct dynsec_client *client);
 
 extern void dynsec_client_track_pid(struct dynsec_client *client, pid_t pid,
                                     bool follow_progeny);
 
+extern int dynsec_client_dump_one_thread(struct dynsec_client *client, pid_t tid,
+                                  struct dynsec_task_dump_data *data);
+
+extern int dynsec_client_dump_one_process(struct dynsec_client *client, pid_t pid,
+                                   struct dynsec_task_dump_data *data);
+
+extern int dynsec_client_dump_all_processes(struct dynsec_client *client);
+
+extern int dynsec_client_dump_all_threads(struct dynsec_client *client);
