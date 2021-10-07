@@ -41,6 +41,9 @@ sizeof: sizeof.c $(DYNSEC_H)
 client_test: client_test.c client.o print.o
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^
 
+dump_all: dump_all.c client.o print.o
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^
+
 self_tests: tests.c test_utils.o rename.o exp.o print.o client.o
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^
 
@@ -74,13 +77,13 @@ test: sizeof.diff dynsec.pahole
 
 clean:
 	rm -f dynsec.pahole sizeof.diff sizeof.*.log \
-		sizeof client_test self_tests \
+		sizeof dump_all client_test self_tests \
 		libdynsecclient.so \
 		test_utils.o rename.o exp.o print.o client.o \
 
 
 # Real Targets
 all: dynsec.pahole sizeof.diff \
-	sizeof client_test self_tests \
+	sizeof dump_all client_test self_tests \
 	libdynsecclient.so \
 

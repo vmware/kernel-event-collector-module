@@ -86,9 +86,21 @@ class dynsec_msg_hdr(ctypes.Structure):
         ('event_type', ctypes.c_int),
     ]
 
+class dynsec_cred(ctypes.Structure):
+    _pack_ = 1
+    _fields_ = [
+        ('uid', ctypes.c_uint32),
+        ('euid', ctypes.c_uint32),
+        ('gid', ctypes.c_uint32),
+        ('egid', ctypes.c_uint32),
+        ('fsuid', ctypes.c_uint32),
+        ('fsgid', ctypes.c_uint32),
+        ('securebits', ctypes.c_uint32),
+    ]
 
 class dynsec_task_ctx(ctypes.Structure):
     _pack_ = 1
+    DYNSEC_TASK_COMM_LEN = 16
     _fields_ = [
         ('tid', ctypes.c_uint32),
         ('pid', ctypes.c_uint32),
@@ -102,6 +114,7 @@ class dynsec_task_ctx(ctypes.Structure):
         ('flags', ctypes.c_uint32),
         ('start_time', ctypes.c_uint64),
         ('extra_ctx', ctypes.c_uint16),
+        ('comm', ctypes.c_char * DYNSEC_TASK_COMM_LEN)
     ]
 
 class dynsec_file(ctypes.Structure):

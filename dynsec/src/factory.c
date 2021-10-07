@@ -1519,6 +1519,29 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
     return -EINVAL;
 }
 
+// Default values for uid/gid should be -1
+static void fill_in_cred(struct dynsec_cred *dynsec_cred, const struct cred *cred)
+{
+    if (dynsec_cred && cred) {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+        dynsec_cred->uid = from_kuid(&init_user_ns, cred->uid);
+        dynsec_cred->euid = from_kuid(&init_user_ns, cred->euid);
+        dynsec_cred->gid = from_kgid(&init_user_ns, cred->gid);
+        dynsec_cred->egid = from_kgid(&init_user_ns, cred->egid);
+        dynsec_cred->fsuid = from_kuid(&init_user_ns, cred->fsuid);
+        dynsec_cred->fsgid = from_kgid(&init_user_ns, cred->fsgid);
+#else
+        dynsec_cred->uid = cred->uid;
+        dynsec_cred->euid = cred->euid;
+        dynsec_cred->gid = cred->gid;
+        dynsec_cred->egid = cred->egid;
+        dynsec_cred->fsuid = cred->fsuid;
+        dynsec_cred->fsgid = cred->fsgid;
+#endif
+        dynsec_cred->securebits = cred->securebits;
+    }
+}
+
 static void __fill_in_task_ctx(const struct task_struct *task,
                                bool check_parent,
                                struct dynsec_task_ctx *task_ctx)
@@ -1583,12 +1606,22 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
     }
 }
 
-static void fill_in_sb_data(struct dynsec_file *dynsec_file, const struct super_block *sb)
+static void fill_in_sb_data(struct dynsec_file *dynsec_file,
+                            const struct super_block *sb)
 {
     if (sb) {
         dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DEVICE;
         dynsec_file->dev = new_encode_dev(sb->s_dev);
         dynsec_file->sb_magic = sb->s_magic;
+    }
+}
+
+static void fill_in_parent_sb_data(struct dynsec_file *dynsec_file,
+                                   const struct super_block *sb)
+{
+    if (dynsec_file && sb) {
+        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
+        dynsec_file->parent_dev = new_encode_dev(sb->s_dev);
     }
 }
 
@@ -1644,9 +1677,14 @@ static void fill_in_preaction_data(struct dynsec_file *dynsec_file,
         if (parent_path->dentry) {
             fill_in_parent_data(dynsec_file, parent_path->dentry->d_inode);
         }
-        if (parent_path->mnt && parent_path->mnt->mnt_sb) {
-            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
-            dynsec_file->parent_dev = new_encode_dev(parent_path->mnt->mnt_sb->s_dev);
+        if (parent_path->mnt) {
+            fill_in_parent_sb_data(dynsec_file, parent_path->mnt->mnt_sb);
+
+            // Safe to assume parent device data will is the target's device
+            // for preactions.
+            if (!(dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE)) {
+                fill_in_sb_data(dynsec_file, parent_path->mnt->mnt_sb);
+            }
         }
     }
 }
@@ -1657,8 +1695,11 @@ static void fill_in_dentry_data(struct dynsec_file *dynsec_file,
     if (dynsec_file && dentry) {
         fill_in_inode_data(dynsec_file, dentry->d_inode);
         fill_in_sb_data(dynsec_file, dentry->d_sb);
+
+        // d_parent data is a best effort attempt.
         if (dentry->d_parent && !IS_ROOT(dentry)) {
             fill_in_parent_data(dynsec_file, dentry->d_parent->d_inode);
+            fill_in_parent_sb_data(dynsec_file, dentry->d_parent->d_sb);
         }
         // Hint to userspace dentry has been deleted
         if (d_unlinked((struct dentry *)dentry)) {
@@ -1670,13 +1711,32 @@ static void fill_in_dentry_data(struct dynsec_file *dynsec_file,
 static void fill_in_file_data(struct dynsec_file *dynsec_file,
                               const struct path *path)
 {
-    // TODO: handle cross mountpoint parents?
-    if (path && path->dentry) {
-        fill_in_dentry_data(dynsec_file, path->dentry);
+    if (!dynsec_file || !path) {
+        return;
     }
-    if (path && path->mnt) {
+
+    fill_in_dentry_data(dynsec_file, path->dentry);
+    if (path->mnt) {
         fill_in_sb_data(dynsec_file, path->mnt->mnt_sb);
     }
+
+#ifdef FILL_IN_REAL_PARENT
+    // Attempt to get the actual parent not the d_parent.
+    if (path->dentry && path->mnt) {
+        if (path->dentry != path->mnt->mnt_root) {
+            if (path->dentry->d_parent) {
+                fill_in_parent_data(dynsec_file,
+                                    path->dentry->d_parent->d_inode);
+                fill_in_parent_sb_data(dynsec_file, path->mnt->mnt_sb);
+            }
+        } else {
+            // TODO: Nice-to-have
+            // If we can sleep we could provide a
+            // deep copy path and call follow_down_one to get
+            // the next mnt and dentry.
+        }
+    }
+#endif /* FILL_IN_REAL_PARENT */
 }
 
 // Fill in event data and compute payload
@@ -1693,7 +1753,7 @@ bool fill_in_bprm_set_creds(struct dynsec_event *dynsec_event,
 
     exec->kmsg.hdr.payload = sizeof(exec->kmsg);
     fill_in_task_ctx(&exec->kmsg.msg.task);
-
+    fill_in_cred(&exec->kmsg.msg.new_cred, bprm->cred);
     fill_in_file_data(&exec->kmsg.msg.file, &bprm->file->f_path);
 
     exec->path = dynsec_build_path(&bprm->file->f_path,
@@ -2410,6 +2470,7 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                                         &create->kmsg.msg.file);
     if (IS_ERR(create->path)) {
         create->path = NULL;
+        return false;
     }
 
     create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
@@ -2464,8 +2525,10 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
     } else {
         rename->new_path = build_preaction_path(newdfd, newname, 0,
                                                 &rename->kmsg.msg.new_file);
+        // Allow this bad intent to
         if (IS_ERR(rename->new_path)) {
             rename->new_path = NULL;
+            return false;
         }
     }
     if (rename->new_path && rename->kmsg.msg.new_file.path_size) {
@@ -2522,6 +2585,7 @@ bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
                                          &symlink->kmsg.msg.file);
     if (IS_ERR(symlink->path)) {
         symlink->path = NULL;
+        return false;
     }
     symlink->kmsg.msg.file.umode |= S_IFLNK;
 
@@ -2577,6 +2641,7 @@ bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
                                           &link->kmsg.msg.new_file);
     if (IS_ERR(link->new_path)) {
         link->new_path = NULL;
+        return false;
     }
     if (link->new_path && link->kmsg.msg.new_file.path_size) {
         link->kmsg.msg.new_file.path_offset = link->kmsg.hdr.payload;

@@ -199,7 +199,6 @@ void dynsec_client_shutdown(struct dynsec_client *client)
         close(client->fd);
         client->fd = -1;
     }
-    client->tracking.shutdown = true;
 }
 
 void dynsec_client_reset(struct dynsec_client *client)
@@ -246,7 +245,16 @@ int dynsec_client_connect(struct dynsec_client *client,
     return client->fd;
 }
 
+#define client_is_shutdown(client) \
+    ((client)->tracking.shutdown || (client)->fd < 0)
 
+bool dynsec_client_is_shutdown(struct dynsec_client *client)
+{
+    if (!client) {
+        return true;
+    }
+    return client_is_shutdown(client);
+}
 
 static int respond_to_access_request(int fd, struct dynsec_msg_hdr *hdr,
                               int response_type, int cache_flags)
@@ -457,7 +465,7 @@ void dynsec_client_track_pid(struct dynsec_client *client, pid_t pid,
 }
 
 
-void dynsec_client_read_events(struct dynsec_client *client)
+int dynsec_client_read_events(struct dynsec_client *client)
 {
 #define DEFAULT_POLL_TIMEOUT_MS 50
 #define MAX_POLL_TIMEOUT_MS 300
@@ -465,8 +473,8 @@ void dynsec_client_read_events(struct dynsec_client *client)
     int timeout_ms = DEFAULT_POLL_TIMEOUT_MS;
     char *buf = NULL;
 
-    if (!client) {
-        return;
+    if (!client || client_is_shutdown(client)) {
+        return -EFAULT;
     }
     buf = client->buf;
     memset(buf, 'A',  MAX_BUF_SZ);
@@ -484,21 +492,23 @@ void dynsec_client_read_events(struct dynsec_client *client)
         int ret;
 
 
-        if (client->tracking.shutdown && client->fd >= 0) {
+        if (client_is_shutdown(client)) {
             break;
         }
 
         ret = poll(&pollfd, 1, timeout_ms);
-
         // Check for shutdown first
-        if (client->tracking.shutdown && client->fd >= 0) {
+        if (client_is_shutdown(client)) {
             break;
+        }
+        if (ret < 0) {
+            // 
+            // if (errno == EINTR) {
+            //     continue;
+            // }
+            return -errno;
         }
 
-        if (ret < 0) {
-            fprintf(stderr, "poll(%m)\n");
-            break;
-        }
         // Timeout
         if (ret == 0) {
             timeout_ms += DEFAULT_POLL_TIMEOUT_MS;
@@ -508,8 +518,8 @@ void dynsec_client_read_events(struct dynsec_client *client)
             continue;
         }
         if (ret != 1 || !(pollfd.revents & POLLIN)) {
-            fprintf(stderr, "poll ret:%d revents:%#x\n",
-                    ret, pollfd.revents);
+            // fprintf(stderr, "poll ret:%d revents:%#x\n",
+            //         ret, pollfd.revents);
             break;
         }
         // Reset timeout even if we get -EAGAIN on read
@@ -581,4 +591,79 @@ void dynsec_client_read_events(struct dynsec_client *client)
 
 out:
     dynsec_client_shutdown(client);
+    return 0;
 }
+
+
+static int __dynsec_client_dump_one(struct dynsec_client *client,
+                                    pid_t pid, uint16_t opts,
+                                    struct dynsec_task_dump_data *data)
+{
+    int ret = -EINVAL;
+    struct dynsec_task_dump *task_dump;
+
+
+    // Fill in storage blob with 'A' for helpful debugging on dumps
+    memset(data, 'A', sizeof(*data));
+    task_dump = (struct dynsec_task_dump *)data;
+    task_dump->hdr.size = sizeof(*data);
+    task_dump->hdr.pid = pid;
+    task_dump->hdr.opts = opts;
+
+    ret = ioctl(client->fd, DYNSEC_IOC_TASK_DUMP, task_dump);
+    if (ret < 0) {
+        ret = -errno;
+    }
+    return ret;
+}
+
+static int __dynsec_client_dump_all(struct dynsec_client *client, pid_t pid,
+                                    uint16_t opts)
+{
+    struct dynsec_task_dump_all task_dump_all = {
+        .hdr = {
+            .size = sizeof(task_dump_all),
+            .pid = pid,
+            .opts = opts,
+        },
+    };
+    return ioctl(client->fd, DYNSEC_IOC_TASK_DUMP_ALL, &task_dump_all);
+}
+
+// Dump the nearest matching thread or process
+int dynsec_client_dump_one_thread(struct dynsec_client *client, pid_t tid,
+                                  struct dynsec_task_dump_data *data)
+{
+    if (!client || !data) {
+        return -EINVAL;
+    }
+    return __dynsec_client_dump_one(client, tid, DUMP_NEXT_THREAD, data);
+}
+
+// Dumps the nearest matching process
+int dynsec_client_dump_one_process(struct dynsec_client *client, pid_t pid,
+                                   struct dynsec_task_dump_data *data)
+{
+    if (!client || !data) {
+        return -EINVAL;
+    }
+    return __dynsec_client_dump_one(client, pid, DUMP_NEXT_TGID, data);
+}
+
+// Dumps everything into event queue
+int dynsec_client_dump_all_processes(struct dynsec_client *client)
+{
+    if (!client) {
+        return -EINVAL;
+    }
+    return __dynsec_client_dump_all(client, 1, DUMP_NEXT_TGID);
+}
+
+int dynsec_client_dump_all_threads(struct dynsec_client *client)
+{
+    if (!client) {
+        return -EINVAL;
+    }
+    return __dynsec_client_dump_all(client, 1, DUMP_NEXT_THREAD);
+}
+

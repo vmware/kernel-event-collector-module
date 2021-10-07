@@ -34,10 +34,10 @@
 
 uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
 
-uint32_t tracepoint_hooks = (
-        DYNSEC_TP_HOOK_TYPE_CLONE |
-        DYNSEC_TP_HOOK_TYPE_EXIT |
-        DYNSEC_TP_HOOK_TYPE_TASK_FREE
+uint32_t process_hooks = (
+        DYNSEC_HOOK_TYPE_CLONE |
+        DYNSEC_HOOK_TYPE_EXIT |
+        DYNSEC_HOOK_TYPE_TASK_FREE
 );
 
 static char lsm_hooks_str[64];
@@ -45,7 +45,7 @@ static char lsm_hooks_str[64];
 module_param_string(lsm_hooks, lsm_hooks_str,
                     sizeof(lsm_hooks_str), 0644);
 
-module_param(tracepoint_hooks, uint, 0644);
+module_param(process_hooks, uint, 0644);
 
 static void setup_lsm_hooks(void)
 {
@@ -81,7 +81,7 @@ static int __init dynsec_init(void)
     }
     dynsec_task_utils_init();
 
-    if (!dynsec_init_tp(tracepoint_hooks)) {
+    if (!dynsec_init_tp(process_hooks)) {
         pr_info("Unable to load process tracepoints\n");
         return -EINVAL;
     }

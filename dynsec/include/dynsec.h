@@ -19,6 +19,8 @@
 #define DYNSEC_HOOK_TYPE_MMAP      0x00001000
 #define DYNSEC_HOOK_TYPE_CLOSE     0x00002000
 #define DYNSEC_HOOK_TYPE_TASK_FREE 0x00004000
+#define DYNSEC_HOOK_TYPE_EXIT      0x00008000
+#define DYNSEC_HOOK_TYPE_CLONE     0x00010000
 
 #define DYNSEC_IOC_BASE            'V'
 #define DYNSEC_IOC_OFFSET          'M'
@@ -26,9 +28,9 @@
 #define DYNSEC_IOC_TASK_DUMP_ALL   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 2)
 
 // Tracepoints
-#define DYNSEC_TP_HOOK_TYPE_CLONE       0x00000001
-#define DYNSEC_TP_HOOK_TYPE_EXIT        0x00000002
-#define DYNSEC_TP_HOOK_TYPE_TASK_FREE   0x00000004
+#define DYNSEC_TP_HOOK_TYPE_CLONE       DYNSEC_HOOK_TYPE_CLONE
+#define DYNSEC_TP_HOOK_TYPE_EXIT        DYNSEC_HOOK_TYPE_EXIT
+#define DYNSEC_TP_HOOK_TYPE_TASK_FREE   DYNSEC_HOOK_TYPE_TASK_FREE
 
 // Event Message Flags aka Report
 #define DYNSEC_REPORT_STALL         0x0001
@@ -124,11 +126,23 @@ struct dynsec_response {
     uint32_t cache_flags;
 };
 
+// Eventually have dynsec_task_ctx contain this
+struct dynsec_cred {
+    uint32_t uid;
+    uint32_t euid;
+    uint32_t gid;
+    uint32_t egid;
+    uint32_t fsuid;
+    uint32_t fsgid;
+    uint32_t securebits;
+};
+
 struct dynsec_task_ctx {
     uint32_t tid;
     uint32_t pid;
     uint32_t ppid;
     uint32_t real_parent_id;
+    // Eventually replace with struct dynsec_cred
     uint32_t uid;
     uint32_t euid;
     uint32_t gid;
@@ -190,6 +204,7 @@ struct dynsec_file {
 // Core Exec Context
 struct dynsec_exec_msg {
     struct dynsec_task_ctx task;
+    struct dynsec_cred new_cred;
     struct dynsec_file file;
 };
 

@@ -931,7 +931,7 @@ void dynsec_sched_process_free_tp(void *data, struct task_struct *task)
 void dynsec_sched_process_free_tp(struct task_struct *task)
 #endif
 {
-    __dynsec_task_exit(task, DYNSEC_TP_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
+    __dynsec_task_exit(task, DYNSEC_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
 }
 
 // Settings to help control mmap event performance

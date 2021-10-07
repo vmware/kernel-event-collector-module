@@ -77,7 +77,7 @@ static bool debug = false;
 // 256 is much larger than the 64 bytes module names are limited to
 #define MAX_KMOD_NAME_LEN 256
 static char kmod_name[MAX_KMOD_NAME_LEN];
-static bool merge = true;
+static bool merge = false;
 struct prx_cache *prx_cache = NULL;
 
 unsigned int largest_read = 0;
