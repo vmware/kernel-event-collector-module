@@ -22,11 +22,6 @@
 #define DYNSEC_HOOK_TYPE_EXIT      0x00008000
 #define DYNSEC_HOOK_TYPE_CLONE     0x00010000
 
-#define DYNSEC_IOC_BASE            'V'
-#define DYNSEC_IOC_OFFSET          'M'
-#define DYNSEC_IOC_TASK_DUMP       _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 1)
-#define DYNSEC_IOC_TASK_DUMP_ALL   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 2)
-
 // Tracepoints
 #define DYNSEC_TP_HOOK_TYPE_CLONE       DYNSEC_HOOK_TYPE_CLONE
 #define DYNSEC_TP_HOOK_TYPE_EXIT        DYNSEC_HOOK_TYPE_EXIT
@@ -360,23 +355,76 @@ struct dynsec_task_dump_umsg {
     struct dynsec_task_dump_msg msg;
 };
 
+// Ioctls
+#define DYNSEC_IOC_BASE            'V'
+#define DYNSEC_IOC_OFFSET          'M'
+// Request to directly get a dump of a task back to the ioctl
+#define DYNSEC_IOC_TASK_DUMP       _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 1)
+// Request to dump tasks from a starting pid value to the event queue
+#define DYNSEC_IOC_TASK_DUMP_ALL   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 2)
+// Return the current struct dynsec_config
+#define DYNSEC_IOC_GET_CONFIG      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 3)
+// All enabled hooks go into a pass-through mode
+#define DYNSEC_IOC_BYPASS_MODE     _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 4)
+// Enable or disable stalling
+#define DYNSEC_IOC_STALL_MODE      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 5)
+// Disable or fine tune several queue and poll notifer options
+#define DYNSEC_IOC_QUEUE_OPTS      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 6)
+// TODO: Remove from char dev registry. Will only work in Bypass Mode
+#define DYNSEC_IOC_DELETE_DEVICE   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 7)
+// Change the default stall timeout by milliseconds
+#define DYNSEC_IO_STALL_TIMEOUT_MS _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 8)
+// May want a request to print out what kernel objects
+// that are blocking a clean rmmod.
+
+
+// Ioctls Transport Data
 
 // Dump Task Header
 struct dynsec_task_dump_hdr {
     uint16_t size;
     pid_t pid;
-    uint16_t opts;
-};
-struct dynsec_task_dump {
-    struct dynsec_task_dump_hdr hdr;
+
+// Optionally request the next matching thread or process
 #define DUMP_NEXT_THREAD 0x0001
 #define DUMP_NEXT_TGID   0x0002
+    uint16_t opts;
+};
+
+// Base Payload for DYNSEC_IOC_TASK_DUMP
+// But needs more storage for blobs
+struct dynsec_task_dump {
+    struct dynsec_task_dump_hdr hdr;
+
     struct dynsec_task_dump_umsg umsg;
 };
 
 // Dump All Tasks Ioctl
 struct dynsec_task_dump_all {
     struct dynsec_task_dump_hdr hdr;
+};
+
+// Eventually will contain mix of global
+// and per-client settings and state of kmod.
+struct dynsec_config {
+    // Don't do anything but propagate callbacks
+    uint32_t bypass_mode;
+    // Unsets STALL in report flags when disabled aka ZERO
+    uint32_t stall_mode;
+    // Tells us how long we can stall
+    uint32_t stall_timeout;
+
+    // Lazy notifer may not always notify when a new event is available
+    uint32_t lazy_notifier;
+    // Hard limit on events to send per-read.
+    uint32_t queue_threshold;
+    // Max events before enforcing a wake_up
+    uint32_t notify_threshold;
+
+    // Available hooks. Currently Immutable.
+    uint64_t lsm_hooks;
+    uint64_t process_hooks;
+    uint64_t preaction_hooks;
 };
 
 #pragma pack(pop)

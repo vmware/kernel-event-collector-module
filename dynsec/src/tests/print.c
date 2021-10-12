@@ -17,6 +17,34 @@
 int debug_print = 0;
 
 
+void print_dynsec_config(struct dynsec_config *dynsec_config)
+{
+    if (!dynsec_config) {
+        return;
+    }
+
+    printf("dynsec_config:\n"
+           "\tbypass_mode:%u\n"
+           "\tstall_mode:%u\n"
+           "\tstall_timeout:%u\n"
+           "\tlazy_notifier:%u\n"
+           "\tqueue_threshold:%u\n"
+           "\tnotify_threshold:%u\n"
+           "\tlsm_hooks:%#lx\n"
+           "\tprocess_hooks:%#lx\n"
+           "\tpreaction_hooks:%#lx\n",
+           dynsec_config->bypass_mode,
+           dynsec_config->stall_mode,
+           dynsec_config->stall_timeout,
+           dynsec_config->lazy_notifier,
+           dynsec_config->queue_threshold,
+           dynsec_config->notify_threshold,
+           dynsec_config->lsm_hooks,
+           dynsec_config->process_hooks,
+           dynsec_config->preaction_hooks
+    );
+}
+
 // Prints fields that are available given bitmap
 static void print_dynsec_file(struct dynsec_file *file,
                               struct dynsec_file *intent)

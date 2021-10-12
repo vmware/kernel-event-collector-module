@@ -138,3 +138,25 @@ extern int dynsec_client_dump_one_process(struct dynsec_client *client, pid_t pi
 extern int dynsec_client_dump_all_processes(struct dynsec_client *client);
 
 extern int dynsec_client_dump_all_threads(struct dynsec_client *client);
+
+// Config Getters and Setters
+extern int dynsec_client_get_config(struct dynsec_client *client,
+                             struct dynsec_config *config);
+extern int dynsec_client_disable_bypass_mode(struct dynsec_client *client);
+extern int dynsec_client_enable_bypass_mode(struct dynsec_client *client);
+
+extern int dynsec_client_disable_stalling(struct dynsec_client *client);
+extern int dynsec_client_enable_stalling(struct dynsec_client *client);
+
+extern int dynsec_client_set_queue_options(struct dynsec_client *client,
+                                    struct dynsec_config *config);
+extern int dynsec_client_disable_lazy_notifier(struct dynsec_client *client);
+extern int dynsec_client_enable_lazy_notifier(struct dynsec_client *client);
+extern int dynsec_client_set_notify_threshold(struct dynsec_client *client,
+                                              uint32_t threshold);
+extern int dynsec_client_disable_notify_threshold(struct dynsec_client *client);
+extern int dynsec_client_set_queue_threshold(struct dynsec_client *client,
+                                             uint32_t threshold);
+extern int dynsec_client_disable_queue_threshold(struct dynsec_client *client);
+extern int dynsec_client_set_stall_timeout(struct dynsec_client *client,
+                                           unsigned int timeout_ms);

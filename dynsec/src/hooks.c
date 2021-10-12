@@ -15,6 +15,7 @@
 #include "task_cache.h"
 #include "task_utils.h"
 #include "symbols.h"
+#include "config.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {
@@ -1032,7 +1033,7 @@ struct kprobe;
 int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
 {
     struct dynsec_event *event = NULL;
-    uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_LO_PRI;
+    uint16_t report_flags = DYNSEC_REPORT_AUDIT;
     DECL_ARG_1(struct task_struct *, p);
 
     if (!p) {

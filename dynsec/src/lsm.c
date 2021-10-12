@@ -75,14 +75,21 @@ static struct lsm_symbols lsm_syms;
 static struct lsm_symbols *p_lsm;
 static uint64_t enabled_lsm_hooks;
 
-bool dynsec_init_lsmhooks(uint64_t enableHooks)
+bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
 {
+    uint64_t enableHooks = 0;
+
     enabled_lsm_hooks = 0;
     p_lsm = NULL;
     g_lsmRegistered = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
     g_original_ops_ptr = NULL;
 #endif
+
+    if (!dynsec_config) {
+        return false;
+    }
+    enableHooks = dynsec_config->lsm_hooks;
 
     // Add check when implementing LSM hooks
     BUILD_BUG_ON(DYNSEC_LSM_bprm_set_creds != DYNSEC_HOOK_TYPE_EXEC);
@@ -206,7 +213,10 @@ bool dynsec_init_lsmhooks(uint64_t enableHooks)
 #endif  //}
 
     g_lsmRegistered = true;
-    lsm_hooks_mask = enableHooks;
+
+    if (dynsec_config) {
+        dynsec_config->lsm_hooks = enabled_lsm_hooks;
+    }
     return true;
 
 out_fail:
@@ -215,6 +225,8 @@ out_fail:
 #else  //}{
     pr_info("LSM: Failed to find security_hook_heads\n");
 #endif  //}
+    dynsec_config->lsm_hooks = enabled_lsm_hooks;
+
     return false;
 }
 

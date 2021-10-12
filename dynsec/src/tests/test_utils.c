@@ -37,6 +37,7 @@ static void stat_to_dynsec_file(const struct stat *sb,
         file->uid = sb->st_uid;
         file->gid = sb->st_gid;
         file->size = sb->st_size;
+        file->nlink = sb->st_nlink;
         file->attr_mask |= DYNSEC_FILE_ATTR_INODE;
     }
     if (attr_mask & DYNSEC_FILE_ATTR_DEVICE) {

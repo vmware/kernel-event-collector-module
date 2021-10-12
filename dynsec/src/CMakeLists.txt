@@ -150,6 +150,7 @@ set(SOURCE_FILES
     task_utils.c
     task_utils.h
     ../include/dynsec.h
+    config.h
 )
 
 foreach(KERNEL_NAME ${KERNEL_LIST})

@@ -34,7 +34,7 @@ extern void dynsec_sched_process_free_tp(struct task_struct *task);
 extern int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs);
 
 static DEFINE_MUTEX(tp_lock);
-uint32_t enabled_tp_hooks = 0;
+uint32_t enabled_process_hooks = 0;
 struct kprobe *new_task_kprobe = NULL;
 struct kprobe __new_task_kprobe;
 
@@ -121,7 +121,7 @@ static int dummy_fault_handler(struct kprobe *kprobe, struct pt_regs *regs, int 
 // hold tp_lock
 static void __enable_clone_tp(uint32_t tp_hooks)
 {
-    if (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
+    if (enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_CLONE) {
         return;
     }
 
@@ -137,7 +137,7 @@ static void __enable_clone_tp(uint32_t tp_hooks)
     new_task_kprobe->fault_handler = dummy_fault_handler;
 
     if (register_kprobe(new_task_kprobe) >= 0 || new_task_kprobe->addr) {
-        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+        enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
         return;
     }
     new_task_kprobe = NULL;
@@ -146,21 +146,21 @@ static void __enable_clone_tp(uint32_t tp_hooks)
     if (dtp.tp[TP_CLONE_IDX].tp && dtp.tp[TP_CLONE_IDX].hook) {
         tracepoint_probe_register(dtp.tp[TP_CLONE_IDX].tp,
                                   dtp.tp[TP_CLONE_IDX].hook, NULL);
-        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+        enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
     }
 #elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
     register_trace_sched_process_fork(dynsec_sched_process_fork_tp, NULL);
-    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+    enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
 #else
     register_trace_sched_process_fork(dynsec_sched_process_fork_tp);
-    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
+    enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
 #endif
 }
 
 // hold tp_lock
 static void __enable_exit_tp(uint32_t tp_hooks)
 {
-    if (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
+    if (enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
         return;
     }
 
@@ -172,21 +172,21 @@ static void __enable_exit_tp(uint32_t tp_hooks)
     if (dtp.tp[TP_EXIT_IDX].tp && dtp.tp[TP_EXIT_IDX].hook) {
         tracepoint_probe_register(dtp.tp[TP_EXIT_IDX].tp,
                                   dtp.tp[TP_EXIT_IDX].hook, NULL);
-        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
+        enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
     }
 #elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
     register_trace_sched_process_exit(dynsec_sched_process_exit_tp, NULL);
-    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
+    enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
 #else
     register_trace_sched_process_exit(dynsec_sched_process_exit_tp);
-    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
+    enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_EXIT;
 #endif
 }
 
 // hold tp_lock
 static void __enable_task_free_tp(uint32_t tp_hooks)
 {
-    if (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
+    if (enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
         return;
     }
 
@@ -198,25 +198,25 @@ static void __enable_task_free_tp(uint32_t tp_hooks)
     if (dtp.tp[TP_TASK_FREE_IDX].tp && dtp.tp[TP_TASK_FREE_IDX].hook) {
         tracepoint_probe_register(dtp.tp[TP_TASK_FREE_IDX].tp,
                                   dtp.tp[TP_TASK_FREE_IDX].hook, NULL);
-        enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
+        enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
     }
 #elif LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
     register_trace_sched_process_free(dynsec_sched_process_free_tp, NULL);
-    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
+    enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
 #else
     register_trace_sched_process_free(dynsec_sched_process_free_tp);
-    enabled_tp_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
+    enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_TASK_FREE;
 #endif
 }
 
 // hold tp_lock
 static void __disable_clone_tp(void)
 {
-    if (!(enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
+    if (!(enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
         return;
     }
 
-    enabled_tp_hooks &= ~(DYNSEC_TP_HOOK_TYPE_CLONE);
+    enabled_process_hooks &= ~(DYNSEC_TP_HOOK_TYPE_CLONE);
 
     if (new_task_kprobe) {
         unregister_kprobe(new_task_kprobe);
@@ -239,11 +239,11 @@ static void __disable_clone_tp(void)
 // hold tp_lock
 static void __disable_exit_tp(void)
 {
-    if (!(enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT)) {
+    if (!(enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_EXIT)) {
         return;
     }
 
-    enabled_tp_hooks &= ~(DYNSEC_TP_HOOK_TYPE_EXIT);
+    enabled_process_hooks &= ~(DYNSEC_TP_HOOK_TYPE_EXIT);
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
     if (dtp.tp[TP_EXIT_IDX].tp && dtp.tp[TP_EXIT_IDX].hook) {
         tracepoint_probe_unregister(dtp.tp[TP_EXIT_IDX].tp,
@@ -259,11 +259,11 @@ static void __disable_exit_tp(void)
 // hold tp_lock
 static void __disable_task_free_tp(void)
 {
-    if (!(enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE)) {
+    if (!(enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE)) {
         return;
     }
 
-    enabled_tp_hooks &= ~(DYNSEC_TP_HOOK_TYPE_TASK_FREE);
+    enabled_process_hooks &= ~(DYNSEC_TP_HOOK_TYPE_TASK_FREE);
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
     if (dtp.tp[TP_TASK_FREE_IDX].tp && dtp.tp[TP_TASK_FREE_IDX].hook) {
         tracepoint_probe_unregister(dtp.tp[TP_TASK_FREE_IDX].tp,
@@ -278,12 +278,12 @@ static void __disable_task_free_tp(void)
 
 bool may_enable_task_cache(void)
 {
-    return (enabled_tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE);
+    return (enabled_process_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE);
 }
 
 void dynsec_tp_shutdown(void)
 {
-    if (enabled_tp_hooks) {
+    if (enabled_process_hooks) {
         mutex_lock(&tp_lock);
         __disable_clone_tp();
         __disable_exit_tp();
@@ -294,26 +294,28 @@ void dynsec_tp_shutdown(void)
     tracepoint_synchronize_unregister();
 }
 
-bool dynsec_init_tp(uint32_t tp_hooks)
+bool dynsec_init_tp(struct dynsec_config *dynsec_config)
 {
-    enabled_tp_hooks = 0;
+    uint64_t process_hooks = 0;
+    enabled_process_hooks = 0;
     new_task_kprobe = NULL;
 
-    if (!tp_hooks) {
+    if (!dynsec_config) {
         return true;
     }
+    process_hooks = dynsec_config->process_hooks;
 
     lock_tp();
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
-    if (!new_task_kprobe && (tp_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
+    if (!new_task_kprobe && (process_hooks & DYNSEC_TP_HOOK_TYPE_CLONE)) {
         dtp.tp[TP_CLONE_IDX].enabled = true;
         dtp.count += 1;
     }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
+    if (process_hooks & DYNSEC_TP_HOOK_TYPE_EXIT) {
         dtp.tp[TP_EXIT_IDX].enabled = true;
         dtp.count += 1;
     }
-    if (tp_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
+    if (process_hooks & DYNSEC_TP_HOOK_TYPE_TASK_FREE) {
         dtp.tp[TP_TASK_FREE_IDX].enabled = true;
         dtp.count += 1;
     }
@@ -323,11 +325,13 @@ bool dynsec_init_tp(uint32_t tp_hooks)
     }
 #endif
 
-    __enable_clone_tp(tp_hooks);
-    __enable_exit_tp(tp_hooks);
-    __enable_task_free_tp(tp_hooks);
+    __enable_clone_tp(process_hooks);
+    __enable_exit_tp(process_hooks);
+    __enable_task_free_tp(process_hooks);
 
     unlock_tp();
+
+    dynsec_config->process_hooks = enabled_process_hooks;
 
     return true;
 }

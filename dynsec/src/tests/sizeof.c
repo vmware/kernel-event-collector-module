@@ -20,6 +20,7 @@ int main(int argc, const char *argv[])
 {
     // Generic Event Objects
     print_sizeof(struct dynsec_msg_hdr);
+    print_sizeof(struct dynsec_cred);
     print_sizeof(struct dynsec_task_ctx);
     print_sizeof(struct dynsec_blob);
     print_sizeof(struct dynsec_file);

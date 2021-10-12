@@ -287,7 +287,8 @@ static u32 stall_tbl_enqueue_event(struct stall_tbl *tbl, struct dynsec_event *e
 {
     u32 size = 0;
 
-    if (stall_tbl_enabled(tbl) && event) {
+    if (!bypass_mode_enabled() &&
+        stall_tbl_enabled(tbl) && event) {
         unsigned long flags = 0;
 
         flags = lock_stall_queue(&tbl->queue, flags);
@@ -300,15 +301,33 @@ static u32 stall_tbl_enqueue_event(struct stall_tbl *tbl, struct dynsec_event *e
     return size;
 }
 
-u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event)
+u32 enqueue_nonstall_event(struct stall_tbl *tbl,
+                           struct dynsec_event *event)
 {
     u32 size = stall_tbl_enqueue_event(tbl, event);
 
     if (size) {
-        if (!(event->report_flags & DYNSEC_REPORT_LO_PRI)) {
-            stall_queue_wakeup(&tbl->queue, true);
+        if (meets_notify_threshold(size) ||
+            !(event->report_flags & DYNSEC_REPORT_LO_PRI)) {
+
+            // Optionally could defer wake ups but let's not
+            // turn it on unless we have to.
+            // stall_queue_wakeup(&tbl->queue, true);
+            stall_queue_wakeup(&tbl->queue, false);
         }
     } else {
+        free_dynsec_event(event);
+    }
+
+    return size;
+}
+
+u32 enqueue_nonstall_event_no_notify(struct stall_tbl *tbl,
+                                     struct dynsec_event *event)
+{
+    u32 size = stall_tbl_enqueue_event(tbl, event);
+
+    if (!size) {
         free_dynsec_event(event);
     }
 
