@@ -16,7 +16,10 @@
 #include "tracepoints.h"
 #include "task_cache.h"
 #include "preaction_hooks.h"
+#include "config.h"
 
+// Current contains most of possibly enabled LSM hooks
+// except for file CLOSE.
 #define DYNSEC_LSM_HOOKS (\
         DYNSEC_HOOK_TYPE_EXEC      |\
         DYNSEC_HOOK_TYPE_UNLINK    |\
@@ -32,13 +35,13 @@
         DYNSEC_HOOK_TYPE_SIGNAL    |\
         DYNSEC_HOOK_TYPE_MMAP)
 
-uint64_t lsm_hooks_mask = DYNSEC_LSM_HOOKS;
+#define DYNSEC_PROCESS_HOOKS (\
+        DYNSEC_HOOK_TYPE_CLONE | \
+        DYNSEC_HOOK_TYPE_EXIT | \
+        DYNSEC_HOOK_TYPE_TASK_FREE)
 
-uint32_t process_hooks = (
-        DYNSEC_HOOK_TYPE_CLONE |
-        DYNSEC_HOOK_TYPE_EXIT |
-        DYNSEC_HOOK_TYPE_TASK_FREE
-);
+// Used only for module_param
+static uint32_t process_hooks = DYNSEC_PROCESS_HOOKS;
 
 static char lsm_hooks_str[64];
 // Hooks to only allow for kmod instance. Superset.
@@ -47,21 +50,48 @@ module_param_string(lsm_hooks, lsm_hooks_str,
 
 module_param(process_hooks, uint, 0644);
 
+// Special Globals
+DEFINE_MUTEX(global_config_lock);
+DEFINE_DYNSEC_CONFIG(global_config);
+
+static void print_config(struct dynsec_config *dynsec_config)
+{
+    if (!dynsec_config) {
+        return;
+    }
+
+    pr_info("dynsec_config: bypass_mode:%d stall_mode:%d\n",
+            dynsec_config->bypass_mode, dynsec_config->stall_mode);
+    pr_info("dynsec_config: stall_timeout:%u\n", dynsec_config->stall_timeout);
+    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d",
+            dynsec_config->lazy_notifier, dynsec_config->queue_threshold,
+            dynsec_config->notify_threshold);
+    pr_info("dynsec_config: lsm_hooks:%#llx process_hooks:%#llx preaction_hooks:%#llx\n",
+            dynsec_config->lsm_hooks, dynsec_config->process_hooks,
+            dynsec_config->preaction_hooks);
+}
+
 static void setup_lsm_hooks(void)
 {
-    int strto_ret;
+    uint64_t process_hooks_mask;
 
     // Set hooks kmod instance may allow.
-    if (lsm_hooks_str[0])
-    {
+    if (lsm_hooks_str[0]) {
+        int strto_ret;
         uint64_t local_lsm_hooks = 0;
 
         lsm_hooks_str[sizeof(lsm_hooks_str) - 1] = 0;
         strto_ret = kstrtoull(lsm_hooks_str, 16, &local_lsm_hooks);
-        if (!strto_ret)
-        {
-            lsm_hooks_mask = local_lsm_hooks;
+        if (!strto_ret) {
+            global_config.lsm_hooks = local_lsm_hooks;
         }
+    }
+
+    // Ensure subset of event hooks only apply to set of process hooks.
+    // Allow for completely disabled process hooks.
+    process_hooks_mask = (process_hooks & DYNSEC_PROCESS_HOOKS);
+    if (!process_hooks || process_hooks_mask) {
+       global_config.process_hooks = process_hooks_mask;
     }
 }
 
@@ -81,12 +111,12 @@ static int __init dynsec_init(void)
     }
     dynsec_task_utils_init();
 
-    if (!dynsec_init_tp(process_hooks)) {
+    if (!dynsec_init_tp(&global_config)) {
         pr_info("Unable to load process tracepoints\n");
         return -EINVAL;
     }
 
-    if (!dynsec_init_lsmhooks(lsm_hooks_mask)) {
+    if (!dynsec_init_lsmhooks(&global_config)) {
         pr_info("Unable to load LSM hooks\n");
         dynsec_tp_shutdown();
         return -EINVAL;
@@ -102,9 +132,10 @@ static int __init dynsec_init(void)
     if (may_enable_task_cache()) {
         task_cache_register();
     }
-    register_preaction_hooks(lsm_hooks_mask);
+    register_preaction_hooks(&global_config);
 
     pr_info("Loaded DynSec\n");
+    print_config(&global_config);
 
     return 0;
 }
@@ -115,6 +146,8 @@ static void __exit dynsec_exit(void)
            CB_APP_MODULE_NAME);
 
     dynsec_chrdev_shutdown();
+
+    task_cache_shutdown();
 
     dynsec_tp_shutdown();
 

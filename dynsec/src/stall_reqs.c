@@ -22,12 +22,13 @@
 #include "version.h"
 #include "task_cache.h"
 #include "hooks.h"
+#include "config.h"
 
 static dev_t g_maj_t;
 static int maj_no;
 static struct cdev dynsec_cdev;
 
-struct stall_tbl *stall_tbl;
+struct stall_tbl *stall_tbl = NULL;
 
 static DEFINE_MUTEX(dump_all_lock);
 
@@ -42,6 +43,7 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
     int ret;
     struct stall_entry *entry;
     int local_response = DYNSEC_RESPONSE_ALLOW;
+    unsigned long timeout;
 
     if (!dynsec_event || !response || !stall_tbl_enabled(stall_tbl)) {
         free_dynsec_event(dynsec_event);
@@ -54,7 +56,8 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
         return PTR_ERR(entry);
     }
 
-    ret = wait_event_interruptible_timeout(entry->wq, entry->mode != 0, msecs_to_jiffies(ms));
+    timeout = msecs_to_jiffies(get_wait_timeout());
+    ret = wait_event_interruptible_timeout(entry->wq, entry->mode != 0, timeout);
     stall_tbl_remove_entry(stall_tbl, entry);
     if (ret >= 1) {
         // Act as a memory barrier
@@ -114,6 +117,12 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
 #ifndef SINGLE_READ_ONLY
     char __user *start = ubuf;
 #endif /* ! SINGLE_READ_ONLY */
+    u32 total_copied = 0;
+    u32 copy_limit = 0;
+
+    lock_config();
+    copy_limit = get_queue_threshold();
+    unlock_config();
 
     event = stall_queue_shift(stall_tbl, count);
     if (!event) {
@@ -144,6 +153,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
     event = NULL;
     count -= ret;
     ubuf += ret;
+    total_copied += 1;
 
 #ifndef SINGLE_READ_ONLY
     while (1)
@@ -188,6 +198,13 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         event = NULL;
         count -= ret;
         ubuf += ret;
+        total_copied += 1;
+
+        // Stop if there is a hard copy limit and we hit it.
+        if (copy_limit && total_copied >= copy_limit) {
+            ret = ubuf - start;
+            goto out;
+        }
     }
 #endif /* ! SINGLE_READ_ONLY */
 
@@ -348,6 +365,148 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
             }
             break;
         }
+
+    // Get the current config settings.
+    // Some settings field may be immutable.
+    case DYNSEC_IOC_GET_CONFIG:
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+
+        if (!arg) {
+            ret = -EINVAL;
+            break;
+        }
+
+        ret = 0;
+
+        // Lock in case called lot in bursts
+        lock_config();
+        if (copy_to_user((void *)arg, &global_config,
+                         sizeof(global_config))) {
+            ret = -EFAULT;
+        }
+        unlock_config();
+        break;
+
+    // Bypass Mode in general means we allow the present hooks
+    // to just propagate and do nothing else.
+    // We may keep basic allocations for the connected client or
+    // until the kmod is removed.
+    case DYNSEC_IOC_BYPASS_MODE:
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+
+        ret = 0;
+
+        // Lock to let one user at time do this operation
+        lock_config();
+        if (arg) {
+            global_config.bypass_mode = 1;
+        } else {
+            global_config.bypass_mode = 0;
+        }
+
+        if (bypass_mode_enabled()) {
+            stall_tbl_disable(stall_tbl);
+            task_cache_disable();
+        } else {
+            stall_tbl_enable(stall_tbl);
+            task_cache_enable();
+        }
+        unlock_config();
+        break;
+
+    // Enable/Disable Stall Mode
+    case DYNSEC_IOC_STALL_MODE:
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+
+        ret = 0;
+
+        // Modfy end of config should at least be protected
+        // from this getting call to frequently.
+        lock_config();
+        if (stall_mode_enabled()) {
+            // Disable stalling
+            if (!arg) {
+                global_config.stall_mode = 0;
+                task_cache_clear();
+            }
+        } else {
+            // Enable stalling
+            if (arg) {
+                task_cache_clear();
+                global_config.stall_mode = 1;
+            }
+        }
+        unlock_config();
+        break;
+
+    // Set Event Queue specific optimizations.
+    case DYNSEC_IOC_QUEUE_OPTS: {
+        struct dynsec_config new_config;
+
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+        if (!arg) {
+            return -EINVAL;
+        }
+        if (copy_from_user(&new_config, (void *)arg, sizeof(new_config))) {
+            return -EFAULT;
+        }
+
+        ret = 0;
+        lock_config();
+        // When enabled, notifying is much more frequent. Strictest
+        // option to controlling queueing.
+        if (global_config.lazy_notifier != new_config.lazy_notifier) {
+            pr_info("dynsec_config: Changing lazy_notifier %u to %u",
+                    global_config.lazy_notifier, new_config.lazy_notifier);
+            global_config.lazy_notifier = new_config.lazy_notifier;
+        }
+
+        // Options below most noticable when lazy notifying enabled.
+
+        // Soft limit for controlling when to notify userspace.
+        // Good for controlling to many big bursts.
+        if (global_config.notify_threshold != new_config.notify_threshold) {
+            pr_info("dynsec_config: Changing notify_threshold %u to %u",
+                    global_config.notify_threshold, new_config.notify_threshold);
+            global_config.notify_threshold = new_config.notify_threshold;
+        }
+        // Harder limit on copying number of events to userspace per read.
+        if (global_config.queue_threshold != new_config.queue_threshold) {
+            pr_info("dynsec_config: Changing queue_threshold %u to %u",
+                    global_config.queue_threshold, new_config.queue_threshold);
+            global_config.queue_threshold = new_config.queue_threshold;
+        }
+        unlock_config();
+        break;
+    }
+
+    case DYNSEC_IO_STALL_TIMEOUT_MS: {
+        unsigned long timeout_ms = MAX_WAIT_TIMEOUT_MS;
+
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+
+        // 0 means it won't stall "really" stall
+        // but will go through the motions.
+        if (arg < MAX_WAIT_TIMEOUT_MS) {
+            timeout_ms = arg;
+        }
+
+        ret = 0;
+        lock_config();
+        global_config.stall_timeout = timeout_ms;
+        unlock_config();
+        break;
+    }
 
     default:
         break;

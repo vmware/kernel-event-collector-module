@@ -75,7 +75,7 @@ static struct syscall_hooks in_kernel;
 static struct syscall_hooks in_our_kmod;
 
 // Mask of LSM hooks requesting PreActions
-static uint64_t syscall_hooks_enabled;
+static uint64_t preaction_hooks_enabled;
 
 static DEFINE_MUTEX(lookup_lock);
 static void **sys_call_table;
@@ -881,7 +881,7 @@ static void init_our_syscall_hooks(uint64_t lsm_hooks)
     do { \
         copy_hook(NAME); \
         if (lsm_hooks & (MASK)) { \
-            syscall_hooks_enabled |= (MASK); \
+            preaction_hooks_enabled |= (MASK); \
         } \
     } while (0)
 
@@ -918,7 +918,7 @@ static void init_our_syscall_hooks(uint64_t lsm_hooks)
 #undef cond_copy_hook
 #undef copy_syscall
 
-    pr_info("syscall_hooks_enabled: %#018llx\n", syscall_hooks_enabled);
+    pr_info("preaction_hooks_enabled: %#018llx\n", preaction_hooks_enabled);
 
     ours = &in_our_kmod;
 }
@@ -986,7 +986,7 @@ static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 
 #define cond_set_syscall(NAME, MASK) \
     do { \
-        if (hooks->NAME && (syscall_hooks_enabled & (MASK))) { \
+        if (hooks->NAME && (preaction_hooks_enabled & (MASK))) { \
             table[__NR_##NAME] = hooks->NAME; \
         } \
     } while (0)
@@ -1087,7 +1087,7 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
 
 #define __cmp_syscall(NAME, MASK, x) \
     do { \
-        if (((syscall_hooks_enabled & (MASK)) || (x)) && \
+        if (((preaction_hooks_enabled & (MASK)) || (x)) && \
             old_hooks->NAME != curr_hooks->NAME) { \
             diff += 1; \
             dynsec_module_name((unsigned long)curr_hooks->NAME, \
@@ -1172,6 +1172,7 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
         ret = register_kretprobe(&kret_dynsec_chown_common);
         if (ret >= 0) {
             enabled_chown_common = true;
+            preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
         } else {
             pr_info("Unable to hook kretprobe: %d %s\n", ret,
                     kret_dynsec_chown_common.kp.symbol_name);
@@ -1198,16 +1199,21 @@ static void unregister_kprobe_hooks(void)
 #endif
 }
 
-bool register_preaction_hooks(uint64_t lsm_hooks)
+bool register_preaction_hooks(struct dynsec_config *dynsec_config)
 {
-    syscall_hooks_enabled = 0;
+    preaction_hooks_enabled = 0;
     orig = NULL;
     ours = NULL;
     sys_call_table = NULL;
     ia32_sys_call_table = NULL;
 
+    if (!dynsec_config) {
+        return true;
+    }
+    dynsec_config->preaction_hooks = 0;
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
-    if (!lsm_hooks) {
+    if (!dynsec_config->lsm_hooks) {
         return true;
     }
 #endif
@@ -1222,7 +1228,7 @@ bool register_preaction_hooks(uint64_t lsm_hooks)
 
     get_syscall_hooks(sys_call_table, &in_kernel);
     orig = &in_kernel;
-    init_our_syscall_hooks(lsm_hooks);
+    init_our_syscall_hooks(dynsec_config->lsm_hooks);
 
     if (ours) {
         if (sys_call_table) {
@@ -1233,8 +1239,9 @@ bool register_preaction_hooks(uint64_t lsm_hooks)
             (void)syscall_changed(orig, NULL);
         }
     }
-    register_kprobe_hooks(lsm_hooks);
+    register_kprobe_hooks(dynsec_config->lsm_hooks);
     mutex_unlock(&lookup_lock);
+    dynsec_config->preaction_hooks = preaction_hooks_enabled;
 
     return true;
 }

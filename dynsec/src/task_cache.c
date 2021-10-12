@@ -6,6 +6,7 @@
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
+#include <linux/vmalloc.h>
 #include "dynsec.h"
 #include "factory.h"
 #include "task_cache.h"
@@ -45,6 +46,8 @@ struct task_entry {
 };
 
 struct task_cache {
+    bool enabled;
+    bool used_vmalloc;
     struct task_bkt *bkt;
 };
 
@@ -54,8 +57,6 @@ struct task_cache {
 
 static struct task_cache *task_cache = NULL;
 
-int task_cache_enabled = 0;
-
 static inline u32 task_hash(struct task_key *key)
 {
     return jhash(key, sizeof(*key), 0);
@@ -63,6 +64,28 @@ static inline u32 task_hash(struct task_key *key)
 static int task_bucket_index(u32 hash)
 {
     return hash & (TASK_BUCKETS - 1);
+}
+
+static void task_cache_free_entries(void)
+{
+    struct task_entry *entry, *tmp;
+    int i;
+    unsigned long flags;
+
+    if (!task_cache || !task_cache->bkt) {
+        return;
+    }
+
+    for (i = 0; i < TASK_BUCKETS; i++) {
+        spin_lock_irqsave(&task_cache->bkt[i].lock, flags);
+        list_for_each_entry_safe (entry, tmp, &task_cache->bkt[i].list,
+                      list) {
+            list_del_init(&entry->list);
+            kfree(entry);
+        }
+        task_cache->bkt[i].size = 0;
+        spin_unlock_irqrestore(&task_cache->bkt[i].lock, flags);
+    }
 }
 
 int task_cache_register(void)
@@ -76,9 +99,18 @@ int task_cache_register(void)
 
     task_cache->bkt =
         kcalloc(TASK_BUCKETS, sizeof(struct task_bkt), GFP_KERNEL);
-    if (!task_cache->bkt) {
-        kfree(task_cache);
-        return -ENOMEM;
+    if (task_cache->bkt) {
+        task_cache->used_vmalloc = false;
+    } else {
+        task_cache->bkt = vmalloc(TASK_BUCKETS * sizeof(struct task_bkt));
+        if (!task_cache->bkt) {
+            kfree(task_cache);
+            task_cache = NULL;
+            return -ENOMEM;
+        }
+        task_cache->used_vmalloc = true;
+        memset(task_cache->bkt, 0,
+               TASK_BUCKETS * sizeof(struct task_bkt));
     }
 
     for (i = 0; i < TASK_BUCKETS; i++) {
@@ -86,14 +118,28 @@ int task_cache_register(void)
         task_cache->bkt[i].size = 0;
         INIT_LIST_HEAD(&task_cache->bkt[i].list);
     }
-    task_cache_enabled = 1;
+
+    task_cache->enabled = 1;
     return 0;
 }
-static void task_cache_free_entries(void);
+
 void task_cache_clear(void)
 {
-    if (task_cache_enabled) {
-        task_cache_free_entries();
+    task_cache_free_entries();
+}
+
+void task_cache_disable(void)
+{
+    if (task_cache && task_cache->enabled) {
+        task_cache_clear();
+        task_cache->enabled = false;
+    }
+}
+
+void task_cache_enable(void)
+{
+    if (task_cache && task_cache->bkt) {
+        task_cache->enabled = true;
     }
 }
 
@@ -101,30 +147,21 @@ void task_cache_shutdown(void)
 {
     if (task_cache) {
         // Shutdown Cache
-        task_cache_enabled = 0;
+        task_cache->enabled = false;
         task_cache_free_entries();
 
         // Iterate through entries and free
+        if (task_cache->bkt) {
+            if (task_cache->used_vmalloc) {
+                vfree(task_cache->bkt);
+            } else {
+                kfree(task_cache->bkt);
+            }
+            task_cache->bkt = NULL;
+        }
+
         kfree(task_cache);
         task_cache = NULL;
-    }
-}
-
-void task_cache_free_entries(void)
-{
-    struct task_entry *entry, *tmp;
-    int i;
-    unsigned long flags;
-
-    for (i = 0; i < TASK_BUCKETS; i++) {
-        spin_lock_irqsave(&task_cache->bkt[i].lock, flags);
-        list_for_each_entry_safe (entry, tmp, &task_cache->bkt[i].list,
-                      list) {
-            list_del_init(&entry->list);
-            kfree(entry);
-        }
-        task_cache->bkt[i].size = 0;
-        spin_unlock_irqrestore(&task_cache->bkt[i].lock, flags);
     }
 }
 
@@ -236,7 +273,7 @@ int task_cache_set_last_event(pid_t tid,
     int bkt_index;
     struct task_key key = {};
 
-    if (!task_cache_enabled || !event || !tid) {
+    if (!task_cache || !task_cache->enabled || !event || !tid) {
         return -EINVAL;
     }
 
@@ -314,7 +351,7 @@ int task_cache_handle_response(struct dynsec_response *response)
     int ret = -ENOENT;
     unsigned opts_set;
 
-    if (!task_cache_enabled || !response) {
+    if (!task_cache || !task_cache->enabled || !response) {
         return -EINVAL;
     }
     if (response->event_type < 0 ||
@@ -375,7 +412,7 @@ void task_cache_clear_response_caches(pid_t tid)
         .tid = tid,
     };
 
-    if (!task_cache_enabled || !tid) {
+    if (!task_cache || !task_cache->enabled || !tid) {
         return;
     }
 
@@ -402,7 +439,7 @@ void task_cache_remove_entry(pid_t tid)
         .tid = tid,
     };
 
-    if (!task_cache_enabled || !tid) {
+    if (!task_cache || !task_cache->enabled || !tid) {
         return;
     }
 

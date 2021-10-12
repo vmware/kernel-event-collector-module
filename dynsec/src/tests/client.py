@@ -4,7 +4,6 @@ import ctypes
 from dynsec import *
 
 
-
 #################################
 # libdynsecclient.so Definitions
 #################################
@@ -153,9 +152,134 @@ lib.print_event_raw.argtypes = [ctypes.POINTER(dynsec_msg_hdr)]
 def print_event_raw(hdr):
     lib.print_event_raw(hdr.contents)
 
+# Config Getters and Setters
+#int dynsec_client_get_config(
+# struct dynsec_client *client,
+# struct dynsec_config *config);
+lib.dynsec_client_get_config.restype = ctypes.c_int
+lib.dynsec_client_get_config.argtypes = [
+    ctypes.POINTER(dynsec_client),
+    ctypes.POINTER(dynsec_config),
+]
+def dynsec_client_get_config(client, config_ptr):
+    config = dynsec_config()
+    ret = lib.dynsec_client_get_config(client, config_ptr)
+    return ret
+
+# int dynsec_client_disable_bypass_mode(
+# struct dynsec_client *client);
+lib.dynsec_client_disable_bypass_mode.restype = ctypes.c_int
+lib.dynsec_client_disable_bypass_mode.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_disable_bypass_mode(client):
+    return lib.dynsec_client_disable_bypass_mode(client)
+
+# int dynsec_client_enable_bypass_mode(
+# struct dynsec_client *client);
+lib.dynsec_client_enable_bypass_mode.restype = ctypes.c_int
+lib.dynsec_client_enable_bypass_mode.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_disable_bypass_mode(client):
+    return lib.dynsec_client_enable_bypass_mode(client)
+
+# int dynsec_client_disable_stalling(
+# struct dynsec_client *client);
+lib.dynsec_client_disable_stalling.restype = ctypes.c_int
+lib.dynsec_client_disable_stalling.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_disable_bypass_mode(client):
+    return lib.dynsec_client_disable_stalling(client)
+
+# int dynsec_client_enable_stalling(
+# struct dynsec_client *client);
+lib.dynsec_client_enable_stalling.restype = ctypes.c_int
+lib.dynsec_client_enable_stalling.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_enable_stalling(client):
+    return lib.dynsec_client_enable_stalling(client)
+
+# int dynsec_client_set_queue_options(
+# struct dynsec_client *client,
+# struct dynsec_config *config);
+lib.dynsec_client_set_queue_options.restype = ctypes.c_int
+lib.dynsec_client_set_queue_options.argtypes = [
+    ctypes.POINTER(dynsec_client),
+    ctypes.POINTER(dynsec_config),
+]
+def dynsec_client_set_queue_options(client, config_ptr):
+    return lib.dynsec_client_set_queue_options(client, config_ptr)
+
+# int dynsec_client_disable_lazy_notifier(
+# struct dynsec_client *client);
+lib.dynsec_client_disable_lazy_notifier.restype = ctypes.c_int
+lib.dynsec_client_disable_lazy_notifier.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_disable_lazy_notifier(client, config_ptr):
+    return lib.dynsec_client_disable_lazy_notifier(client, config_ptr)
+
+# int dynsec_client_enable_lazy_notifier(
+# struct dynsec_client *client);
+lib.dynsec_client_enable_stalling.restype = ctypes.c_int
+lib.dynsec_client_enable_stalling.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_enable_stalling(client, config_ptr):
+    return lib.dynsec_client_enable_stalling(client, config_ptr)
 
 
+# int dynsec_client_set_notify_threshold(
+# struct dynsec_client *client,
+# uint32_t threshold);
+lib.dynsec_client_set_notify_threshold.restype = ctypes.c_int
+lib.dynsec_client_set_notify_threshold.argtypes = [
+    ctypes.POINTER(dynsec_client),
+    ctypes.c_uint32,
+]
+def dynsec_client_set_notify_threshold(client, threshold):
+    return lib.dynsec_client_set_notify_threshold(client, threshold)
 
+#int dynsec_client_disable_notify_threshold(struct dynsec_client *client)
+lib.dynsec_client_disable_notify_threshold.restype = ctypes.c_int
+lib.dynsec_client_disable_notify_threshold.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_disable_notify_threshold(client):
+    return lib.dynsec_client_disable_notify_threshold(client)
+
+# int dynsec_client_set_queue_threshold(
+# struct dynsec_client *client,
+# uint32_t threshold);
+lib.dynsec_client_set_queue_threshold.restype = ctypes.c_int
+lib.dynsec_client_set_queue_threshold.argtypes = [
+    ctypes.POINTER(dynsec_client),
+    ctypes.c_uint32,
+]
+def dynsec_client_set_queue_threshold(client, threshold):
+    return lib.dynsec_client_set_queue_threshold(client)
+
+#int dynsec_client_disable_queue_threshold(struct dynsec_client *client)
+lib.dynsec_client_disable_queue_threshold.restype = ctypes.c_int
+lib.dynsec_client_disable_queue_threshold.argtypes = [
+    ctypes.POINTER(dynsec_client),
+]
+def dynsec_client_disable_queue_threshold(client):
+    return lib.dynsec_client_disable_queue_threshold(client)
+
+#int dynsec_client_set_stall_timeout(
+#struct dynsec_client *client,
+#unsigned int timeout_ms);
+lib.dynsec_client_set_stall_timeout.restype = ctypes.c_int
+lib.dynsec_client_set_stall_timeout.argtypes = [
+    ctypes.POINTER(dynsec_client),
+    ctypes.c_uint,
+]
+def dynsec_client_set_stall_timeout(client, timeout_ms):
+    return lib.dynsec_client_set_stall_timeout(client, timeout_ms)
 
 
 # Below is a rough and dirty approach to testing RENAME
@@ -168,6 +292,7 @@ if __name__ == '__main__':
     import os
     import sys
     import threading
+    import json
 
     # Helper for tracking threads we just spawned of ourself
     _libc = ctypes.CDLL('libc.so.6')
@@ -176,6 +301,8 @@ if __name__ == '__main__':
 
     OUR_SELF = []
 
+    # Helper class to wrap some classes together
+    dynsec = DynSec()
 
     # Thread to read events
     def read_events(client):
@@ -197,32 +324,28 @@ if __name__ == '__main__':
 
         # only care about ourself and RENAME events
         if hdr.contents.tid in OUR_SELF:
-            if (hdr.contents.event_type == DYNSEC_EVENT_TYPE.RENAME):
+            if (hdr.contents.event_type == dynsec.EVENT_TYPE.RENAME):
                 print("RENAME: report_flags:%s[%#x]" % (
-                    DYNSEC_REPORT_FLAGS.name(hdr.contents.report_flags),
+                    dynsec.report_flags_name(hdr.contents.report_flags),
                     hdr.contents.report_flags,
                 ))
-                print_event_raw(hdr)
+                #print_event_raw(hdr)
+                print(json.dumps(dynsec.cast(hdr), indent=1, cls=RawDynSecJSONEncoder))
 
-                if (hdr.contents.report_flags & DYNSEC_REPORT_FLAGS.INTENT):
+                if (hdr.contents.report_flags & dynsec.REPORT_FLAGS.INTENT):
                     OBSERVED_INTENT = True
                 # Shutdown Client. SELF
                 # INTENT_FOUND is EXPECTED to be set in report_flags
                 elif (OBSERVED_INTENT or
-                      (hdr.contents.report_flags & DYNSEC_REPORT_FLAGS.INTENT_FOUND)):
+                      (hdr.contents.report_flags & dynsec.REPORT_FLAGS.INTENT_FOUND)):
                     return DYNSEC_EAT.SHUTDOWN
 
             return DYNSEC_EAT.DEFAULT
-        # # In case the next event isn't a rename shutdown anyways
-        # # Python in theory could cause false shutdown case here.
-        # elif OBSERVED_INTENT:
-        #     return DYNSEC_EAT.SHUTDOWN
 
         # Drop the event
         return DYNSEC_EAT.DISCARD
 
     def discard(client, hdr, may_override):
-        # print("tid: %d" % (hdr.contents.tid))
         return DYNSEC_EAT.DEFAULT
 
     def release_cb(client):
@@ -263,6 +386,16 @@ if __name__ == '__main__':
 
     # Run tests if client has a connection
     if dynsec_client_connect(client_ptr) >= 0:
+        config = dynsec_config()
+        ret = dynsec_client_get_config(client_ptr, ctypes.byref(config))
+        if ret == 0:
+            print("LSM Hooks Enabled: %s" %
+                  (dynsec.hook_type_name(config.lsm_hooks)))
+            print("Process Hooks Enabled: %s" %
+                  ((dynsec.hook_type_name(config.process_hooks))))
+            print("PreAction Hooks Enabled: %s" %
+                  ((dynsec.hook_type_name(config.preaction_hooks))))
+
         read_thread.start()
 
         # Trigger events

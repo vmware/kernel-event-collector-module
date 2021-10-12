@@ -3,6 +3,7 @@
 #pragma once
 
 #include "dynsec.h"
+#include "config.h"
 #include <linux/irq_work.h>
 
 struct stall_bkt {
@@ -78,6 +79,9 @@ extern struct stall_entry *
 stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode);
 
 extern u32 enqueue_nonstall_event(struct stall_tbl *tbl, struct dynsec_event *event);
+
+extern u32 enqueue_nonstall_event_no_notify(struct stall_tbl *tbl,
+                                            struct dynsec_event *event);
 
 extern int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry);
 

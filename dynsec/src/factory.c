@@ -23,6 +23,7 @@
 #include "path_utils.h"
 #include "task_cache.h"
 #include "task_utils.h"
+#include "config.h"
 
 static atomic64_t req_id = ATOMIC64_INIT(0);
 
@@ -279,6 +280,11 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
                                         uint16_t report_flags,
                                         gfp_t mode)
 {
+    // Disable stalling auto-magically
+    if (!stall_mode_enabled()) {
+        report_flags &= ~(DYNSEC_REPORT_STALL);
+    }
+
     switch (event_type)
     {
     case DYNSEC_EVENT_TYPE_EXEC:
@@ -342,7 +348,7 @@ void prepare_non_report_event(enum dynsec_event_type event_type, gfp_t mode)
         .req_id = 0,
     };
 
-    if (event_type < DYNSEC_EVENT_TYPE_HEALTH) {
+    if (event_type < DYNSEC_EVENT_TYPE_TASK_DUMP) {
         (void)task_cache_set_last_event(current->pid, &dummy_track, NULL, mode);
     }
 }
@@ -354,6 +360,11 @@ void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
 
     if (!dynsec_event) {
         return;
+    }
+
+    // Disable stalling auto-magically
+    if (!stall_mode_enabled()) {
+        dynsec_event->report_flags &= ~(DYNSEC_REPORT_STALL);
     }
 
     event.track_flags = (TRACK_EVENT_REQ_ID_VALID | TRACK_EVENT_REPORTABLE);
@@ -388,9 +399,14 @@ void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
     }
 
     // Set Queueing Priority When Not High Priority
-    if (!(dynsec_event->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_HI_PRI))) {
-        dynsec_event->report_flags |= DYNSEC_REPORT_LO_PRI;
+    if (lazy_notifier_enabled()) {
+        if (!(dynsec_event->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_HI_PRI))) {
+            dynsec_event->report_flags |= DYNSEC_REPORT_LO_PRI;
+        }
     }
+
+    // A trace mode placed here to disable stalling at the
+    // very last step before we enqueue things would be nice.
 
     switch (dynsec_event->event_type)
     {

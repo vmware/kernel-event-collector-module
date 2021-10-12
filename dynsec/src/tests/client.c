@@ -667,3 +667,160 @@ int dynsec_client_dump_all_threads(struct dynsec_client *client)
     return __dynsec_client_dump_all(client, 1, DUMP_NEXT_THREAD);
 }
 
+
+int dynsec_client_get_config(struct dynsec_client *client,
+                             struct dynsec_config *config)
+{
+    int ret;
+
+    if (!client || !config) {
+        return -EINVAL;
+    }
+
+    ret = ioctl(client->fd, DYNSEC_IOC_GET_CONFIG, config);
+    if (ret < 0) {
+        ret = -errno;
+    }
+    return ret;
+}
+
+
+static int __dynsec_ioc_generic(struct dynsec_client *client,
+                                unsigned long cmd, unsigned long arg)
+{
+    int ret;
+
+    if (!client) {
+        return -EINVAL;
+    }
+
+    ret = ioctl(client->fd, cmd, arg);
+    if (ret < 0) {
+        ret = -errno;
+    }
+    return ret;
+}
+int dynsec_client_disable_bypass_mode(struct dynsec_client *client)
+{
+    return __dynsec_ioc_generic(client, DYNSEC_IOC_BYPASS_MODE, 0);
+}
+int dynsec_client_enable_bypass_mode(struct dynsec_client *client)
+{
+    return __dynsec_ioc_generic(client, DYNSEC_IOC_BYPASS_MODE, 1);
+}
+
+int dynsec_client_disable_stalling(struct dynsec_client *client)
+{
+    return __dynsec_ioc_generic(client, DYNSEC_IOC_STALL_MODE, 0);
+}
+int dynsec_client_enable_stalling(struct dynsec_client *client)
+{
+    return __dynsec_ioc_generic(client, DYNSEC_IOC_STALL_MODE, 1);
+}
+
+
+// kmod will only commit these change if they are valid.
+//  - lazy_notifier, queue_threshold, notify_threshold
+int dynsec_client_set_queue_options(struct dynsec_client *client,
+                                    struct dynsec_config *config)
+{
+    int ret = -EINVAL;
+
+    if (!client || !config) {
+        return -EINVAL;
+    }
+
+    ret = ioctl(client->fd, DYNSEC_IOC_QUEUE_OPTS, config);
+    if (ret < 0) {
+        ret = -errno;
+    }
+    return ret;
+}
+
+// Tells kmod to notify poll() when possible
+int dynsec_client_disable_lazy_notifier(struct dynsec_client *client)
+{
+    int ret;
+    struct dynsec_config config;
+
+    ret = dynsec_client_get_config(client, &config);
+    if (ret < 0) {
+        return ret;
+    }
+    config.lazy_notifier = 0;
+
+    return dynsec_client_set_queue_options(client, &config);
+}
+
+// Basically let's kmod not always notify poll() when enqueueing events.
+// Aka Lazy Mode
+int dynsec_client_enable_lazy_notifier(struct dynsec_client *client)
+{
+    int ret;
+    struct dynsec_config config;
+
+    ret = dynsec_client_get_config(client, &config);
+    if (ret < 0) {
+        return ret;
+    }
+    config.lazy_notifier = 1;
+    return dynsec_client_set_queue_options(client, &config);
+}
+
+// Soft threshold to tell us when to explicity notify poll()
+// Reads off queue will may very be above this value
+// When ZERO notifying poll() will depend on if the event
+// needs to explicity notify poll().
+int dynsec_client_set_notify_threshold(struct dynsec_client *client,
+                                       uint32_t threshold)
+{
+    int ret;
+    struct dynsec_config config;
+
+    ret = dynsec_client_get_config(client, &config);
+    if (ret < 0) {
+        return ret;
+    }
+
+    config.notify_threshold = threshold;
+    return dynsec_client_set_queue_options(client, &config);
+}
+
+// A ZERO notify threshold disables it.
+// However this is helpful to keep enabled for burst event mitigations.
+int dynsec_client_disable_notify_threshold(struct dynsec_client *client)
+{
+    return dynsec_client_set_notify_threshold(client, 0);
+}
+
+// Hard threshold to tell us when to stop copying event to userspace.
+// This value SHOULD be greater than or equal to the notify_threshold.
+// When ZERO the number of copies to userspace is bounded by buffer size.
+// Helpful to ensure we don't read too many events for a read operation.
+int dynsec_client_set_queue_threshold(struct dynsec_client *client,
+                                      uint32_t threshold)
+{
+    int ret;
+    struct dynsec_config config;
+
+    ret = dynsec_client_get_config(client, &config);
+    if (ret < 0) {
+        return ret;
+    }
+
+    config.queue_threshold = threshold;
+    return dynsec_client_set_queue_options(client, &config);
+}
+
+// A ZERO queue threshold allows us to fill in the buffer as much as possible.
+int dynsec_client_disable_queue_threshold(struct dynsec_client *client)
+{
+    return dynsec_client_set_queue_threshold(client, 0);
+}
+
+int dynsec_client_set_stall_timeout(struct dynsec_client *client,
+                                    unsigned int timeout_ms)
+{
+    return __dynsec_ioc_generic(client, DYNSEC_IO_STALL_TIMEOUT_MS,
+                                timeout_ms);
+}

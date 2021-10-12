@@ -8,12 +8,31 @@ from dynsec import *
 # Won't detect member reorder or renaming if sizes don't change.
 
 if __name__ == '__main__':
-    print("sizeof(struct dynsec_msg_hdr):%d" % (
-          ctypes.sizeof(dynsec_msg_hdr)))
-    print("sizeof(struct dynsec_task_ctx):%d" % (
-          ctypes.sizeof(dynsec_task_ctx)))
-    print("sizeof(struct dynsec_file):%d" % (
-          ctypes.sizeof(dynsec_file)))
-    print("sizeof(struct dynsec_rename_umsg):%d" % (
-          ctypes.sizeof(dynsec_rename_umsg)))
+    def print_sizeof(dynsec_type):
+        print("sizeof(struct %s):%d" % (
+            dynsec_type.__name__,
+            ctypes.sizeof(dynsec_type),
+        ))
+
+    # Generic Event Objects
+    print_sizeof(dynsec_msg_hdr)
+    print_sizeof(dynsec_cred)
+    print_sizeof(dynsec_task_ctx)
+    print_sizeof(dynsec_blob)
+    print_sizeof(dynsec_file)
+
+    # Event Specific Objects
+    print_sizeof(dynsec_exec_umsg)
+    print_sizeof(dynsec_unlink_umsg)
+    print_sizeof(dynsec_rename_umsg)
+    print_sizeof(dynsec_setattr_umsg)
+    print_sizeof(dynsec_create_umsg)
+    print_sizeof(dynsec_file_umsg)
+    print_sizeof(dynsec_link_umsg)
+    print_sizeof(dynsec_symlink_umsg)
+    print_sizeof(dynsec_mmap_umsg)
+    print_sizeof(dynsec_ptrace_umsg)
+    print_sizeof(dynsec_signal_umsg)
+    print_sizeof(dynsec_task_umsg)
+    print_sizeof(dynsec_task_dump_umsg)
 

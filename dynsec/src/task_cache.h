@@ -24,3 +24,5 @@ extern int task_cache_handle_response(struct dynsec_response *response);
 extern void task_cache_clear_response_caches(pid_t tid);
 extern void task_cache_remove_entry(pid_t tid);
 extern void task_cache_clear(void);
+extern void task_cache_disable(void);
+extern void task_cache_enable(void);

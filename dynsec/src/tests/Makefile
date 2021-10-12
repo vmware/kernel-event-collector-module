@@ -6,7 +6,7 @@ CFLAGS += -g -O2 -fpic -Wall
 
 DYNSEC_H := ../../include/dynsec.h
 
-.PHONY : all clean test
+.PHONY : all clean test sizeof.diff
 
 # Try to find python3 somewhere
 ifeq ($(PYTHON),)
@@ -47,6 +47,9 @@ dump_all: dump_all.c client.o print.o
 self_tests: tests.c test_utils.o rename.o exp.o print.o client.o
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^
 
+stall_disable_test: stall_disable_test.c client.o print.o
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $^
+
 # Might as well output some sizes of objects
 dynsec.pahole: client_test $(DYNSEC_H)
 ifneq ($(shell which pahole),)
@@ -69,8 +72,10 @@ else
 sizeof.py.log: $(DYNSEC_H) sizeof.py dynsec.py
 	$(PYTHON) $(CURDIR)/sizeof.py > $@
 
+# should at least cause building to fail until
 sizeof.diff: sizeof.py.log sizeof.c.log
-	diff sizeof.c.log sizeof.py.log | tee $@
+	@cmp --quiet sizeof.py.log sizeof.c.log || \
+	diff sizeof.c.log sizeof.py.log > $@
 endif
 
 test: sizeof.diff dynsec.pahole
@@ -78,6 +83,7 @@ test: sizeof.diff dynsec.pahole
 clean:
 	rm -f dynsec.pahole sizeof.diff sizeof.*.log \
 		sizeof dump_all client_test self_tests \
+		stall_disable_test \
 		libdynsecclient.so \
 		test_utils.o rename.o exp.o print.o client.o \
 
@@ -85,5 +91,6 @@ clean:
 # Real Targets
 all: dynsec.pahole sizeof.diff \
 	sizeof dump_all client_test self_tests \
+	stall_disable_test \
 	libdynsecclient.so \
 
