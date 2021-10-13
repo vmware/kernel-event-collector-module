@@ -198,11 +198,11 @@ kbpbi_exit:
 
 void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
-    pid_t pid;
+    pid_t pid = 0;
     struct my_siginfo info;
     int ret;
     struct list_head *pos, *safe_del;
-    PosixIdentity *posix_identity = NULL;
+    ProcessHandle *process_handle = NULL;
     RUNNING_BANNED_INODE_S sRunningInodesToBan;
     RUNNING_PROCESSES_TO_BAN *temp = NULL;
 
@@ -237,26 +237,29 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     {
         struct task_struct const *task = NULL;
 
-        posix_identity = (PosixIdentity *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->posix_identity);
-        pid = posix_identity->pt_key.pid;
-
-        task = ec_find_task(pid);
-        if (task)
+        process_handle = (ProcessHandle *)(list_entry(pos, RUNNING_PROCESSES_TO_BAN, list)->process_handle);
+        if (process_handle)
         {
-            ret = send_sig_info(SIGKILL, &info, (struct task_struct *)task);
-            if (!ret)
-            {
-                TRACE(DL_ERROR, "%s: killed process with [%llu:%llu] pid=%d", __func__, device, ino, pid);
+            pid = ec_process_posix_identity(process_handle)->pt_key.pid;
 
-                // Send the event
-                ec_event_send_block(posix_identity,
-                                 ProcessTerminatedAfterStartup,
-                                 TerminateFailureReasonNone,
-                                 0,
-                                 ec_process_tracking_should_track_user() ? posix_identity->uid : (uid_t)-1,
-                                 NULL,
-                                 context);
-                continue;
+            task = ec_find_task(pid);
+            if (task)
+            {
+                ret = send_sig_info(SIGKILL, &info, (struct task_struct *) task);
+                if (!ret)
+                {
+                    TRACE(DL_ERROR, "%s: killed process with [%llu:%llu] pid=%d", __func__, device, ino, pid);
+
+                    // Send the event
+                    ec_event_send_block(process_handle,
+                                        ProcessTerminatedAfterStartup,
+                                        TerminateFailureReasonNone,
+                                        0,
+                                        ec_process_tracking_should_track_user() ? ec_process_posix_identity(process_handle)->uid : (uid_t) -1,
+                                        NULL,
+                                        context);
+                    continue;
+                }
             }
         }
 

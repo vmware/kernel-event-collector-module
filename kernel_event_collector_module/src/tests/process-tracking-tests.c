@@ -16,7 +16,7 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
 {
     bool passed = false;
 
-    PosixIdentity *posix_identity = ec_process_tracking_create_process(
+    ProcessHandle *handle = ec_process_tracking_create_process(
         200,
         100,
         200,
@@ -27,21 +27,19 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
         NULL,
         REAL_START,
         context);
-    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
 
-    ASSERT_TRY(posix_identity && exec_identity);
+    ASSERT_TRY(handle);
 
-    atomic64_set(&exec_identity->active_process_count, 0);
+    atomic64_set(&ec_process_exec_identity(handle)->active_process_count, 0);
     ASSERT_TRY(!ec_process_tracking_report_exit(200, context));
-    ASSERT_TRY(atomic64_read(&exec_identity->exit_event) == 0);
+    ASSERT_TRY(atomic64_read(&ec_process_exec_identity(handle)->exit_event) == 0);
 
     passed = true;
 CATCH_DEFAULT:
-    ec_process_tracking_put_exec_identity(exec_identity, context);
-    if (posix_identity)
+    if (handle)
     {
-        ec_process_tracking_remove_process(posix_identity, context);
-        ec_process_tracking_put_process(posix_identity, context);
+        ec_process_tracking_remove_process(handle, context);
+        ec_process_tracking_put_handle(handle, context);
     }
 
     return passed;

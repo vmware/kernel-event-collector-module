@@ -6,7 +6,7 @@
 
 #include "process-tracking.h"
 
-void ec_event_send_start(PosixIdentity * posix_identity,
+void ec_event_send_start(ProcessHandle  * process_handle,
                          uid_t            uid,
                          int              start_action,
                          ProcessContext  *context);
@@ -14,11 +14,11 @@ void ec_event_send_start(PosixIdentity * posix_identity,
 void ec_event_send_last_exit(PCB_EVENT        event,
                              ProcessContext  *context);
 
-void ec_event_send_exit(PosixIdentity *posix_identity,
+void ec_event_send_exit(ProcessHandle  *process_handle,
                         bool             was_last_active_process,
                         ProcessContext  *context);
 
-void ec_event_send_block(PosixIdentity  *posix_identity,
+void ec_event_send_block(ProcessHandle  *process_handle,
                          uint32_t          type,
                          uint32_t          reason,
                          uint32_t          details,
@@ -26,7 +26,7 @@ void ec_event_send_block(PosixIdentity  *posix_identity,
                          char             *cmdline,
                          ProcessContext *context);
 
-void ec_event_send_file(PosixIdentity *posix_identity,
+void ec_event_send_file(ProcessHandle  *process_handle,
                         CB_EVENT_TYPE    event_type,
                         CB_INTENT_TYPE   intent,
                         uint64_t         device,
@@ -34,7 +34,7 @@ void ec_event_send_file(PosixIdentity *posix_identity,
                         const char *path,
                         ProcessContext *context);
 
-void ec_event_send_modload(PosixIdentity *posix_identity,
+void ec_event_send_modload(ProcessHandle  *process_handle,
                            CB_EVENT_TYPE    event_type,
                            uint64_t         device,
                            uint64_t         inode,
@@ -42,7 +42,7 @@ void ec_event_send_modload(PosixIdentity *posix_identity,
                            char *path,
                            ProcessContext *context);
 #
-void ec_event_send_net(PosixIdentity *posix_identity,
+void ec_event_send_net(ProcessHandle  *process_handle,
                        char            *msg,
                        CB_EVENT_TYPE    net_event_type,
                        CB_SOCK_ADDR * localAddr,
@@ -51,7 +51,7 @@ void ec_event_send_net(PosixIdentity *posix_identity,
                        void             *sk,
                        ProcessContext   *context);
 
-void ec_event_send_net_proxy(PosixIdentity *posix_identity,
+void ec_event_send_net_proxy(ProcessHandle  *process_handle,
                              char            *msg,
                              CB_EVENT_TYPE    net_event_type,
                              CB_SOCK_ADDR     *localAddr,

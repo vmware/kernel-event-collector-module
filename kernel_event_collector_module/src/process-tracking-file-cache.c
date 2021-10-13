@@ -15,28 +15,22 @@ struct for_each_priv {
 
 int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
-bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, ProcessContext *context)
+bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *tree_handle, ProcessContext *context)
 {
-    ExecIdentity *exec_identity = NULL;
-    PosixIdentity *posix_identity = NULL;
+    ProcessHandle *process_handle = NULL;
 
-    TRY(handle);
-    handle->tree = NULL;
-    handle->exec_identity = NULL;
+    TRY(tree_handle);
+    tree_handle->tree = NULL;
+    tree_handle->exec_identity = NULL;
 
-    posix_identity = ec_process_tracking_get_process(pid, context);
+    process_handle = ec_process_tracking_get_handle(pid, context);
+    TRY(process_handle);
 
-    TRY(posix_identity);
-    exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
+    // This holds onto a exec_identity ref
+    tree_handle->exec_identity = ec_process_tracking_get_exec_identity_ref(ec_process_exec_identity(process_handle), context);
+    tree_handle->tree        = ec_process_exec_identity(process_handle)->tracked_files;
 
-    if (exec_identity)
-    {
-        // This holds the ref we just got
-        handle->exec_identity = exec_identity;
-        handle->tree        = exec_identity->tracked_files;
-    }
-
-    ec_process_tracking_put_process(posix_identity, context);
+    ec_process_tracking_put_handle(process_handle, context);
 
     return true;
 
@@ -44,13 +38,13 @@ CATCH_DEFAULT:
     return false;
 }
 
-void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext *context)
+void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *tree_handle, ProcessContext *context)
 {
-    if (handle)
+    if (tree_handle)
     {
-        ec_process_tracking_put_exec_identity(handle->exec_identity, context);
-        handle->tree = NULL;
-        handle->exec_identity = NULL;
+        ec_process_tracking_put_exec_identity(tree_handle->exec_identity, context);
+        tree_handle->tree = NULL;
+        tree_handle->exec_identity = NULL;
     }
 }
 

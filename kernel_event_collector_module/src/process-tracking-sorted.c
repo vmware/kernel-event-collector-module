@@ -44,11 +44,11 @@ void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, Pro
     ec_rbtree_destroy(&data.tree, context);
 }
 
-PosixIdentity *ec_sorted_tracking_table_get_process(void *data, ProcessContext *context)
+ProcessHandle *ec_sorted_tracking_table_get_handle(void *data, ProcessContext *context)
 {
     if (data)
     {
-        return ec_process_tracking_get_process(((SORTED_PROCESS *)data)->pid, context);
+        return ec_process_tracking_get_handle(((SORTED_PROCESS *)data)->pid, context);
     }
     return NULL;
 }

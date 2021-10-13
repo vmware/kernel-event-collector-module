@@ -9,39 +9,37 @@
 bool ec_is_process_tracked(pid_t pid, ProcessContext *context)
 {
     bool ret = false;
-    PosixIdentity *posix_identity = ec_process_tracking_get_process(pid, context);
+    ProcessHandle *process_handle = ec_process_tracking_get_handle(pid, context);
 
-    ret = (posix_identity != NULL);
+    ret = (process_handle != NULL);
 
-    ec_process_tracking_put_process(posix_identity, context);
+    ec_process_tracking_put_handle(process_handle, context);
 
     return ret;
 }
 
-void ec_process_tracking_mark_as_blocked(PosixIdentity *posix_identity)
+void ec_process_tracking_mark_as_blocked(ProcessHandle *process_handle)
 {
-    if (posix_identity)
+    if (process_handle)
     {
-        posix_identity->exec_blocked = true;
+        ec_process_posix_identity(process_handle)->exec_blocked = true;
     }
 }
 
-bool ec_process_tracking_is_blocked(PosixIdentity *posix_identity)
+bool ec_process_tracking_is_blocked(ProcessHandle *process_handle)
 {
-    return (posix_identity && posix_identity->exec_blocked);
+    return (process_handle && ec_process_posix_identity(process_handle)->exec_blocked);
 }
 
-pid_t ec_process_tracking_exec_pid(PosixIdentity *posix_identity, ProcessContext *context)
+pid_t ec_process_tracking_exec_pid(ProcessHandle *process_handle, ProcessContext *context)
 {
     pid_t result = 1;
-    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
 
-    TRY(posix_identity && exec_identity);
+    TRY(process_handle);
 
-    result = exec_identity->exec_details.pid;
+    result = ec_process_exec_identity(process_handle)->exec_details.pid;
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_exec_identity(exec_identity, context);
     return result;
 }
 
@@ -73,21 +71,16 @@ void ec_process_tracking_put_cmdline(char *cmdline, ProcessContext *context)
     ec_mem_cache_put_generic(cmdline);
 }
 
-void ec_process_tracking_set_proc_cmdline(PosixIdentity *posix_identity, char *cmdline, ProcessContext *context)
+void ec_process_tracking_set_proc_cmdline(ProcessHandle *process_handle, char *cmdline, ProcessContext *context)
 {
-    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
-
-    TRY(exec_identity && cmdline);
+    CANCEL_VOID(process_handle && cmdline);
 
     // Duplicate the command line for storage
     cmdline = ec_mem_cache_strdup(cmdline, context);
 
-    ec_process_tracking_set_cmdline(exec_identity, cmdline, context);
+    ec_process_tracking_set_cmdline(ec_process_exec_identity(process_handle), cmdline, context);
 
     ec_mem_cache_put_generic(cmdline);
-
-CATCH_DEFAULT:
-    ec_process_tracking_put_exec_identity(exec_identity, context);
 }
 
 ExecIdentity *ec_process_tracking_get_exec_identity_ref(ExecIdentity *exec_identity, ProcessContext *context)
@@ -130,7 +123,7 @@ ExecIdentity *ec_process_tracking_get_exec_identity(PosixIdentity *posix_identit
     return exec_identity;
 }
 
-void ec_process_tracking_set_exec_identity(PosixIdentity *posix_identity, ExecIdentity *exec_identity, ProcessContext *context)
+void ec_process_posix_identity_set_exec_identity(PosixIdentity *posix_identity, ExecIdentity *exec_identity, ProcessContext *context)
 {
     CANCEL_VOID(posix_identity);
 
@@ -141,6 +134,72 @@ void ec_process_tracking_set_exec_identity(PosixIdentity *posix_identity, ExecId
 
     // Set the new one, and take the reference
     posix_identity->exec_identity = ec_process_tracking_get_exec_identity_ref(exec_identity, context);
+}
+
+void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecIdentity *exec_identity, ProcessContext *context)
+{
+    if (process_handle && exec_identity)
+    {
+        ec_process_tracking_put_exec_identity(ec_process_exec_identity(process_handle), context);
+        ec_exec_handle_set_exec_identity(&process_handle->exec_handle, exec_identity, context);
+    }
+}
+
+ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessContext *context)
+{
+    ProcessHandle *process_handle = ec_mem_cache_alloc_generic(
+        sizeof(ProcessHandle),
+        context);
+
+    if (process_handle)
+    {
+        // This takes ownership of the reference provided by the hash table
+        process_handle->posix_identity = posix_identity;
+        memset(&process_handle->exec_handle, 0, sizeof(process_handle->exec_handle));
+        ec_exec_handle_set_exec_identity(&process_handle->exec_handle, ec_process_tracking_get_exec_identity(posix_identity, context), context);
+
+        TRY(process_handle->exec_handle.identity && process_handle->exec_handle.path && process_handle->exec_handle.cmdline);
+    }
+    return process_handle;
+
+CATCH_DEFAULT:
+    ec_process_tracking_put_handle(process_handle, context);
+    return NULL;
+}
+
+void ec_process_tracking_put_handle(ProcessHandle *process_handle, ProcessContext *context)
+{
+    if (process_handle)
+    {
+        ec_process_tracking_put_exec_handle(&process_handle->exec_handle, context);
+        ec_hashtbl_put_generic(g_process_tracking_data.table, process_handle->posix_identity, context);
+        ec_mem_cache_free_generic(process_handle);
+    }
+}
+
+void ec_process_tracking_put_exec_handle(ExecHandle *exec_handle, ProcessContext *context)
+{
+    if (exec_handle)
+    {
+        ec_process_tracking_put_path(exec_handle->path, context);
+        ec_process_tracking_put_cmdline(exec_handle->cmdline, context);
+        ec_process_tracking_put_exec_identity(exec_handle->identity, context);
+    }
+}
+
+void ec_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdentity *exec_identity, ProcessContext *context)
+{
+    if (exec_handle)
+    {
+        ec_process_tracking_put_path(exec_handle->path, context);
+        ec_process_tracking_put_cmdline(exec_handle->cmdline, context);
+        ec_process_tracking_put_exec_identity(exec_handle->identity, context);
+
+
+        exec_handle->identity = ec_process_tracking_get_exec_identity_ref(exec_identity, context);
+        exec_handle->path = ec_process_tracking_get_path(exec_identity, context);
+        exec_handle->cmdline = ec_process_tracking_get_cmdline(exec_identity, context);
+    }
 }
 
 ExecIdentity *ec_process_tracking_get_temp_exec_identity(PosixIdentity *posix_identity, ProcessContext *context)
@@ -341,7 +400,7 @@ int __ec_hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *
         });
 
         //Update our structure
-        temp->posix_identity = posix_identity;
+        temp->process_handle = ec_hashtbl_get_generic_ref(hashTblp, nodep, context);
         list_add(&(temp->list), &(psRunningInodesToBan->BanList.list));
         psRunningInodesToBan->count++;
     }
@@ -422,4 +481,14 @@ void ec_process_tracking_update_op_cnts(PosixIdentity *posix_identity, CB_EVENT_
     default:
         break;
     }
+}
+
+PosixIdentity *ec_process_posix_identity(ProcessHandle *process_handle)
+{
+    return process_handle ? process_handle->posix_identity : NULL;
+}
+
+ExecIdentity *ec_process_exec_identity(ProcessHandle *process_handle)
+{
+    return process_handle ? process_handle->exec_handle.identity : NULL;
 }
