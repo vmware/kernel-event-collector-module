@@ -50,10 +50,12 @@ void __ec_mem_cache_free_generic(void *value, const char *fn, uint32_t line);
 #  define ec_mem_cache_alloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, false, __func__, __LINE__)
 #  define ec_mem_cache_valloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, true, __func__, __LINE__)
 #  define ec_mem_cache_free_generic(VALUE) __ec_mem_cache_free_generic(VALUE, __func__, __LINE__)
+#  define ec_mem_cache_put_generic(VALUE) __ec_mem_cache_free_generic(VALUE, __func__, __LINE__)
 #else
 #  define ec_mem_cache_alloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, false, NULL, __LINE__)
 #  define ec_mem_cache_valloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, true, NULL, __LINE__)
 #  define ec_mem_cache_free_generic(VALUE) __ec_mem_cache_free_generic(VALUE, NULL, __LINE__)
+#  define ec_mem_cache_put_generic(VALUE) __ec_mem_cache_free_generic(VALUE, NULL, __LINE__)
 #endif
 
 void *ec_mem_cache_get_generic(void *value, ProcessContext *context);

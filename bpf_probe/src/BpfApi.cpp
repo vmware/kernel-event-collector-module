@@ -33,6 +33,10 @@ BpfApi::BpfApi()
     , m_bracket_kptr_restrict(false)
     , m_first_syscall_lookup(true)
     , m_kptr_restrict_orig(0)
+    , m_event_list()
+    , m_timestamp_last(0)
+    , m_event_count(0)
+    , m_did_leave_events(false)
 {
 }
 

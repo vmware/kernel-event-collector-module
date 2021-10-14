@@ -131,7 +131,8 @@ enum event_type {
 	EVENT_NET_CONNECT_DNS_RESPONSE,
 	EVENT_NET_CONNECT_WEB_PROXY,
 	EVENT_FILE_DELETE,
-	EVENT_FILE_CLOSE
+	EVENT_FILE_CLOSE,
+	EVENT_FILE_RENAME
 };
 
 #define DNS_RESP_PORT_NUM 53
@@ -213,24 +214,33 @@ struct dns_data {
 	u32 name_len;
 };
 
+struct rename_data {
+    struct data_header header;
+
+    u64 old_inode, new_inode;
+    u32 old_device, new_device;
+};
+
 // THis is a helper struct for the "file like" events.  These follow a pattern where 3+n events are sent.
-//  The first event sends the device/inode.  Each path element is sent as a seperate event.  Finally an event is sent
+//  The first event sends the device/inode.  Each path element is sent as a separate event.  Finally an event is sent
 //  to say the operation is complete.
 // The macros below help to access the correct object in the struct.
 struct _file_event
 {
-	union
-	{
-		struct file_data _file_data;
-		struct path_data _path_data;
-		struct data      _data;
-	};
+    union
+    {
+        struct file_data   _file_data;
+        struct path_data   _path_data;
+        struct rename_data _rename_data;
+        struct data        _data;
+    };
 };
 
 #define DECLARE_FILE_EVENT(DATA) struct _file_event DATA = {}
 #define GENERIC_DATA(DATA)  ((struct data*)&((struct _file_event*)(DATA))->_data)
 #define FILE_DATA(DATA)  ((struct file_data*)&((struct _file_event*)(DATA))->_file_data)
 #define PATH_DATA(DATA)  ((struct path_data*)&((struct _file_event*)(DATA))->_path_data)
+#define RENAME_DATA(DATA)  ((struct rename_data*)&((struct _file_event*)(DATA))->_rename_data)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 BPF_HASH(last_parent, u32, u32, 8192);
@@ -915,7 +925,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	FILE_DATA(&data)->flags = file->f_flags;
 	FILE_DATA(&data)->prot = file->f_mode;
 
-	if (type == EVENT_FILE_WRITE)
+	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
 		// This allows us to send the last-write event on file close
 		__track_write_entry(file, FILE_DATA(&data));
@@ -978,37 +988,38 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 				 struct dentry *new_dentry, unsigned int flags)
 {
 	DECLARE_FILE_EVENT(data);
-	struct super_block *old_sb = NULL;
-	struct super_block *new_sb = NULL;
-	struct inode *inode = NULL;
 
-	if (!__send_dentry_delete(ctx, &data, old_dentry)) {
-		goto out;
-	}
+    // send event for delete of source file
+    if (!__send_dentry_delete(ctx, &data, old_dentry)) {
+        goto out;
+    }
 
-	// If the target destination already exists,
-	// send a delete event for the file that will be overwritten
-	if (new_dentry && new_dentry->d_inode != NULL) {
-		__send_dentry_delete(ctx, &data, new_dentry);
-	}
+    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
-	// Send the create event for the path where the file is being moved to
-	// (the path will be the one reported in the new dentry, but the inode
-	// will persist and be the one from the old dentry)
+    RENAME_DATA(&data)->old_device = __get_device_from_dentry(old_dentry);
+    RENAME_DATA(&data)->old_inode = __get_inode_from_dentry(old_dentry);
 
-	__init_header(EVENT_FILE_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-	inode = NULL;
+    __file_tracking_delete(0, RENAME_DATA(&data)->old_device, RENAME_DATA(&data)->old_inode);
 
+    // If the target destination already exists
+    if (new_dentry)
+    {
+        __file_tracking_delete(0, RENAME_DATA(&data)->new_device, RENAME_DATA(&data)->new_inode);
 
-	FILE_DATA(&data)->device = __get_device_from_dentry(new_dentry ? new_dentry : old_dentry);
-	FILE_DATA(&data)->inode = __get_inode_from_dentry(old_dentry);
+        RENAME_DATA(&data)->new_device = __get_device_from_dentry(new_dentry);
+        RENAME_DATA(&data)->new_inode  = __get_inode_from_dentry(new_dentry);
+    } else
+    {
+        RENAME_DATA(&data)->new_device = 0;
+        RENAME_DATA(&data)->new_inode  = 0;
+    }
 
-	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
-	__do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
-	send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    send_event(ctx, RENAME_DATA(&data), sizeof(struct rename_data));
 
+    __do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
+    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
 out:
-	return 0;
+    return 0;
 }
 
 int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)

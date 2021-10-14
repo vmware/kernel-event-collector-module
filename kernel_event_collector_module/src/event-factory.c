@@ -30,17 +30,25 @@ PCB_EVENT ec_factory_alloc_event(ProcessTracking *procp,
 {
     PCB_EVENT event = NULL;
 
-    if (procp && type_msg)
+    if (procp && type_msg && MAY_TRACE_LEVEL(trace_level))
     {
-        TRACE(trace_level, "%s%s %s of %d by %d (reported as %d:%ld by %d)",
-               type_msg,
-               (status_msg ? status_msg : ""),
-               (procp->shared_data->path ? procp->shared_data->path : "<unknown>"),
-               procp->posix_details.pid,
-               procp->posix_parent_details.pid,
-               procp->shared_data->exec_details.pid,
-               procp->shared_data->exec_details.start_time,
-               procp->shared_data->exec_parent_details.pid);
+        SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+        char *path = ec_process_tracking_get_path(shared_data, context);
+
+        if (shared_data)
+        {
+            TRACE(trace_level, "%s%s %s of %d by %d (reported as %d:%ld by %d)",
+                  type_msg,
+                  (status_msg ? status_msg : ""),
+                  (path ? path : "<unknown>"),
+                  procp->posix_details.pid,
+                  procp->posix_parent_details.pid,
+                  shared_data->exec_details.pid,
+                  shared_data->exec_details.start_time,
+                  shared_data->exec_parent_details.pid);
+        }
+        ec_process_tracking_put_path(path, context);
+        ec_process_tracking_put_shared_data(shared_data, context);
     }
 
     // This will return a NULL event if we are configured to not send this event type
@@ -59,12 +67,13 @@ void ec_event_send_start(ProcessTracking *procp,
                       ProcessContext *context)
 {
     PCB_EVENT event = NULL;
+    SharedTrackingData *shared_data = NULL;
 
     CANCEL_VOID(procp);
 
     event = ec_factory_alloc_event(
         procp,
-	INTENT_REPORT,
+        INTENT_REPORT,
         start_action != CB_PROCESS_START_BY_FORK ? CB_EVENT_TYPE_PROCESS_START_EXEC : CB_EVENT_TYPE_PROCESS_START_FORK,
         DL_PROCESS,
         ec_StartAction_ToString(start_action),
@@ -78,9 +87,10 @@ void ec_event_send_start(ProcessTracking *procp,
     event->processStart.start_action   = start_action;
     event->processStart.observed       = procp->is_real_start;
 
-    if (procp->shared_data->cmdline)
+    shared_data = ec_process_tracking_get_shared_data(procp, context);
+    if (shared_data)
     {
-        event->processStart.path = ec_mem_cache_get_generic(procp->shared_data->cmdline, context);
+        event->processStart.path = ec_process_tracking_get_cmdline(shared_data, context);// take reference
         if (event->processStart.path)
         {
             event->processStart.path_size = (uint16_t)strlen(event->processStart.path) + 1;
@@ -89,6 +99,7 @@ void ec_event_send_start(ProcessTracking *procp,
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
+    ec_process_tracking_put_shared_data(shared_data, context);
 }
 
 void ec_event_send_last_exit(PCB_EVENT        event,
@@ -143,16 +154,24 @@ void ec_event_send_exit(ProcessTracking *procp,
         status_msg = "<IGNORED> ";
     }
 
-    if (procp)
+    if (procp && MAY_TRACE_LEVEL(DL_PROCESS))
     {
-        TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
-               status_msg,
-               (procp->shared_data->path ? procp->shared_data->path : "<unknown>"),
-               procp->posix_details.pid,
-               procp->posix_parent_details.pid,
-               procp->shared_data->exec_details.pid,
-               procp->shared_data->exec_details.start_time,
-               procp->shared_data->exec_parent_details.pid);
+        SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+        char *path = ec_process_tracking_get_path(shared_data, context);
+
+        if (shared_data)
+        {
+            TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
+                  status_msg,
+                  (path ? path : "<unknown>"),
+                  procp->posix_details.pid,
+                  procp->posix_parent_details.pid,
+                  shared_data->exec_details.pid,
+                  shared_data->exec_details.start_time,
+                  shared_data->exec_parent_details.pid);
+        }
+        ec_process_tracking_put_path(path, context);
+        ec_process_tracking_put_shared_data(shared_data, context);
     }
 }
 

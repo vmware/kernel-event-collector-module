@@ -27,15 +27,17 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
         NULL,
         REAL_START,
         context);
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
 
-    ASSERT_TRY(procp);
+    ASSERT_TRY(procp && shared_data);
 
-    atomic64_set(&procp->shared_data->active_process_count, 0);
+    atomic64_set(&shared_data->active_process_count, 0);
     ASSERT_TRY(!ec_process_tracking_report_exit(200, context));
-    ASSERT_TRY(atomic64_read(&procp->shared_data->exit_event) == 0);
+    ASSERT_TRY(atomic64_read(&shared_data->exit_event) == 0);
 
     passed = true;
 CATCH_DEFAULT:
+    ec_process_tracking_put_shared_data(shared_data, context);
     if (procp)
     {
         ec_process_tracking_remove_process(procp, context);

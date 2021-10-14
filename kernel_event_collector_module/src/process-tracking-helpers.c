@@ -31,30 +31,84 @@ bool ec_process_tracking_is_blocked(ProcessTracking *procp)
     return (procp && procp->exec_blocked);
 }
 
-pid_t ec_process_tracking_exec_pid(ProcessTracking *procp)
+pid_t ec_process_tracking_exec_pid(ProcessTracking *procp, ProcessContext *context)
 {
-    return procp ? procp->shared_data->exec_details.pid : 1;
+    pid_t result = 1;
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+
+    TRY(procp && shared_data);
+
+    result = shared_data->exec_details.pid;
+
+CATCH_DEFAULT:
+    ec_process_tracking_put_shared_data(shared_data, context);
+    return result;
 }
 
-void ec_process_tracking_set_cmdline(ProcessTracking *procp, char *cmdline, ProcessContext *context)
+void ec_process_tracking_set_cmdline(SharedTrackingData *shared_data, char *cmdline, ProcessContext *context)
 {
-    if (procp)
+    if (shared_data)
     {
-        procp->shared_data->cmdline = ec_mem_cache_strdup(cmdline, context);
+        // TODO: Add lock
+        ec_process_tracking_put_cmdline(shared_data->cmdline, context);
+        shared_data->cmdline = (cmdline ? ec_mem_cache_get_generic(cmdline, context) : NULL);
     }
+}
+
+char *ec_process_tracking_get_cmdline(SharedTrackingData *shared_data, ProcessContext *context)
+{
+    char *cmdline = NULL;
+
+    if (shared_data)
+    {
+        // TODO: Add lock here
+
+        cmdline = ec_mem_cache_get_generic(shared_data->cmdline, context);
+    }
+    return cmdline;
+}
+
+void ec_process_tracking_put_cmdline(char *cmdline, ProcessContext *context)
+{
+    ec_mem_cache_put_generic(cmdline);
+}
+
+void ec_process_tracking_set_proc_cmdline(ProcessTracking *procp, char *cmdline, ProcessContext *context)
+{
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+
+    TRY(shared_data && cmdline);
+
+    // Duplicate the command line for storage
+    cmdline = ec_mem_cache_strdup(cmdline, context);
+
+    ec_process_tracking_set_cmdline(shared_data, cmdline, context);
+
+    ec_mem_cache_put_generic(cmdline);
+
+CATCH_DEFAULT:
+    ec_process_tracking_put_shared_data(shared_data, context);
 }
 
 SharedTrackingData *ec_process_tracking_get_shared_data_ref(SharedTrackingData *shared_data, ProcessContext *context)
 {
     TRY(shared_data);
 
-    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
-        __func__,
-        ec_process_tracking_get_proc_name(shared_data->path),
-        shared_data->exec_details.pid,
-        atomic64_read(&shared_data->reference_count),
-        atomic64_read(&shared_data->active_process_count),
-        shared_data);
+    #ifdef _REF_DEBUGGING
+    if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
+    {
+        char *path = ec_process_tracking_get_path(shared_data, context);
+
+        TRACE(DL_PROC_TRACKING, "    %s: %s %d shared_data Ref count: %ld/%ld (%p)",
+            __func__,
+            ec_process_tracking_get_proc_name(path),
+            shared_data->exec_details.pid,
+            atomic64_read(&shared_data->reference_count),
+            atomic64_read(&shared_data->active_process_count),
+            shared_data);
+        ec_process_tracking_put_path(path, context);
+    }
+    #endif
 
     atomic64_inc(&shared_data->reference_count);
 
@@ -62,20 +116,52 @@ CATCH_DEFAULT:
     return shared_data;
 }
 
+SharedTrackingData *ec_process_tracking_get_shared_data(ProcessTracking *procp, ProcessContext *context)
+{
+    SharedTrackingData *shared_data = NULL;
+
+    if (procp)
+    {
+        // TODO: Add lock here
+
+        shared_data = ec_process_tracking_get_shared_data_ref(procp->shared_data, context);
+    }
+
+    return shared_data;
+}
+
 void ec_process_tracking_set_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context)
 {
     CANCEL_VOID(procp);
 
+    // TODO: Add lock here
+
     // Make sure that we release the one we are holding
-    ec_process_tracking_release_shared_data_ref(procp->shared_data, context);
+    ec_process_tracking_put_shared_data(procp->shared_data, context);
 
     // Set the new one, and take the reference
     procp->shared_data = ec_process_tracking_get_shared_data_ref(shared_data, context);
 }
 
+SharedTrackingData *ec_process_tracking_get_temp_shared_data(ProcessTracking *procp, ProcessContext *context)
+{
+    SharedTrackingData *shared_data = NULL;
+
+    TRY(procp);
+
+    // TODO: Add lock here
+
+    shared_data = ec_process_tracking_get_shared_data_ref(procp->temp_shared_data, context);
+
+CATCH_DEFAULT:
+    return shared_data;
+}
+
 void ec_process_tracking_set_temp_shared_data(ProcessTracking *procp, SharedTrackingData *shared_data, ProcessContext *context)
 {
     CANCEL_VOID(procp);
+
+    // TODO: Add lock here
 
     TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s parent_shared_data %p (old %p)",
         (shared_data ? "set" : "clear"),
@@ -83,7 +169,7 @@ void ec_process_tracking_set_temp_shared_data(ProcessTracking *procp, SharedTrac
         procp->temp_shared_data);
 
     // Make sure that we release the one we are holding
-    ec_process_tracking_release_shared_data_ref(procp->temp_shared_data, context);
+    ec_process_tracking_put_shared_data(procp->temp_shared_data, context);
 
     // Set the new one, and take the reference
     procp->temp_shared_data = ec_process_tracking_get_shared_data_ref(shared_data, context);
@@ -91,19 +177,21 @@ void ec_process_tracking_set_temp_shared_data(ProcessTracking *procp, SharedTrac
 
 void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
 {
-    TRY(procp && event);
-    TRY(procp->shared_data);
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+    SharedTrackingData *temp_shared_data = NULL;
+
+    TRY(procp && event && shared_data);
 
     event->procInfo.all_process_details.array[FORK]             = procp->posix_details;
     event->procInfo.all_process_details.array[FORK_PARENT]      = procp->posix_parent_details;
     event->procInfo.all_process_details.array[FORK_GRANDPARENT] = procp->posix_grandparent_details;
-    event->procInfo.all_process_details.array[EXEC]             = procp->shared_data->exec_details;
-    event->procInfo.all_process_details.array[EXEC_PARENT]      = procp->shared_data->exec_parent_details;
-    event->procInfo.all_process_details.array[EXEC_GRANDPARENT] = procp->shared_data->exec_grandparent_details;
+    event->procInfo.all_process_details.array[EXEC]             = shared_data->exec_details;
+    event->procInfo.all_process_details.array[EXEC_PARENT]      = shared_data->exec_parent_details;
+    event->procInfo.all_process_details.array[EXEC_GRANDPARENT] = shared_data->exec_grandparent_details;
 
 
-    event->procInfo.path_found      = procp->shared_data->path_found;
-    event->procInfo.path            = ec_mem_cache_get_generic(procp->shared_data->path, context);
+    event->procInfo.path_found      = shared_data->path_found;
+    event->procInfo.path            = ec_process_tracking_get_path(shared_data, context);// hold reference
     if (event->procInfo.path)
     {
         event->procInfo.path_size    = strlen(event->procInfo.path) + 1;
@@ -129,11 +217,14 @@ void ec_process_tracking_set_event_info(ProcessTracking *procp, CB_INTENT_TYPE i
         //  (This forces an exit of the parent to be sent after the start of a child)
         // For process exit events we hold a reference to the child preocess
         //  (This forces the child's exit to be sent after the parent's exit)
-        ec_event_set_process_data(event, procp->temp_shared_data, context);
+
+
+        temp_shared_data = ec_process_tracking_get_temp_shared_data(procp, context);
+        ec_event_set_process_data(event, temp_shared_data, context);
         break;
     default:
         // For all other events we hold a reference to this process
-        ec_event_set_process_data(event, procp->shared_data, context);
+        ec_event_set_process_data(event, shared_data, context);
         break;
     }
 
@@ -144,24 +235,52 @@ CATCH_DEFAULT:
     //  because we still need to free the parent shared data
     //  Example: This will happen if we are ignoring fork events.
     ec_process_tracking_set_temp_shared_data(procp, NULL, context);
+    ec_process_tracking_put_shared_data(shared_data, context);
+    ec_process_tracking_put_shared_data(temp_shared_data, context);
 }
 
-char *ec_process_tracking_get_path(SharedTrackingData *shared_data)
+char *ec_process_tracking_get_path(SharedTrackingData *shared_data, ProcessContext *context)
 {
-    return shared_data->path ? shared_data->path : "<unknown>";
+    char *path = NULL;
+
+    if (shared_data)
+    {
+        // TODO: Add lock
+        path = ec_mem_cache_get_generic(shared_data->path, context);
+    }
+
+    return path;
+}
+
+void ec_process_tracking_set_path(SharedTrackingData *shared_data, char *path, ProcessContext *context)
+{
+     if (shared_data)
+     {
+         // TODO: Add lock
+         ec_process_tracking_put_path(shared_data->path, context);
+         shared_data->path = (path ? ec_mem_cache_get_generic(path, context) : NULL);
+     }
+}
+
+void ec_process_tracking_put_path(char *path, ProcessContext *context)
+{
+    ec_mem_cache_put_generic(path);
 }
 
 void ec_process_tracking_store_exit_event(ProcessTracking *procp, PCB_EVENT event, ProcessContext *context)
 {
     PCB_EVENT prev_event;
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
 
-    CANCEL_VOID(procp);
+    CANCEL_VOID(procp && shared_data);
 
     // This is the last exit, so store the event in the tracking entry to be sent later
-    prev_event = (PCB_EVENT) atomic64_xchg(&procp->shared_data->exit_event, (uint64_t) event);
+    prev_event = (PCB_EVENT) atomic64_xchg(&shared_data->exit_event, (uint64_t) event);
 
     // This should never happen, but just in case
     ec_free_event(prev_event, context);
+
+    ec_process_tracking_put_shared_data(shared_data, context);
 }
 
 int __ec_hashtbl_search_callback(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
@@ -173,9 +292,18 @@ void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningI
     return;
 }
 
-bool ec_process_tracking_has_active_process(ProcessTracking *procp)
+bool ec_process_tracking_has_active_process(ProcessTracking *procp, ProcessContext *context)
 {
-    return procp != NULL && atomic64_read(&procp->shared_data->active_process_count) != 0;
+    bool result = false;
+    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
+
+    TRY(procp && shared_data);
+
+    result = atomic64_read(&shared_data->active_process_count) != 0;
+
+CATCH_DEFAULT:
+    ec_process_tracking_put_shared_data(shared_data, context);
+    return result;
 }
 
 // Note: This function is used as a callback by ec_hashtbl_read_for_each_generic called from

@@ -419,7 +419,7 @@ LOCAL int my_socket_recvmsg_hook_counted(ProcessContext *context, struct socket 
     procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
     TRY(procp);
 
-    pid = ec_process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp, context);
 
     TRY(!ec_banning_IgnoreProcess(context, pid));
 
@@ -1120,7 +1120,7 @@ int ec_lsm_socket_sendmsg(struct socket *sock, struct my_user_msghdr *msg, int s
     procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "SEND", &context);
     TRY(procp);
 
-    pid = ec_process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp, &context);
 
     TRY(!ec_banning_IgnoreProcess(&context, pid));
 
@@ -1182,7 +1182,7 @@ int __ec_socket_recvmsg_hook_counted(ProcessContext *context, struct socket *soc
     procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "RECV", context);
     TRY(procp);
 
-    pid = ec_process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp, context);
 
     TRY(!ec_banning_IgnoreProcess(context, pid));
 
@@ -1303,7 +1303,7 @@ int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrle
     procp = ec_get_procinfo_and_create_process_start_if_needed(pid, "CONNECT", &context);
     TRY(procp);
 
-    pid = ec_process_tracking_exec_pid(procp);
+    pid = ec_process_tracking_exec_pid(procp, &context);
 
     TRY(!ec_banning_IgnoreProcess(&context, pid));
 
