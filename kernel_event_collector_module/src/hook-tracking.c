@@ -29,35 +29,39 @@ void ec_hook_tracking_shutdown(ProcessContext *context)
     ec_spinlock_destroy(&s_hook_tracking.lock, context);
 }
 
-void ec_hook_tracking_add_entry(ProcessContext *context)
+void ec_hook_tracking_add_entry(ProcessContext *context, const char *hook_name)
 {
     CANCEL_VOID(context);
-    CANCEL_VOID(context->hook_tracking);
+    CANCEL_VOID(context->percpu_hook_tracking);
 
-    if (list_empty(&context->hook_tracking->list))
+    if (!context->percpu_hook_tracking->hook_name)
     {
         ec_write_lock(&s_hook_tracking.lock, context);
-        // Now that we're inside the lock check this hook still has not been added
-        if (list_empty(&context->hook_tracking->list))
+        // Now that we're inside the lock check this hook still has not been initialized
+        if (!context->percpu_hook_tracking->hook_name)
         {
-            list_add(&context->hook_tracking->list, &s_hook_tracking.hook_list);
+            TRACE(DL_VERBOSE, "%s %d %p", hook_name, smp_processor_id(), context->percpu_hook_tracking);
+
+            context->percpu_hook_tracking->hook_name = hook_name;
+            INIT_LIST_HEAD(&context->percpu_hook_tracking->list);
+            list_add(&context->percpu_hook_tracking->list, &s_hook_tracking.hook_list);
         }
         ec_write_unlock(&s_hook_tracking.lock, context);
     }
 
-    atomic64_inc(&context->hook_tracking->count);
-    atomic64_set(&context->hook_tracking->last_enter_time, CURRENT_TIME_SEC.tv_sec);
-    atomic64_set(&context->hook_tracking->last_pid, context->pid);
+    atomic64_inc(&context->percpu_hook_tracking->count);
+    atomic64_set(&context->percpu_hook_tracking->last_enter_time, CURRENT_TIME_SEC.tv_sec);
+    atomic64_set(&context->percpu_hook_tracking->last_pid, context->pid);
 }
 
 void ec_hook_tracking_del_entry(ProcessContext *context)
 {
     CANCEL_VOID(context);
-    CANCEL_VOID(context->hook_tracking);
+    CANCEL_VOID(context->percpu_hook_tracking);
 
-    ATOMIC64_DEC__CHECK_NEG(&context->hook_tracking->count);
-    atomic64_set(&context->hook_tracking->last_enter_time, 0);
-    atomic64_set(&context->hook_tracking->last_pid, 0);
+    ATOMIC64_DEC__CHECK_NEG(&context->percpu_hook_tracking->count);
+    atomic64_set(&context->percpu_hook_tracking->last_enter_time, 0);
+    atomic64_set(&context->percpu_hook_tracking->last_pid, 0);
 }
 
 // This will be called in the module disable logic when we need to wait for hooks

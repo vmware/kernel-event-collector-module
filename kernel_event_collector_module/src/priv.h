@@ -32,7 +32,7 @@
 #include "cb-test.h"
 #include "version.h"
 #include "task-helper.h"
-#include "hook-tracking.h"
+#include "module_state.h"
 
 extern const char DRIVER_NAME[];
 
@@ -61,105 +61,6 @@ extern uint32_t g_max_queue_size_pri2;
 #define DEFAULT_P1_QUEUE_SIZE  MSG_QUEUE_SIZE
 #define DEFAULT_P2_QUEUE_SIZE  MSG_QUEUE_SIZE
 
-//-------------------------------------------------
-// Module usage protection
-//  NOTE: Be very careful when adding new exit points to the hooks that the PUT is properly called.
-// 'module_used' tracks usage of our hook functions and blocks module unload but not disable.
-// 'g_module_state_info.module_active_call_count' tracks usage of code that requires
-// the module to be in an enabled state and blocks disable but not unload.
-extern atomic64_t module_used;
-#define MODULE_GET()  atomic64_inc_return(&module_used)
-#define MODULE_PUT()  ATOMIC64_DEC__CHECK_NEG(&module_used)
-
-typedef enum {
-    ModuleStateEnabled = 1,
-    ModuleStateDisabling = 2,
-    ModuleStateDisabled = 3,
-    ModuleStateEnabling = 4
-} ModuleState;
-
-typedef struct _ModuleStateInfo {
-    uint64_t     module_state_lock;
-    ModuleState  module_state;
-    atomic64_t   module_active_call_count;
-} ModuleStateInfo;
-
-//------------------------------------------------
-// Macros that track entry and exit for each of the hook routines.
-// - Implement the checks for module-state and bypass the routines if the module is disabled.
-// - Keep track of a counter use_count, to allow for safe rmmod.
-
-extern ModuleStateInfo g_module_state_info;
-
-
-// Everything between this macro and FINISH_MODULE_DISABLE_CHECK is tracked
-// and can potentially block the module from disabling. We should avoid calling
-// the original syscall between these two macros.
-// checkpatch-ignore: SUSPECT_CODE_INDENT,MACRO_WITH_FLOW_CONTROL
-#define BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)    \
-do {                                                                                \
-    ec_read_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
-                                                                                    \
-    if (g_module_state_info.module_state != ModuleStateEnabled)                     \
-    {                                                                               \
-        ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
-        (CONTEXT)->decr_active_call_count_on_exit = false;                          \
-        goto pass_through_label;                                                    \
-    }                                                                               \
-    else                                                                            \
-    {                                                                               \
-        (CONTEXT)->decr_active_call_count_on_exit = true;                           \
-        atomic64_inc_return(&g_module_state_info.module_active_call_count);         \
-    }                                                                               \
-                                                                                    \
-    ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
-    ec_hook_tracking_add_entry((CONTEXT));                                          \
-} while (false)
-
-#define IF_MODULE_DISABLED_GOTO(CONTEXT, pass_through_label)                        \
-do {                                                                                \
-    ec_read_lock(&g_module_state_info.module_state_lock, (CONTEXT));               \
-                                                                                    \
-    if (g_module_state_info.module_state != ModuleStateEnabled)                     \
-    {                                                                               \
-        ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));         \
-        goto pass_through_label;                                                    \
-    }                                                                               \
-                                                                                    \
-    ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));             \
-} while (false)
-
-#define MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)  \
-do {                                                                                             \
-   MODULE_GET();                                                                                 \
-   BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO((CONTEXT), pass_through_label);                   \
-}                                                                                                \
-while (false)
-
-#define MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(CONTEXT, pass_through_label)         \
-do {                                                                                \
-   MODULE_GET();                                                                    \
-   IF_MODULE_DISABLED_GOTO((CONTEXT), pass_through_label);                          \
-}                                                                                   \
-while (false)
-
-#define FINISH_MODULE_DISABLE_CHECK(CONTEXT)                                  \
-do {                                                                          \
-  if ((CONTEXT)->decr_active_call_count_on_exit)                              \
-  {                                                                           \
-      ec_hook_tracking_del_entry((CONTEXT));                                  \
-      ATOMIC64_DEC__CHECK_NEG(&g_module_state_info.module_active_call_count); \
-  }                                                                           \
-}                                                                             \
-while (false)
-
-#define MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(CONTEXT)               \
-do {                                                                      \
-  FINISH_MODULE_DISABLE_CHECK(CONTEXT);                                   \
-  MODULE_PUT();                                                           \
-}                                                                         \
-while (false)
-// checkpatch-no-ignore: SUSPECT_CODE_INDENT,MACRO_WITH_FLOW_CONTROL
 
 
 //-------------------------------------------------

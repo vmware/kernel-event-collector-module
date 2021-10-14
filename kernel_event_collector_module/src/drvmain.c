@@ -62,7 +62,9 @@ module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 
 INIT_CB_RESOLVED_SYMS();
-atomic64_t       module_used      = ATOMIC64_INIT(0);
+
+DEFINE_PER_CPU(atomic64_t, module_inuse);
+DEFINE_PER_CPU(atomic64_t, module_active_inuse);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
@@ -283,8 +285,6 @@ void ec_shutdown(ProcessContext *context)
 
 void __exit ec_cleanup(void)
 {
-    uint64_t l_module_used;
-
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     TRACE(DL_SHUTDOWN, "Cleaning up module...");
@@ -295,9 +295,22 @@ void __exit ec_cleanup(void)
     // We have to be sure we're not in a hook. Wait here until nothing is using our module.
     // NOTE: We only care about the actual hooks.  If our dev node is open, Linux will already
     //  prevent unloading.
-    while ((l_module_used = atomic64_read(&module_used)) != 0)
+    while (true)
     {
-        TRACE(DL_SHUTDOWN, "Module has %lld active hooks, delaying shutdown...", l_module_used);
+        uint64_t l_module_inuse = 0;
+        unsigned int cpu;
+
+        for_each_possible_cpu(cpu)
+        {
+            l_module_inuse += atomic64_read(&per_cpu(module_inuse, cpu));
+        }
+
+        if (!l_module_inuse)
+        {
+            break;
+        }
+
+        TRACE(DL_SHUTDOWN, "Module has %lld active hooks, delaying shutdown...", l_module_inuse);
         ssleep(5);
     }
 
@@ -378,8 +391,13 @@ int ec_disable_module(ProcessContext *context)
     while (true)
     {
         uint64_t l_active_call_count = 0;
+        unsigned int cpu;
 
-        l_active_call_count = atomic64_read(&g_module_state_info.module_active_call_count);
+        for_each_possible_cpu(cpu)
+        {
+            l_active_call_count += atomic64_read(&per_cpu(module_active_inuse, cpu));
+        }
+
         if (l_active_call_count != 0)
         {
             // Reduce how often we print a message about active hooks
