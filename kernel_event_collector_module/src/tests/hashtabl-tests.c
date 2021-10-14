@@ -29,7 +29,8 @@ HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_del
                               offsetof(Entry, key),
                               offsetof(Entry, link),
                               refcount_offset,
-                              delete_callback);
+                              delete_callback,
+                              NULL);
 }
 
 bool __init test__hash_table(ProcessContext *context)

@@ -15,28 +15,22 @@ struct for_each_priv {
 
 int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
-bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *handle, ProcessContext *context)
+bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *tree_handle, ProcessContext *context)
 {
-    SharedTrackingData *shared_data = NULL;
-    ProcessTracking *procp = NULL;
+    ProcessHandle *process_handle = NULL;
 
-    TRY(handle);
-    handle->tree = NULL;
-    handle->shared_data = NULL;
+    TRY(tree_handle);
+    tree_handle->tree = NULL;
+    memset(&tree_handle->exec_handle, 0, sizeof(ExecHandle));
 
-    procp = ec_process_tracking_get_process(pid, context);
+    process_handle = ec_process_tracking_get_handle(pid, context);
+    TRY(process_handle);
 
-    TRY(procp);
-    shared_data = ec_process_tracking_get_shared_data(procp, context);
+    // This holds onto a exec_identity ref
+    ec_process_exec_handle_clone(ec_process_exec_handle(process_handle), &tree_handle->exec_handle, context);
+    tree_handle->tree = ec_process_exec_identity(process_handle)->tracked_files;
 
-    if (shared_data)
-    {
-        // This holds the ref we just got
-        handle->shared_data = shared_data;
-        handle->tree        = shared_data->tracked_files;
-    }
-
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_handle(process_handle, context);
 
     return true;
 
@@ -44,13 +38,13 @@ CATCH_DEFAULT:
     return false;
 }
 
-void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *handle, ProcessContext *context)
+void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *tree_handle, ProcessContext *context)
 {
-    if (handle)
+    if (tree_handle)
     {
-        ec_process_tracking_put_shared_data(handle->shared_data, context);
-        handle->tree = NULL;
-        handle->shared_data = NULL;
+        ec_process_tracking_put_exec_handle(&tree_handle->exec_handle, context);
+        tree_handle->tree = NULL;
+        memset(&tree_handle->exec_handle, 0, sizeof(ExecHandle));
     }
 }
 
@@ -71,8 +65,8 @@ void ec_process_tracking_for_each_file_tree(process_tracking_for_each_tree_callb
 //       sleep should be avoided.
 int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
-    ProcessTracking *procp      = NULL;
-    SharedTrackingData *shared_data = NULL;
+    PosixIdentity *posix_identity      = NULL;
+    ExecIdentity *exec_identity = NULL;
     struct for_each_priv *local_priv = NULL;
 
     // NULL when hashtbl iterator has signal a stop.
@@ -90,18 +84,18 @@ int __ec_hashtbl_for_each_file_tree(HashTbl *hashTblp, HashTableNode *nodep, voi
         return ACTION_STOP;
     }
 
-    procp = (ProcessTracking *)nodep;
-    shared_data = ec_process_tracking_get_shared_data(procp, context);
+    posix_identity = (PosixIdentity *)nodep;
+    exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
     local_priv = (struct for_each_priv *)priv;
 
-    if (shared_data)
+    if (exec_identity)
     {
         // TODO: How well is tracked_files protected
         ((process_tracking_for_each_tree_callback) local_priv->callback)(
-            shared_data->tracked_files,
+            exec_identity->tracked_files,
             local_priv->priv,
             context);
     }
-    ec_process_tracking_put_shared_data(shared_data, context);
+    ec_process_tracking_put_exec_identity(exec_identity, context);
     return ACTION_CONTINUE;
 }

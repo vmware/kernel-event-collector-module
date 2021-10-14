@@ -44,25 +44,25 @@ void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, Pro
     ec_rbtree_destroy(&data.tree, context);
 }
 
-ProcessTracking *ec_sorted_tracking_table_get_process(void *data, ProcessContext *context)
+ProcessHandle *ec_sorted_tracking_table_get_handle(void *data, ProcessContext *context)
 {
     if (data)
     {
-        return ec_process_tracking_get_process(((SORTED_PROCESS *)data)->pid, context);
+        return ec_process_tracking_get_handle(((SORTED_PROCESS *)data)->pid, context);
     }
     return NULL;
 }
 
 int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
 {
-    ProcessTracking *procp = (ProcessTracking *)nodep;
+    PosixIdentity *posix_identity = (PosixIdentity *)nodep;
     SORTED_PROCESS_TREE *data  = (SORTED_PROCESS_TREE *)priv;
 
     IF_MODULE_DISABLED_GOTO(context, CATCH_DISABLED);
 
-    // procp will be non-null while looping the entries, and null for the last call
+    // posix_identity will be non-null while looping the entries, and null for the last call
     //  after iterating
-    if (procp)
+    if (posix_identity)
     {
         // Insert each process entry into a rb_tree sorted by the start time
         SORTED_PROCESS *value = ec_mem_cache_alloc_generic(sizeof(SORTED_PROCESS), context);
@@ -70,8 +70,8 @@ int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, vo
         if (value)
         {
             RB_CLEAR_NODE(&value->node);
-            value->start_time = procp->posix_details.start_time;
-            value->pid        = procp->pt_key.pid;
+            value->start_time = posix_identity->posix_details.start_time;
+            value->pid        = posix_identity->pt_key.pid;
             if (!ec_rbtree_insert(&data->tree, value, context))
             {
                 ec_mem_cache_free_generic(value);

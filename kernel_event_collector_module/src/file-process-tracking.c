@@ -4,6 +4,7 @@
 
 #include "file-process-tracking.h"
 #include "process-tracking.h"
+#include "process-tracking-private.h"
 #include "hash-table-generic.h"
 #include "priv.h"
 #include "rbtree-helper.h"
@@ -64,7 +65,6 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
     FILE_PROCESS_VALUE *value = NULL;
     FILE_TREE_HANDLE tree_handle;
     FILE_PROCESS_KEY key = { device, inode };
-    char *process_path = NULL;
 
     TRY(ec_process_tracking_get_file_tree(pid, &tree_handle, context));
 
@@ -107,16 +107,12 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
             value = NULL;
             if (MAY_TRACE_LEVEL(DL_INFO))
             {
-                if (tree_handle.shared_data)
-                {
-                    process_path = ec_process_tracking_get_path(tree_handle.shared_data, context);
-                }
+                char *process_path = ec_exec_path(&tree_handle.exec_handle);
 
                 // We are racing against other threads or processes
                 // to insert a similar entry on the same rb_tree.
                 TRACE(DL_INFO, "File entry already exists: [%llu:%llu] %s pid:%u (%s)",
                     device, inode, path ? path : "(path unknown)", pid, process_path ? process_path : "<unknown>");
-                ec_process_tracking_put_path(process_path, context);
             }
         }
     }

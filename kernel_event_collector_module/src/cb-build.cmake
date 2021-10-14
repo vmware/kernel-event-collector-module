@@ -49,6 +49,7 @@ function(do_build_kernel_module)
                 FLAGS               ${CBSENSOR_FLAGS}
                 AFLAGS              ${CBSENSOR_AFLAGS}
                 SOURCE_FILES        ${SOURCE_FILES}
+                DEPENDS             ${HEADER_FILES}
                 USE_NATIVE_COMPILER)
     endforeach()
 endfunction()
