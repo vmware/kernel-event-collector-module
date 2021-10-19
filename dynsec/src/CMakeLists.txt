@@ -202,4 +202,5 @@ file (GLOB SRC_FILES
 #         SOURCE_FILES        ${SRC_FILES}
 # )
 
-# add_subdirectory(examples)
+add_subdirectory(examples)
+#add_subdirectory(tests)
