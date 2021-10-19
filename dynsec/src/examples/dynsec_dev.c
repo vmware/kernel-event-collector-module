@@ -19,9 +19,12 @@
 #include <signal.h>
 #include <getopt.h>
 #include <stdbool.h>
-#include <limits.h>
-
+// container header conflict with limits.h
+//#include <limits.h>
 #include "dynsec.h"
+#ifndef MODULE_NAME
+#include "version.h"
+#endif /* ! MODULE_NAME */
 
 struct prx_cache {
     int tail;
@@ -131,7 +134,7 @@ static const char *event_type_name[DYNSEC_EVENT_TYPE_MAX] = {
 #define MAX_HISTO_SZ (MAX_BUF_SZ / EVENT_AVG_SZ)
 char *global_buf = NULL;
 
-// gcc -I../../include -pthread ./dynsec_dev.c -o dynsec
+// gcc -DMODULE_NAME=dynsec_2_4_99999 -I../../include -pthread ./dynsec_dev.c -o dynsec
 
 // Pass in the desired char device and the major number
 // That can be grabbed from /proc/devices

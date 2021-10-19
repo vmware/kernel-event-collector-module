@@ -62,9 +62,9 @@ class DynSec(CbConanFile):
             cmake.build()
 
     def package(self):
-        include_dir = "include" + os.path.sep + "k_events_module"
+        include_dir = "include" + os.path.sep + "dynsec_kmod"
         self.copy("*.h", dst=include_dir, src="include", keep_path=True)
-        self.copy("version.h", dst=include_dir, src="module", keep_path=True)
+        self.copy("version.h", dst=include_dir, keep_path=True)
         self.copy("*.ko.*", excludes="*.debug", dst="modules", src="kernel-builds", keep_path=True)
         self.copy("*.symvers.*", dst="symvers", src="kernel-builds", keep_path=True)
 
