@@ -8,7 +8,6 @@
 #include <string.h>
 #include <sys/types.h>
 #include "client.h"
-#include "print.h"
 
 
 //
@@ -31,12 +30,13 @@ static enum DYNSEC_EAT only_print_task_dump(struct dynsec_client *client,
         hdr->event_type == DYNSEC_EVENT_TYPE_TASK_DUMP) {
         const struct dynsec_task_dump_umsg *task_dump = (const struct dynsec_task_dump_umsg *)hdr;
 
-        print_event_raw((struct dynsec_msg_hdr *)hdr);
-
         // should always hold true since incrementing
         if (task_dump->msg.task.tid > data->max_pid) {
             data->max_pid = task_dump->msg.task.tid;
         }
+        printf("%s tid:%u pid:%u ppid:%u\n", task_dump->msg.task.comm,
+               task_dump->msg.task.tid, task_dump->msg.task.pid,
+               task_dump->msg.task.ppid);
         return DYNSEC_EAT_DEFAULT;
     }
     return DYNSEC_EAT_DISCARD;
@@ -103,9 +103,9 @@ int main(int argc, const char *argv[])
 
     // Requests to place TASK_DUMP events onto event queue
     if (dump_threads) {
-        ret = dynsec_client_dump_all_processes(&client);
-    } else {
         ret = dynsec_client_dump_all_threads(&client);
+    } else {
+        ret = dynsec_client_dump_all_processes(&client);
     }
     if (ret < 0) {
         fprintf(stderr, "Unable to make task_dump_all request: %s\n",
