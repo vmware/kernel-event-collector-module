@@ -52,7 +52,7 @@ struct task_cache {
 };
 
 #define TASK_MAX_BKT_SZ 10
-#define TASK_BUCKET_BITS 11
+#define TASK_BUCKET_BITS 14
 #define TASK_BUCKETS BIT(TASK_BUCKET_BITS)
 
 static struct task_cache *task_cache = NULL;
