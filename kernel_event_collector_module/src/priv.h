@@ -79,6 +79,7 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__NR_unlinkat                   0x0000000000002000
 #define CB__NR_rename                     0x0000000000004000
 #define CB__NR_renameat                   0x0000000000008000
+#define CB__NR_renameat2                  0x0000000000010000
 
 #define SYSCALL_HOOK_MASK                 0x00000000FFFFFFFF
 

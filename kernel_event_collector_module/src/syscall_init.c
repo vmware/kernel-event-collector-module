@@ -29,6 +29,7 @@ extern long (*ec_orig_sys_unlink)(const char __user *pathname);
 extern long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int flag);
 extern long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
 extern long (*ec_orig_sys_renameat)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
+extern long (*ec_orig_sys_renameat2)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname, unsigned int flags);
 
 extern asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode);
 extern asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, umode_t mode);
@@ -37,6 +38,7 @@ extern asmlinkage long ec_sys_unlink(const char __user *pathname);
 extern asmlinkage long ec_sys_unlinkat(int dfd, const char __user *pathname, int flag);
 extern asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *newname);
 extern asmlinkage long ec_sys_renameat(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
+extern asmlinkage long ec_sys_renameat2(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname, unsigned int flags);
 
 // Kernel module hooks
 extern long (*ec_orig_sys_delete_module)(const char __user *name_user, unsigned int flags);
@@ -58,6 +60,9 @@ void __ec_save_old_hooks(p_sys_call_table syscall_table)
     ec_orig_sys_unlinkat      = syscall_table[__NR_unlinkat];
     ec_orig_sys_rename        = syscall_table[__NR_rename];
     ec_orig_sys_renameat      = syscall_table[__NR_renameat];
+    #if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
+    ec_orig_sys_renameat2     = syscall_table[__NR_renameat2];
+    #endif
 }
 
 bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
@@ -81,6 +86,9 @@ bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
         if (enableHooks & CB__NR_unlinkat) syscall_table[__NR_unlinkat]  = ec_sys_unlinkat;
         if (enableHooks & CB__NR_rename) syscall_table[__NR_rename]    = ec_sys_rename;
         if (enableHooks & CB__NR_renameat) syscall_table[__NR_renameat]    = ec_sys_renameat;
+        #if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
+        if (enableHooks & CB__NR_renameat2) syscall_table[__NR_renameat2]    = ec_sys_renameat2;
+        #endif
 
         ec_restore_page_state(syscall_table, page_rw_set);
         rval = true;
@@ -138,6 +146,9 @@ void __ec_restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
         if (enableHooks & CB__NR_unlinkat) syscall_table[__NR_unlinkat]  = ec_orig_sys_unlinkat;
         if (enableHooks & CB__NR_rename) syscall_table[__NR_rename]    = ec_orig_sys_rename;
         if (enableHooks & CB__NR_renameat) syscall_table[__NR_renameat]    = ec_orig_sys_renameat;
+        #if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
+        if (enableHooks & CB__NR_renameat2) syscall_table[__NR_renameat2]    = ec_orig_sys_renameat2;
+        #endif
         ec_restore_page_state(syscall_table, page_rw_set);
     } else {
         TRACE(DL_ERROR, "Failed to make 64-bit call table RW!!\n");
@@ -295,6 +306,7 @@ int ec_get_sys_unlink(struct seq_file *m, void *v) { return getSyscall(CB__NR_un
 int ec_get_sys_unlinkat(struct seq_file *m, void *v) { return getSyscall(CB__NR_unlinkat, m); }
 int ec_get_sys_rename(struct seq_file *m, void *v) { return getSyscall(CB__NR_rename,     m); }
 int ec_get_sys_renameat(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat, m); }
+int ec_get_sys_renameat2(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat2, m); }
 
 ssize_t ec_set_sys_recvfrom(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {

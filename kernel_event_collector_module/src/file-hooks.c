@@ -504,6 +504,7 @@ long (*ec_orig_sys_unlink)(const char __user *filename);
 long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int flag);
 long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
 long (*ec_orig_sys_renameat)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
+long (*ec_orig_sys_renameat2)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname, unsigned int flags);
 
 asmlinkage void ec_lsm_file_free_security(struct file *file)
 {
@@ -769,6 +770,68 @@ CATCH_DISABLED:
         BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
         __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CLOSE);
+    }
+
+CATCH_DEFAULT:
+    __ec_put_file_data(&context, old_file_data);
+    __ec_put_file_data(&context, new_file_data_pre_rename);
+    __ec_put_file_data(&context, new_file_data_post_rename);
+
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return ret;
+}
+
+asmlinkage long ec_sys_renameat2(int olddirfd, char __user const *oldname, int newdirfd, char __user const *newname, unsigned int flags)
+{
+    long         ret;
+    file_data_t *old_file_data = NULL;
+    file_data_t *new_file_data_pre_rename = NULL;
+    file_data_t *new_file_data_post_rename = NULL;
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
+    // so do not begin hook tracking yet, since that can block module disable
+    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
+
+    // Collect data about the file before it is modified.  The event will be sent
+    //  after a successful operation
+    old_file_data = __ec_get_file_data_from_name_at(&context, olddirfd, oldname);
+
+    // Only lookup new path when old path was found
+    if (old_file_data)
+    {
+        new_file_data_pre_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
+    }
+    // Old path must exist but still execute syscall
+
+CATCH_DISABLED:
+    ret = ec_orig_sys_renameat2(olddirfd, oldname, newdirfd, newname, flags);
+
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+    // Now the active count is incremented and the hook is being tracked
+
+    if (!IS_ERR_VALUE(ret) && old_file_data)
+    {
+        __ec_do_generic_file_event(&context, old_file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
+
+        // Send a delete for the destination if the renameat will overwrite an existing file
+        if (new_file_data_pre_rename)
+        {
+            __ec_do_generic_file_event(&context, new_file_data_pre_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_DELETE);
+        }
+
+        FINISH_MODULE_DISABLE_CHECK(&context);
+
+        // This could block so call it outside the disable tracking
+        new_file_data_post_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
+
+        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CLOSE);
     }
 
 CATCH_DEFAULT:
@@ -829,6 +892,7 @@ CATCH_DISABLED:
         BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
         __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(&context, new_file_data_post_rename, INTENT_REPORT, CB_EVENT_TYPE_FILE_CLOSE);
     }
 
 CATCH_DEFAULT:
