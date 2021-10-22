@@ -99,6 +99,8 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__LSM_socket_sendmsg            0x0020000000000000
 #define CB__LSM_socket_recvmsg            0x0040000000000000
 
+#define SAFE_STRING(PATH) (PATH) ? (PATH) : "<unknown>"
+
 // ------------------------------------------------
 // Module Helpers
 //

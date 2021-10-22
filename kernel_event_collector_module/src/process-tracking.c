@@ -440,7 +440,7 @@ ProcessHandle *ec_process_tracking_update_process(
     {
         TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld) (active: %" PRFs64 ")",
               msg,
-              ec_process_path(process_handle) ? ec_process_path(process_handle) : "<unknown>",
+              SAFE_STRING(ec_process_path(process_handle)),
               pid,
               parent,
               exec_identity->exec_details.pid,

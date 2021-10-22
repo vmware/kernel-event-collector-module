@@ -357,7 +357,7 @@ void __ec_do_generic_file_event(ProcessContext *context,
         TRACE(DL_VERBOSE, "Checking if deleted inode [%llu:%llu] was banned.", file_data->device, file_data->inode);
         if (ec_banning_ClearBannedProcessInode(context, file_data->device, file_data->inode))
         {
-            TRACE(DL_INFO, "[%llu:%llu] was removed from banned inode table.", file_data->device, file_data->inode);
+            TRACE(DL_FILE, "[%llu:%llu] was removed from banned inode table.", file_data->device, file_data->inode);
         }
     }
 
@@ -379,6 +379,8 @@ void __ec_do_generic_file_event(ProcessContext *context,
 CATCH_DEFAULT:
     ec_process_tracking_put_handle(process_handle, context);
 }
+
+#define SANE_PATH(PATH) PATH ? PATH : "<unknown>"
 
 void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
 {
@@ -411,11 +413,11 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     {
         pathname = fileProcess->path;
         TRY_MSG(eventType != CB_EVENT_TYPE_FILE_WRITE,
-                DL_INFO, "[%llu:%llu] process:%u written before", device, inode, pid);
+                DL_FILE, "%s [%llu:%llu] process:%u written before", SANE_PATH(pathname), device, inode, pid);
 
         if (eventType == CB_EVENT_TYPE_FILE_CLOSE || eventType == CB_EVENT_TYPE_FILE_DELETE)
         {
-            TRACE(DL_INFO, "[%llu:%llu] process:%u closed or deleted", device, inode, pid);
+            TRACE(DL_FILE, "%s [%llu:%llu] process:%u closed or deleted", SANE_PATH(pathname), device, inode, pid);
             // I still need to use the path buffer from fileProcess, so don't call
             //  ec_file_process_status_close until later.
             doClose = true;
@@ -449,7 +451,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                 }
             }
 
-            TRACE(DL_INFO, "[%llu:%llu] process:%u first write", device, inode, pid);
+            TRACE(DL_FILE, "%s [%llu:%llu] process:%u first write", SANE_PATH(pathname), device, inode, pid);
             fileProcess = ec_file_process_status_open(device,
                                                    inode,
                                                    pid,
@@ -470,11 +472,11 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             // empty and if not is VERY small.
             if (ec_banning_ClearBannedProcessInode(context, device, inode))
             {
-                TRACE(DL_INFO, "[%llu:%llu] was removed from banned inode table.", device, inode);
+                TRACE(DL_FILE, "%s [%llu:%llu] was removed from banned inode table.", SANE_PATH(pathname), device, inode);
             }
         } else if (eventType == CB_EVENT_TYPE_FILE_CLOSE)
         {
-            TRACE(DL_VERBOSE, "[%llu:%llu] process:%u NOT written before", device, inode, pid);
+            TRACE(DL_FILE, "%s [%llu:%llu] process:%u NOT written before", SANE_PATH(pathname), device, inode, pid);
             goto CATCH_DEFAULT;
         }
     }
@@ -517,7 +519,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
 #endif
         else
         {
-            TRACE(DL_INFO, "invalid full path %s event %d", pathname, eventType);
+            TRACE(DL_FILE, "invalid full path %s event %d", pathname, eventType);
         }
     }
 

@@ -614,7 +614,7 @@ bool ec_disable_peer_modules(ProcessContext *context)
         {
             TRACE(DL_ERROR, "Request to disable module %s, failed with error: %s",
                   elem->module_name,
-                  err_str?err_str:"unknown");
+                  SAFE_STRING(err_str));
             goto Exit;
         }
     }
