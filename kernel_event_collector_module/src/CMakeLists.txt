@@ -99,7 +99,6 @@ set(SOURCE_FILES drvmain.c
         process-tracking-discovery.c
         process-tracking-show.c
         process-tracking-helpers.c
-        process-tracking-file-cache.c
         cb-isolation.c
         cb-banning.c
         netfilter.c

@@ -627,7 +627,6 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
 {
     if (exec_identity)
     {
-        ec_file_process_tree_init(&exec_identity->tracked_files, context);
         atomic64_set(&exec_identity->reference_count, 0);
         atomic64_set(&exec_identity->active_process_count, 0);
         atomic64_set(&exec_identity->exit_event, 0);
@@ -664,13 +663,6 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
 
     // If the reference count reaches 0, then delete it
     IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->reference_count, {
-        // Notify the file tracking logic that this process has exited and any open files should be purged.
-        ec_check_open_file_list_on_exit(exec_identity->tracked_files, context);
-
-        // Destroy the file tracking
-        ec_file_process_tree_destroy(&exec_identity->tracked_files, context);
-
-
         // Free the lock
         ec_spinlock_destroy(&exec_identity->string_lock, context);
 

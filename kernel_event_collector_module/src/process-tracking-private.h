@@ -5,7 +5,6 @@
 #pragma once
 
 #include "process-tracking.h"
-#include "rbtree-helper.h"
 
 typedef struct posix_identity_data {
     uint64_t      op_cnt;

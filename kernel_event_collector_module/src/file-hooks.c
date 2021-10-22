@@ -390,7 +390,6 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     char               *pathname       = NULL;
     pid_t               pid            = ec_getpid(current);
     bool                doClose        = false;
-    ProcessHandle      *process_handle = NULL;
 
     CANCEL_VOID(!ec_banning_IgnoreProcess(context, pid));
 
@@ -404,11 +403,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     // Skip if excluded
     CANCEL_VOID(!ec_is_excluded_file(device, inode));
 
-    // Check to see if the process is tracked already
-    process_handle = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
-    CANCEL_VOID(process_handle);
-
-    fileProcess = ec_file_process_status(device, inode, pid, context);
+    fileProcess = ec_file_process_get(pid, device, inode, context);
     if (fileProcess && fileProcess->status == OPENED)
     {
         pathname = fileProcess->path;
@@ -452,9 +447,10 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             }
 
             TRACE(DL_FILE, "%s [%llu:%llu] process:%u first write", SANE_PATH(pathname), device, inode, pid);
-            fileProcess = ec_file_process_status_open(device,
-                                                   inode,
+            fileProcess = ec_file_process_status_open(
                                                    pid,
+                                                   device,
+                                                   inode,
                                                    pathname,
                                                    isSpecialFile,
                                                    context);
@@ -483,6 +479,11 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
 
     if (pathname && strlen(pathname) > 0)
     {
+        // Check to see if the process is tracked already
+        ProcessHandle      *process_handle = process_handle = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
+
+        TRY(process_handle);
+
         if (pathname[0] == '/')
         {
             //
@@ -521,14 +522,14 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
         {
             TRACE(DL_FILE, "invalid full path %s event %d", pathname, eventType);
         }
+        ec_process_tracking_put_handle(process_handle, context);
     }
 
 CATCH_DEFAULT:
     ec_file_process_put_ref(fileProcess, context);
-    ec_process_tracking_put_handle(process_handle, context);
     if (doClose)
     {
-        ec_file_process_status_close(device, inode, pid, context);
+        ec_file_process_status_close(pid, device, inode, context);
     }
 
     return;

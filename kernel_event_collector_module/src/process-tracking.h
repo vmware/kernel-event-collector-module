@@ -69,11 +69,6 @@ typedef struct ExecIdentity_handle {
     char         *cmdline;
 } ExecHandle;
 
-typedef struct file_tree_handle {
-    CB_RBTREE *tree;
-    ExecHandle exec_handle;
-} FILE_TREE_HANDLE;
-
 typedef struct posix_identity {
     HashTableNode     pt_link;
     PT_TBL_KEY        pt_key;
@@ -195,8 +190,6 @@ bool ec_process_tracking_has_active_process(PosixIdentity *posix_identity, Proce
 
 // File helpers
 typedef void (*process_tracking_for_each_tree_callback)(void *tree, void *priv, ProcessContext *context);
-bool ec_process_tracking_get_file_tree(pid_t pid, FILE_TREE_HANDLE *process_handle, ProcessContext *context);
-void ec_process_tracking_put_file_tree(FILE_TREE_HANDLE *process_handle, ProcessContext *context);
 void ec_process_tracking_for_each_file_tree(process_tracking_for_each_tree_callback callback, void *priv, ProcessContext *context);
 
 PosixIdentity *ec_process_posix_identity(ProcessHandle *process_handle);
