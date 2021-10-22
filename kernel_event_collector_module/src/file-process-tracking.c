@@ -49,14 +49,12 @@ void __ec_file_tracking_delete_callback(void *data, ProcessContext *context)
 
 
 FILE_PROCESS_VALUE *ec_file_process_status_open(
-    uint32_t       pid,
-    uint64_t       device,
-    uint64_t       inode,
-    char          *path,
-    bool           isSpecialFile,
+    struct file    *file,
+    uint32_t        pid,
+    char           *path,
     ProcessContext *context)
 {
-    FILE_PROCESS_VALUE *value = ec_file_process_get(pid, device, inode, context);
+    FILE_PROCESS_VALUE *value = ec_file_process_get(file, context);
 
     if (!value)
     {
@@ -66,22 +64,21 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
         // Initialize the reference count
         atomic64_set(&value->reference_count, 1);
 
-        value->key.pid       = pid;
-        value->key.device    = device;
-        value->key.inode     = inode;
-        value->isSpecialFile = isSpecialFile;
-        value->didReadType   = false;
-        value->status        = OPENED;
+        value->key.file      = (uint64_t)file;
+        value->pid           = pid;
         value->path          = ec_mem_cache_strdup(path, context);
+        value->isSpecialFile = ec_is_special_file(value->path, ec_mem_cache_get_size_generic(value->path));
+
+        ec_get_devinfo_from_file(file, &value->device, &value->inode);
 
         if (ec_hashtbl_add_generic(s_file_hash_table, value, context) < 0)
         {
-            if (MAY_TRACE_LEVEL(DL_INFO))
+            if (MAY_TRACE_LEVEL(DL_FILE))
             {
                 // We are racing against other threads or processes
                 // to insert a similar entry on the same rb_tree.
-                TRACE(DL_INFO, "File entry already exists: [%llu:%llu] %s pid:%u",
-                    device, inode, path ? path : "<path unknown>", pid);
+                TRACE(DL_FILE, "File entry already exists: [%llu:%llu] %s pid:%u",
+                      value->device, value->inode, path ? path : "<unknown>", pid);
             }
 
             // If the insert failed we free the local reference and clear
@@ -96,23 +93,26 @@ CATCH_DEFAULT:
     return value;
 }
 
-FILE_PROCESS_VALUE *ec_file_process_get(uint32_t pid, uint64_t device, uint64_t inode, ProcessContext *context)
+FILE_PROCESS_VALUE *ec_file_process_get(
+    struct file    *file,
+    ProcessContext *context)
 {
-    FILE_PROCESS_KEY key = { pid, device, inode };
+    FILE_PROCESS_KEY key = { (uint64_t)file };
 
     return ec_hashtbl_get_generic(s_file_hash_table, &key, context);
 }
 
-void ec_file_process_status_close(uint32_t pid, uint64_t device, uint64_t inode, ProcessContext *context)
+void ec_file_process_status_close(
+    struct file    *file,
+    ProcessContext *context)
 {
-    FILE_PROCESS_KEY key = {pid, device, inode};
+    FILE_PROCESS_KEY key = {(uint64_t)file};
     FILE_PROCESS_VALUE *value = NULL;
 
     value = ec_hashtbl_del_by_key_generic(s_file_hash_table, &key, context);
 
     // We still need to release it
     ec_hashtbl_put_generic(s_file_hash_table, value, context);
-
 }
 
 void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
@@ -125,8 +125,8 @@ int ec_file_track_show_table(struct seq_file *m, void *v)
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    seq_printf(m, "%40s | %10s | %10s | %6s | %10s |\n",
-                   "Path", "Device", "Inode", "PID", "Is Special");
+    seq_printf(m, "%50s | %10s | %10s | %6s | %10s | %10s |\n",
+                   "Path", "Device", "Inode", "PID", "Is Special", "File Pointer");
 
     ec_hashtbl_read_for_each_generic(
         s_file_hash_table,
@@ -143,12 +143,13 @@ int __ec_file_tracking_show(HashTbl *hashTblp, HashTableNode *data, void *m, Pro
     {
         FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
 
-        seq_printf(m, "%40s | %10llu | %10llu | %6d | %10s |\n",
+        seq_printf(m, "%50s | %10llu | %10llu | %6d | %10s | %10llx |\n",
                       value->path,
-                      value->key.device,
-                      value->key.inode,
-                      value->key.pid,
-                      (value->isSpecialFile ? "YES" : "NO"));
+                      value->device,
+                      value->inode,
+                      value->pid,
+                      (value->isSpecialFile ? "YES" : "NO"),
+                      value->key.file);
     }
 
     return ACTION_CONTINUE;

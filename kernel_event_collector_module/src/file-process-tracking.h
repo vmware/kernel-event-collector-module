@@ -8,23 +8,16 @@
 #include "priv.h"
 #include "hash-table-generic.h"
 
-typedef enum FILE_PROCESS_STATUS {
-    OPENED, //File has been opened, and written before
-    CLOSED  //File is closed.
-} FILE_PROCESS_STATUS;
-
 typedef struct FILE_PROCESS_KEY {
-    uint32_t            pid;
-    uint64_t            device;
-    uint64_t            inode;
+    uint64_t            file;
 } FILE_PROCESS_KEY;
 
 typedef struct FILE_PROCESS_VALUE {
     HashTableNode       node;
     FILE_PROCESS_KEY    key;
-    pid_t               pid;
-    FILE_PROCESS_STATUS status;
-    bool                didReadType;
+    uint32_t            pid;
+    uint64_t            device;
+    uint64_t            inode;
     bool                isSpecialFile;
     char               *path;
     atomic64_t          reference_count;
@@ -35,19 +28,13 @@ void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
 bool ec_file_tracking_init(ProcessContext *context);
 void ec_file_tracking_shutdown(ProcessContext *context);
 FILE_PROCESS_VALUE *ec_file_process_get(
-    uint32_t        pid,
-    uint64_t        device,
-    uint64_t        inode,
+    struct file    *file,
     ProcessContext *context);
 FILE_PROCESS_VALUE *ec_file_process_status_open(
+    struct file    *file,
     uint32_t        pid,
-    uint64_t        device,
-    uint64_t        inode,
     char           *path,
-    bool            isSpecialFile,
     ProcessContext *context);
 void ec_file_process_status_close(
-    uint32_t        pid,
-    uint64_t        device,
-    uint64_t        inode,
+    struct file    *file,
     ProcessContext *context);

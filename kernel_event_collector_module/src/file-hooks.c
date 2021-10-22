@@ -13,8 +13,6 @@
 #include <linux/file.h>
 #include <linux/namei.h>
 
-static FILE_PROCESS_KEY g_log_messages_file_id = {0, 0};
-
 bool ec_file_exists(int dfd, const char __user *filename);
 
 #define N_ELEM(x) (sizeof(x) / sizeof(*x))
@@ -61,12 +59,12 @@ void __ec_put_file_data(ProcessContext *context, file_data_t *file_data);
 #define MIN_SPECIAL_FILE_LEN 5
 static const special_file_t special_files[] = {
 
+    ENABLE_SPECIAL_FILE_SETUP("/var/log/messages"),
     ENABLE_SPECIAL_FILE_SETUP("/var/lib/cb"),
     ENABLE_SPECIAL_FILE_SETUP("/var/log"),
     ENABLE_SPECIAL_FILE_SETUP("/srv/bit9/data"),
     ENABLE_SPECIAL_FILE_SETUP("/sys"),
     ENABLE_SPECIAL_FILE_SETUP("/proc"),
-    DISABLE_SPECIAL_FILE_SETUP(""),
     DISABLE_SPECIAL_FILE_SETUP(""),
     DISABLE_SPECIAL_FILE_SETUP(""),
     DISABLE_SPECIAL_FILE_SETUP(""),
@@ -133,25 +131,6 @@ int ec_is_special_file(char *pathname, int len)
     }
 
     return 0;
-}
-
-void __ec_check_for_log_messages(uint64_t device, uint64_t inode, char *pathname, bool forcecheck)
-{
-    // If we don't know what the messages inode is then figure it out
-    if (g_log_messages_file_id.inode == 0 || forcecheck)
-    {
-        if (strstr(pathname, "/var/log/messages") == pathname)
-        {
-            g_log_messages_file_id.device = device;
-            g_log_messages_file_id.inode  = inode;
-        }
-    }
-}
-
-bool ec_is_excluded_file(uint64_t device, uint64_t inode)
-{
-    // Ignore /var/log/messages
-    return g_log_messages_file_id.device == device && g_log_messages_file_id.inode == inode;
 }
 
 bool ec_is_interesting_file(struct file *file)
@@ -384,80 +363,67 @@ CATCH_DEFAULT:
 
 void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
 {
-    uint64_t            device         = 0;
-    uint64_t            inode          = 0;
     FILE_PROCESS_VALUE *fileProcess    = NULL;
-    char               *pathname       = NULL;
     pid_t               pid            = ec_getpid(current);
     bool                doClose        = false;
 
+    CANCEL_VOID(file);
     CANCEL_VOID(!ec_banning_IgnoreProcess(context, pid));
 
     CANCEL_VOID(ec_logger_should_log(INTENT_REPORT, eventType));
 
-    ec_get_devinfo_from_file(file, &device, &inode);
-
     // Skip if not interesting
     CANCEL_VOID(ec_is_interesting_file(file));
 
-    // Skip if excluded
-    CANCEL_VOID(!ec_is_excluded_file(device, inode));
+    fileProcess = ec_file_process_get(file, context);
 
-    fileProcess = ec_file_process_get(pid, device, inode, context);
-    if (fileProcess && fileProcess->status == OPENED)
+    if (fileProcess)
     {
-        pathname = fileProcess->path;
         TRY_MSG(eventType != CB_EVENT_TYPE_FILE_WRITE,
-                DL_FILE, "%s [%llu:%llu] process:%u written before", SANE_PATH(pathname), device, inode, pid);
+                DL_FILE, "%s [%llu:%llu] process:%u written before", SANE_PATH(fileProcess->path), fileProcess->device, fileProcess->inode, pid);
 
         if (eventType == CB_EVENT_TYPE_FILE_CLOSE || eventType == CB_EVENT_TYPE_FILE_DELETE)
         {
-            TRACE(DL_FILE, "%s [%llu:%llu] process:%u closed or deleted", SANE_PATH(pathname), device, inode, pid);
+            TRACE(DL_FILE, "%s [%llu:%llu] process:%u closed or deleted", SANE_PATH(fileProcess->path), fileProcess->device, fileProcess->inode, pid);
             // I still need to use the path buffer from fileProcess, so don't call
             //  ec_file_process_status_close until later.
             doClose = true;
         }
     } else //status == CLOSED
     {
+        char *path          = NULL;
+        char *string_buffer = NULL;
+
+        TRY(eventType == CB_EVENT_TYPE_FILE_WRITE || eventType == CB_EVENT_TYPE_FILE_CREATE);
+
         // If this file is deleted already, then just skip it
         TRY(!d_unlinked(file->f_path.dentry));
 
-        if (eventType == CB_EVENT_TYPE_FILE_WRITE)
+        string_buffer = ec_get_path_buffer(context);
+        if (string_buffer)
         {
-            bool  isSpecialFile = false;
-            char *string_buffer = ec_get_path_buffer(context);
+            // ec_file_get_path() uses dpath which builds the path efficently
+            //  by walking back to the root. It starts with a string terminator
+            //  in the last byte of the target buffer and needs to be copied
+            //  with memmove to adjust
+            // Note for CB-6707: The 3.10 kernel occasionally crashed in d_path when the file was closed.
+            //  The workaround used dentry->d_iname instead. But this only provided the short name and
+            //  not the whole path.  The daemon could no longer match the lastWrite to the firstWrite.
+            //  I am now only calling this with an open file now so we should be fine.
+            ec_file_get_path(file, string_buffer, PATH_MAX, &path);
+        }
 
-            if (string_buffer)
-            {
-                // ec_file_get_path() uses dpath which builds the path efficently
-                //  by walking back to the root. It starts with a string terminator
-                //  in the last byte of the target buffer and needs to be copied
-                //  with memmove to adjust
-                // Note for CB-6707: The 3.10 kernel occasionally crashed in d_path when the file was closed.
-                //  The workaround used dentry->d_iname instead. But this only provided the short name and
-                //  not the whole path.  The daemon could no longer match the lastWrite to the firstWrite.
-                //  I am now only calling this with an open file now so we should be fine.
-                ec_file_get_path(file, string_buffer, PATH_MAX, &pathname);
-                if (pathname)
-                {
-                    // Check to see if this is a special file that we will not send an event for.  It will save
-                    //  us at least one check in the future.
-                    isSpecialFile = ec_is_special_file(pathname, strlen(pathname));
-                }
-            }
+        fileProcess = ec_file_process_status_open(
+            file,
+            pid,
+            path,
+            context);
+        ec_put_path_buffer(string_buffer);
 
-            TRACE(DL_FILE, "%s [%llu:%llu] process:%u first write", SANE_PATH(pathname), device, inode, pid);
-            fileProcess = ec_file_process_status_open(
-                                                   pid,
-                                                   device,
-                                                   inode,
-                                                   pathname,
-                                                   isSpecialFile,
-                                                   context);
-            ec_put_path_buffer(string_buffer);
-
-            TRY(fileProcess);
-            pathname = fileProcess->path;
+        if (fileProcess)
+        {
+            path = SANE_PATH(fileProcess->path);
+            TRACE(DL_FILE, "%s [%llu:%llu:%p] process:%u first write", path, fileProcess->device, fileProcess->inode, file, pid);
 
             // If this file has been written to AND that files inode is in the banned list
             // we need to remove it on the assumption that the md5 will have changed. It is
@@ -466,61 +432,54 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             //
             // This should be a fairly lightweight call as it is inlined and the hashtable is usually
             // empty and if not is VERY small.
-            if (ec_banning_ClearBannedProcessInode(context, device, inode))
+            if (ec_banning_ClearBannedProcessInode(context, fileProcess->device, fileProcess->inode))
             {
-                TRACE(DL_FILE, "%s [%llu:%llu] was removed from banned inode table.", SANE_PATH(pathname), device, inode);
+                TRACE(DL_FILE, "%s [%llu:%llu] was removed from banned inode table.", path, fileProcess->device,
+                      fileProcess->inode);
             }
-        } else if (eventType == CB_EVENT_TYPE_FILE_CLOSE)
-        {
-            TRACE(DL_FILE, "%s [%llu:%llu] process:%u NOT written before", SANE_PATH(pathname), device, inode, pid);
-            goto CATCH_DEFAULT;
         }
     }
 
-    if (pathname && strlen(pathname) > 0)
+    TRY(fileProcess);
+    if (fileProcess->path)
     {
         // Check to see if the process is tracked already
-        ProcessHandle      *process_handle = process_handle = ec_get_procinfo_and_create_process_start_if_needed(pid, "Fileop", context);
+        ProcessHandle *process_handle = ec_process_tracking_get_handle(pid, context);
 
         TRY(process_handle);
 
-        if (pathname[0] == '/')
+        if (fileProcess->path[0] == '/')
         {
             //
             // Log it
             //
-            __ec_check_for_log_messages(device, inode, pathname, true);
             if (!fileProcess->isSpecialFile)
             {
                 ec_event_send_file(
                     process_handle,
                     eventType,
                     INTENT_REPORT,
-                    device,
-                    inode,
-                    pathname,
+                    fileProcess->device,
+                    fileProcess->inode,
+                    fileProcess->path,
                     context);
             }
-        } else if (pathname[0] == '[' && eventType == CB_EVENT_TYPE_FILE_WRITE)
+        } else if (fileProcess->path[0] == '[' && eventType == CB_EVENT_TYPE_FILE_WRITE)
         {
             // CEL This is a noop as we can see [eventfd] on a write and we don't care about it
-        }
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-        else if (eventType == CB_EVENT_TYPE_FILE_CLOSE)
+        } else if (eventType == CB_EVENT_TYPE_FILE_CLOSE)
         {
             ec_event_send_file(
                 process_handle,
                 eventType,
                 INTENT_REPORT,
-                device,
-                inode,
-                pathname,
+                fileProcess->device,
+                fileProcess->inode,
+                fileProcess->path,
                 context);
-        }
-#endif
-        else
+        } else
         {
-            TRACE(DL_FILE, "invalid full path %s event %d", pathname, eventType);
+            TRACE(DL_FILE, "invalid full path %s event %d", fileProcess->path, eventType);
         }
         ec_process_tracking_put_handle(process_handle, context);
     }
@@ -529,7 +488,7 @@ CATCH_DEFAULT:
     ec_file_process_put_ref(fileProcess, context);
     if (doClose)
     {
-        ec_file_process_status_close(pid, device, inode, context);
+        ec_file_process_status_close(file, context);
     }
 
     return;
@@ -546,69 +505,24 @@ long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int flag);
 long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
 long (*ec_orig_sys_renameat)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
 
-asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t count)
+asmlinkage void ec_lsm_file_free_security(struct file *file)
 {
-    long         ret;
-    struct file *file = NULL;
-
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    MODULE_GET(&context);
-
-    // Do the actual write first.  This way if the type is changed we will detect it later.
-    ret = ec_orig_sys_write(fd, buf, count);
-    TRY(ret > -1);
-
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    // Get a local reference to the file
-    file = fget(fd);
-    TRY(file != NULL);
-
-    TRY(!ec_may_skip_unsafe_vfs_calls(file));
-
-    __ec_do_file_event(&context, file, CB_EVENT_TYPE_FILE_WRITE);
-
-CATCH_DEFAULT:
-    if (file)
-    {
-        fput(file);
-    }
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-
-    return ret;
-}
-
-asmlinkage long ec_sys_close(unsigned int fd)
-{
-    long                ret;
-    struct file *file          = NULL;
-
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+    DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    // Get a local reference to the file
-    file = fget(fd);
-    TRY(file != NULL);
 
     __ec_do_file_event(&context, file, CB_EVENT_TYPE_FILE_CLOSE);
 
 CATCH_DEFAULT:
-    if (file)
-    {
-        fput(file);
-    }
 
-    ret = ec_orig_sys_close(fd);
+    g_original_ops_ptr->file_free_security(file);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return ret;
 }
 
 asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode)
 {
-    long                ret;
+    long                fd;
     CB_EVENT_TYPE       eventType = 0;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
@@ -619,6 +533,9 @@ asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode
     {
         // If this is opened with create mode AND it does not already exist we will report a create event
         eventType = CB_EVENT_TYPE_FILE_CREATE;
+    } else if (flags & (O_RDWR | O_WRONLY))
+    {
+        eventType = CB_EVENT_TYPE_FILE_WRITE;
     } else if (!(flags & (O_RDWR | O_WRONLY)))
     {
         // If the file is opened with read-only mode we will report an open event
@@ -626,26 +543,27 @@ asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode
     }
 
 CATCH_DISABLED:
-    ret = ec_orig_sys_open(filename, flags, mode);
+    fd = ec_orig_sys_open(filename, flags, mode);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    if (!IS_ERR_VALUE(ret) && eventType)
+    if (!IS_ERR_VALUE(fd) && eventType)
     {
-        file_data_t *file_data = __ec_get_file_data_from_fd(&context, filename, ret);
+        struct file *file = fget(fd);
 
-        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, eventType);
-        __ec_put_file_data(&context, file_data);
+        TRY(!IS_ERR_OR_NULL(file));
+        __ec_do_file_event(&context, file, eventType);
+        fput(file);
     }
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return ret;
+    return fd;
 }
 
 asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, umode_t mode)
 {
-    long ret;
+    long                fd;
     CB_EVENT_TYPE       eventType = 0;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
@@ -656,6 +574,9 @@ asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, u
     {
         // If this is opened with create mode AND it does not already exist we will report a create event
         eventType = CB_EVENT_TYPE_FILE_CREATE;
+    } else if (flags & (O_RDWR | O_WRONLY))
+    {
+        eventType = CB_EVENT_TYPE_FILE_WRITE;
     } else if (!(flags & (O_RDWR | O_WRONLY)))
     {
         // If the file is opened with read-only mode we will report an open event
@@ -663,27 +584,28 @@ asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, u
     }
 
 CATCH_DISABLED:
-    ret = ec_orig_sys_openat(dfd, filename, flags, mode);
+    fd = ec_orig_sys_openat(dfd, filename, flags, mode);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    if (!IS_ERR_VALUE(ret) && eventType)
+    if (!IS_ERR_VALUE(fd) && eventType)
     {
-        file_data_t *file_data = __ec_get_file_data_from_fd(&context, filename, ret);
+        struct file *file = fget(fd);
 
-        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, eventType);
-        __ec_put_file_data(&context, file_data);
+        TRY(!IS_ERR_OR_NULL(file));
+        __ec_do_file_event(&context, file, eventType);
+        fput(file);
     }
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return ret;
+    return fd;
 }
 
 asmlinkage long ec_sys_creat(const char __user *filename, umode_t mode)
 {
-    long ret;
-    bool report_create = false;
+    long fd;
+    CB_EVENT_TYPE       eventType = 0;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
@@ -691,24 +613,31 @@ asmlinkage long ec_sys_creat(const char __user *filename, umode_t mode)
 
     // If this is opened with create mode AND it does not already exist we
     //  will report an event
-    report_create = (!ec_file_exists(AT_FDCWD, filename));
+    if (!ec_file_exists(AT_FDCWD, filename))
+    {
+        eventType = CB_EVENT_TYPE_FILE_CREATE;
+    } else
+    {
+        eventType = CB_EVENT_TYPE_FILE_WRITE;
+    }
 
 CATCH_DISABLED:
-    ret = ec_orig_sys_creat(filename, mode);
+    fd = ec_orig_sys_creat(filename, mode);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    if (!IS_ERR_VALUE(ret) && report_create)
+    if (!IS_ERR_VALUE(fd) && eventType)
     {
-        file_data_t *file_data = __ec_get_file_data_from_fd(&context, filename, ret);
+        struct file *file = fget(fd);
 
-        __ec_do_generic_file_event(&context, file_data, INTENT_REPORT, CB_EVENT_TYPE_FILE_CREATE);
-        __ec_put_file_data(&context, file_data);
+        TRY(!IS_ERR_OR_NULL(file));
+        __ec_do_file_event(&context, file, eventType);
+        fput(file);
     }
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return ret;
+    return fd;
 }
 
 asmlinkage long ec_sys_unlink(const char __user *filename)

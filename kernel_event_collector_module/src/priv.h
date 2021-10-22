@@ -71,9 +71,7 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__NR_recvfrom                   0x0000000000000008
 #define CB__NR_recvmsg                    0x0000000000000010
 #define CB__NR_recvmmsg                   0x0000000000000020
-#define CB__NR_write                      0x0000000000000040
 #define CB__NR_delete_module              0x0000000000000080
-#define CB__NR_close                      0x0000000000000100
 #define CB__NR_creat                      0x0000000000000200
 #define CB__NR_open                       0x0000000000000400
 #define CB__NR_openat                     0x0000000000000800
@@ -98,6 +96,7 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__LSM_socket_post_create        0x0010000000000000
 #define CB__LSM_socket_sendmsg            0x0020000000000000
 #define CB__LSM_socket_recvmsg            0x0040000000000000
+#define CB__LSM_file_free_security        0x0080000000000000
 
 #define SAFE_STRING(PATH) (PATH) ? (PATH) : "<unknown>"
 
@@ -271,7 +270,6 @@ extern struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry)
 umode_t ec_get_mode_from_file(struct file const *file);
 extern struct super_block const *ec_get_sb_from_file(struct file const *file);
 extern bool ec_is_interesting_file(struct file *file);
-extern bool ec_is_excluded_file(uint64_t device, uint64_t inode);
 extern int ec_is_special_file(char *pathname, int len);
 extern bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
 

@@ -22,8 +22,6 @@ extern asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
                                 struct timespec __user *timeout);
 
 // For File hooks
-extern long (*ec_orig_sys_write)(unsigned int fd, const char __user *buf, size_t count);
-extern long (*ec_orig_sys_close)(unsigned int fd);
 extern long (*ec_orig_sys_open)(const char __user *filename, int flags, umode_t mode);
 extern long (*ec_orig_sys_openat)(int dfd, const char __user *filename, int flags, umode_t mode);
 extern long (*ec_orig_sys_creat)(const char __user *pathname, umode_t mode);
@@ -32,8 +30,6 @@ extern long (*ec_orig_sys_unlinkat)(int dfd, const char __user *pathname, int fl
 extern long (*ec_orig_sys_rename)(const char __user *oldname, const char __user *newname);
 extern long (*ec_orig_sys_renameat)(int old_dfd, const char __user *oldname, int new_dfd, const char __user *newname);
 
-extern asmlinkage long ec_sys_write(unsigned int fd, const char __user *buf, size_t count);
-extern asmlinkage long ec_sys_close(unsigned int fd);
 extern asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode);
 extern asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, umode_t mode);
 extern asmlinkage long ec_sys_creat(const char __user *pathname, umode_t mode);
@@ -55,8 +51,6 @@ void __ec_save_old_hooks(p_sys_call_table syscall_table)
     ec_orig_sys_recvfrom      = syscall_table[__NR_recvfrom];
     ec_orig_sys_recvmsg       = syscall_table[__NR_recvmsg];
     ec_orig_sys_recvmmsg      = syscall_table[__NR_recvmmsg];
-    ec_orig_sys_write         = syscall_table[__NR_write];
-    ec_orig_sys_close         = syscall_table[__NR_close];
     ec_orig_sys_creat         = syscall_table[__NR_creat];
     ec_orig_sys_open          = syscall_table[__NR_open];
     ec_orig_sys_openat        = syscall_table[__NR_openat];
@@ -80,8 +74,6 @@ bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
         if (enableHooks & CB__NR_recvfrom) syscall_table[__NR_recvfrom]  = ec_sys_recvfrom;
         if (enableHooks & CB__NR_recvmsg) syscall_table[__NR_recvmsg]   = ec_sys_recvmsg;
         if (enableHooks & CB__NR_recvmmsg) syscall_table[__NR_recvmmsg]  = ec_sys_recvmmsg;
-        if (enableHooks & CB__NR_write) syscall_table[__NR_write]     = ec_sys_write;
-        if (enableHooks & CB__NR_close) syscall_table[__NR_close]     = ec_sys_close;
         if (enableHooks & CB__NR_creat) syscall_table[__NR_creat]    = ec_sys_creat;
         if (enableHooks & CB__NR_open) syscall_table[__NR_open]      = ec_sys_open;
         if (enableHooks & CB__NR_openat) syscall_table[__NR_openat]    = ec_sys_openat;
@@ -105,24 +97,25 @@ bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 bool set_new_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
-    bool rval = false;
-
-    get_cpu();
-    GPF_DISABLE;
-
-    if (ec_set_page_state_rw(syscall_table, &page_rw_set))
-    {
-        if (enableHooks & CB__NR_write) syscall_table[__NR_ia32_write] = ec_sys_write;
-        ec_restore_page_state(syscall_table, page_rw_set);
-        rval = true;
-    } else {
-        TRACE(DL_ERROR, "Failed to make 32-bit call table RW!!\n");
-    }
-
-    GPF_ENABLE;
-    put_cpu();
-
-    return rval;
+    return true;
+//    bool rval = false;
+//
+//    get_cpu();
+//    GPF_DISABLE;
+//
+//    if (ec_set_page_state_rw(syscall_table, &page_rw_set))
+//    {
+//        // Set hooks here
+//        ec_restore_page_state(syscall_table, page_rw_set);
+//        rval = true;
+//    } else {
+//        TRACE(DL_ERROR, "Failed to make 32-bit call table RW!!\n");
+//    }
+//
+//    GPF_ENABLE;
+//    put_cpu();
+//
+//    return rval;
 }
 #endif
 
@@ -137,8 +130,6 @@ void __ec_restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
         if (enableHooks & CB__NR_recvfrom) syscall_table[__NR_recvfrom]  = ec_orig_sys_recvfrom;
         if (enableHooks & CB__NR_recvmsg) syscall_table[__NR_recvmsg]   = ec_orig_sys_recvmsg;
         if (enableHooks & CB__NR_recvmmsg) syscall_table[__NR_recvmmsg]  = ec_orig_sys_recvmmsg;
-        if (enableHooks & CB__NR_write) syscall_table[__NR_write]     = ec_orig_sys_write;
-        if (enableHooks & CB__NR_close) syscall_table[__NR_close]     = ec_orig_sys_close;
         if (enableHooks & CB__NR_delete_module) syscall_table[__NR_delete_module] = ec_orig_sys_delete_module;
         if (enableHooks & CB__NR_creat) syscall_table[__NR_creat]     = ec_orig_sys_creat;
         if (enableHooks & CB__NR_open) syscall_table[__NR_open]      = ec_orig_sys_open;
@@ -160,20 +151,20 @@ void __ec_restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 void restore_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
-    // Disable CPU write protect, and restore the call table
-    get_cpu();
-    GPF_DISABLE;
-
-    if (ec_set_page_state_rw(syscall_table, &page_rw_set))
-    {
-        if (enableHooks & CB__NR_write) syscall_table[__NR_ia32_write] = ec_orig_sys_write;
-        ec_restore_page_state(syscall_table, page_rw_set);
-    } else {
-        TRACE(DL_ERROR, "Failed to make 32-bit call table RW!!\n");
-    }
-
-    GPF_ENABLE;
-    put_cpu();
+//    // Disable CPU write protect, and restore the call table
+//    get_cpu();
+//    GPF_DISABLE;
+//
+//    if (ec_set_page_state_rw(syscall_table, &page_rw_set))
+//    {
+//        // Set hooks here
+//        ec_restore_page_state(syscall_table, page_rw_set);
+//    } else {
+//        TRACE(DL_ERROR, "Failed to make 32-bit call table RW!!\n");
+//    }
+//
+//    GPF_ENABLE;
+//    put_cpu();
 }
 #endif
 
@@ -221,7 +212,6 @@ bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks)
     if (enableHooks & CB__NR_recvfrom) changed |= syscall_table[__NR_recvfrom]  != ec_sys_recvfrom;
     if (enableHooks & CB__NR_recvmsg) changed |= syscall_table[__NR_recvmsg]   != ec_sys_recvmsg;
     if (enableHooks & CB__NR_recvmmsg) changed |= syscall_table[__NR_recvmmsg]  != ec_sys_recvmmsg;
-    if (enableHooks & CB__NR_write) changed |= syscall_table[__NR_write]     != ec_sys_write;
 
 CATCH_DEFAULT:
     return changed;
@@ -297,8 +287,6 @@ int getSyscall(uint64_t syscall, struct seq_file *m)
 int ec_get_sys_recvfrom(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvfrom, m); }
 int ec_get_sys_recvmsg(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmsg,  m); }
 int ec_get_sys_recvmmsg(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmmsg, m); }
-int ec_get_sys_write(struct seq_file *m, void *v) { return getSyscall(CB__NR_write,    m); }
-int ec_get_sys_close(struct seq_file *m, void *v) { return getSyscall(CB__NR_close,    m); }
 int ec_get_sys_delete_module(struct seq_file *m, void *v) { return getSyscall(CB__NR_delete_module,    m); }
 int ec_get_sys_creat(struct seq_file *m, void *v) { return getSyscall(CB__NR_creat,       m); }
 int ec_get_sys_open(struct seq_file *m, void *v) { return getSyscall(CB__NR_open,         m); }
@@ -323,19 +311,6 @@ ssize_t ec_set_sys_recvmsg(struct file *file, const char *buf, size_t size, loff
 ssize_t ec_set_sys_recvmmsg(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     setSyscall(buf, "recvmmsg", CB__NR_recvmmsg, __NR_recvmmsg, ec_sys_recvmmsg,       ec_orig_sys_recvmmsg, CB_RESOLVED(sys_call_table));
-    return size;
-}
-
-ssize_t ec_set_sys_write(struct file *file, const char *buf, size_t size, loff_t *ppos)
-{
-    setSyscall(buf, "write", CB__NR_write,   __NR_write,      ec_sys_write,            ec_orig_sys_write, CB_RESOLVED(sys_call_table));
-    //setSyscall( buf, "write", CB__NR_write,   __NR_ia32_write, ec_sys_write,            ec_orig_sys_write, CB_RESOLVED(ia32_sys_call_table) );
-    return size;
-}
-
-ssize_t ec_set_sys_close(struct file *file, const char *buf, size_t size, loff_t *ppos)
-{
-    setSyscall(buf, "close", CB__NR_close,   __NR_close,      ec_sys_close,            ec_orig_sys_close, CB_RESOLVED(sys_call_table));
     return size;
 }
 
