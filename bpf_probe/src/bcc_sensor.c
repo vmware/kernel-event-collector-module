@@ -50,6 +50,7 @@
 #include <net/inet_sock.h>
 
 #define MAX_FNAME 255L
+#define CONTAINER_ID_LEN 64
 
 // Create BPF_LRU if it does not exist.
 // Support for lru hashes begins with 4.10, so a regular hash table must be used on earlier
@@ -86,7 +87,7 @@
 static long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr)
 {
 	bpf_probe_read(dst, size, unsafe_ptr);
-	return MAX_FNAME;
+	return size;
 }
 #else
 #define FLAG_EXTENDED_ARG_BEHAVIOR
@@ -132,7 +133,8 @@ enum event_type {
 	EVENT_NET_CONNECT_WEB_PROXY,
 	EVENT_FILE_DELETE,
 	EVENT_FILE_CLOSE,
-	EVENT_FILE_RENAME
+	EVENT_FILE_RENAME,
+	EVENT_CONTAINER_CREATE
 };
 
 #define DNS_RESP_PORT_NUM 53
@@ -181,6 +183,12 @@ struct file_data {
 	u32 device;
 	u64 flags; // MMAP only
 	u64 prot;  // MMAP only
+};
+
+struct container_data {
+	struct data_header header;
+
+	char container_id[CONTAINER_ID_LEN + 1];
 };
 
 struct path_data {
@@ -436,6 +444,7 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
 		header->ppid = *ppid;
 	}
 #endif
+
 }
 
 // Assumed current context is what is valid!
@@ -1584,6 +1593,57 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 
 out:
 	currsock3.delete(&id);
+	return 0;
+}
+
+int on_cgroup_attach_task(struct pt_regs *ctx, struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup)
+{
+	struct kernfs_node *node = NULL;
+
+	bpf_probe_read(&node, sizeof(node), &(dst_cgrp->kn));
+	if (node == NULL)
+		return 0;
+
+	const char * cgroup_dirname = NULL;
+	bpf_probe_read(&cgroup_dirname, sizeof(cgroup_dirname), &(node->name));
+
+	struct container_data data = {};
+	__init_header(EVENT_CONTAINER_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+
+
+	// Check for common container prefixes, and then try to read the full-length CONTAINER_ID
+	unsigned int offset = 0;
+	if (cb_bpf_probe_read_str(&data.container_id, 8, cgroup_dirname) == 8)
+	{
+
+		if (data.container_id[0] == 'd' &&
+			data.container_id[1] == 'o' &&
+			data.container_id[2] == 'c' &&
+			data.container_id[3] == 'k' &&
+			data.container_id[4] == 'e' &&
+			data.container_id[5] == 'r' &&
+			data.container_id[6] == '-')
+		{
+			offset = 7;
+		}
+
+		if (data.container_id[0] == 'l' &&
+			data.container_id[1] == 'i' &&
+			data.container_id[2] == 'b' &&
+			data.container_id[3] == 'p' &&
+			data.container_id[4] == 'o' &&
+			data.container_id[5] == 'd' &&
+			data.container_id[6] == '-')
+		{
+			offset = 7;
+		}
+	}
+
+	if (cb_bpf_probe_read_str(&data.container_id, CONTAINER_ID_LEN + 1, cgroup_dirname + offset) == CONTAINER_ID_LEN + 1)
+	{
+		send_event(ctx, &data, sizeof(data));
+	}
+
 	return 0;
 }
 

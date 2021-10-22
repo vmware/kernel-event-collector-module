@@ -9,6 +9,7 @@
 
 
 #define MAX_FNAME 255
+#define CONTAINER_ID_LEN 64
 
 namespace cb_endpoint {
 namespace bpf_probe {
@@ -46,7 +47,8 @@ namespace bpf_probe {
         EVENT_NET_CONNECT_WEB_PROXY,
         EVENT_FILE_DELETE,
         EVENT_FILE_CLOSE,
-        EVENT_FILE_RENAME
+        EVENT_FILE_RENAME,
+        EVENT_CONTAINER_CREATE
     };
 
     struct data_header {
@@ -79,6 +81,12 @@ namespace bpf_probe {
         uint32_t device;
         uint64_t flags; // MMAP only
         uint64_t prot;  // MMAP only
+    };
+
+    struct container_data {
+        struct data_header header;
+
+        char container_id[CONTAINER_ID_LEN + 1];
     };
 
     struct path_data {
