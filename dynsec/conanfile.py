@@ -13,6 +13,10 @@ class DynSec(CbConanFile):
     version  = "PROJECT_VERSION"
     settings = "os", "arch"
     generators = "cmake"
+    options = {
+        'module_name': ['dynsec']
+    }
+    default_options = "module_name=dynsec"
 
     kernelDeps = [
         "KERNEL_RHEL_6_6_VERSION", "KERNEL_RHEL_6_7_VERSION",
