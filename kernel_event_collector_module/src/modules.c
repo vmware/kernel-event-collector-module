@@ -49,7 +49,6 @@ int ec_lsm_file_mmap(struct file *file,
     // Skip if excluded
     // TODO: add device to test
     ec_get_devinfo_from_file(file, &device, &inode);
-    TRY(!ec_is_excluded_file(device, inode));
 
     // TODO: Add logic here to kill a process based on banned inode.
     //       There was logic here that made the check, but did not actually kill

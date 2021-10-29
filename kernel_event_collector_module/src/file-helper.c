@@ -168,53 +168,23 @@ void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_
 
 void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     struct super_block const *sb = NULL;
-#else
-     int           ret = 0;
-     struct kstat  ks;
-#endif
 
     CANCEL_VOID(file && device && inode);
 
     *device = 0;
     *inode  = 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     if (file->f_inode)
     {
-        sb = file->f_inode->i_sb;
         *inode = file->f_inode->i_ino;
     }
-    if (!sb)
-    {
-        sb = file->f_path.dentry->d_inode->i_sb;
-        if (!sb)
-        {
-            // This might not exactly be the sb we are looking for
-            sb = file->f_path.dentry->d_sb;
-        }
-    }
+
+    sb = ec_get_sb_from_file(file);
     if (sb)
     {
         *device = new_encode_dev(sb->s_dev);
     }
-
-#else
-    CANCEL_VOID(!ec_may_skip_unsafe_vfs_calls(file));
-
-    // Note, on some kernels this will call the security callback inode_getattr
-    //  At this time we are not hooking that call.  But if we do in the future,
-    //  it may be an issue.
-    ret = VFS_GETATTR(&file->f_path, &ks);
-
-    if (ret == 0)
-    {
-        // Encode the device the same way that it is encoded for the `stat` call
-        *device = new_encode_dev(ks.dev);
-        *inode  = ks.ino;
-    }
-#endif
 }
 
 umode_t ec_get_mode_from_file(struct file const *file)

@@ -36,7 +36,7 @@ PCB_EVENT ec_factory_alloc_event(
         TRACE(trace_level, "%s%s %s of %d by %d (reported as %d:%ld by %d)",
               type_msg,
               (status_msg ? status_msg : ""),
-              (ec_process_path(process_handle) ? ec_process_path(process_handle) : "<unknown>"),
+              SAFE_STRING(ec_process_path(process_handle)),
               ec_process_posix_identity(process_handle)->posix_details.pid,
               ec_process_posix_identity(process_handle)->posix_parent_details.pid,
               ec_process_exec_identity(process_handle)->exec_details.pid,
@@ -93,7 +93,7 @@ void ec_event_send_last_exit(PCB_EVENT        event,
     CANCEL_VOID(event);
 
     TRACE(DL_PROCESS, "EXIT <SEND-LAST> %s of %d by %d (reported as %d:%ld by %d)",
-           (event->procInfo.path ? event->procInfo.path : "<unknown>"),
+           SAFE_STRING(event->procInfo.path),
            event->procInfo.all_process_details.array[FORK].pid,
            event->procInfo.all_process_details.array[FORK_PARENT].pid,
            event->procInfo.all_process_details.array[EXEC].pid,
@@ -144,7 +144,7 @@ void ec_event_send_exit(
     {
         TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
               status_msg,
-              (ec_process_path(process_handle) ? ec_process_path(process_handle) : "<unknown>"),
+              SAFE_STRING(ec_process_path(process_handle)),
               ec_process_posix_identity(process_handle)->posix_details.pid,
               ec_process_posix_identity(process_handle)->posix_parent_details.pid,
               ec_process_exec_identity(process_handle)->exec_details.pid,

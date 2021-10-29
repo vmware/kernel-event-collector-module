@@ -42,11 +42,11 @@ extern int ec_lsm_file_mmap(struct file *file,
 extern void ec_lsm_inet_conn_established(struct sock *sk, struct sk_buff *skb);
 extern int ec_lsm_socket_connect(struct socket *sock, struct sockaddr *addr, int addrlen);
 extern int ec_lsm_inet_conn_request(struct sock *sk, struct sk_buff *skb, struct request_sock *req);
-extern int ec_lsm_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags);
 extern int ec_lsm_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size);
 extern int ec_lsm_socket_recvmsg(struct socket *sock, struct msghdr *msg, int size, int flags);
 extern int ec_lsm_socket_post_create(struct socket *sock, int family, int type, int protocol, int kern);
 extern int ec_lsm_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen);
+extern void ec_lsm_file_free_security(struct file *file);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
 static unsigned int cblsm_hooks_count;
@@ -105,6 +105,7 @@ bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
     CB_LSM_SETUP_HOOK(socket_post_create);
     CB_LSM_SETUP_HOOK(socket_sendmsg);
     CB_LSM_SETUP_HOOK(socket_recvmsg);  // incoming UDP/DNS - where we get the process context
+    CB_LSM_SETUP_HOOK(file_free_security);
 #undef CB_LSM_SETUP_HOOK
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
@@ -151,6 +152,7 @@ bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
     if (enableHooks & CB__LSM_socket_post_create) changed |= secops->socket_post_create != ec_lsm_socket_post_create;
     if (enableHooks & CB__LSM_socket_sendmsg) changed |= secops->socket_sendmsg != ec_lsm_socket_sendmsg;
     if (enableHooks & CB__LSM_socket_recvmsg) changed |= secops->socket_recvmsg != ec_lsm_socket_recvmsg;
+    if (enableHooks & CB__LSM_file_free_security) changed |= secops->file_free_security != ec_lsm_file_free_security;
 
     return changed;
 }
@@ -210,6 +212,7 @@ int ec_get_lsm_inet_conn_request(struct seq_file *m, void *v)    { return __ec_g
 int ec_get_lsm_socket_post_create(struct seq_file *m, void *v)   { return __ec_getHook(CB__LSM_socket_post_create, m); }
 int ec_get_lsm_socket_sendmsg(struct seq_file *m, void *v)       { return __ec_getHook(CB__LSM_socket_sendmsg, m); }
 int ec_get_lsm_socket_recvmsg(struct seq_file *m, void *v)       { return __ec_getHook(CB__LSM_socket_recvmsg, m); }
+int ec_get_lsm_file_free_security(struct seq_file *m, void *v)   { return __ec_getHook(CB__LSM_file_free_security, m); }
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -234,6 +237,7 @@ LSM_HOOK(inet_conn_request, "inet_conn_request",    ec_lsm_inet_conn_request)
 LSM_HOOK(socket_post_create, "socket_post_create",   ec_lsm_socket_post_create)
 LSM_HOOK(socket_sendmsg, "socket_sendmsg",       ec_lsm_socket_sendmsg)
 LSM_HOOK(socket_recvmsg, "socket_recvmsg",       ec_lsm_socket_recvmsg)
+LSM_HOOK(file_free_security, "file_free_security", ec_lsm_file_free_security)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 LSM_HOOK(mmap_file, "mmap_file",            ec_lsm_mmap_file)

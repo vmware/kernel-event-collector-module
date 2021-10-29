@@ -536,7 +536,7 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
     TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
     TRY_STEP(NET_IS,    ec_file_helper_init(context));
     TRY_STEP(NET_IS,    ec_task_initialize(context));
-    TRY_STEP(TASK,      ec_file_process_tracking_init(context));
+    TRY_STEP(TASK,      ec_file_tracking_init(context));
     TRY_STEP(FILE_PROC, ec_stats_proc_initialize(context));
     TRY_STEP(STALL,     ec_stall_events_initialize(context));
 
@@ -544,7 +544,7 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 CATCH_STALL:
     ec_stats_proc_shutdown(context);
 CATCH_FILE_PROC:
-    ec_file_process_tracking_shutdown(context);
+    ec_file_tracking_shutdown(context);
 CATCH_TASK:
     ec_task_shutdown(context);
 CATCH_NET_IS:
@@ -582,7 +582,7 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
     ec_network_tracking_shutdown(context);
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
-    ec_file_process_tracking_shutdown(context);
+    ec_file_tracking_shutdown(context);
     ec_path_buffers_shutdown(context);
     ec_proc_shutdown(context);
 }
@@ -614,7 +614,7 @@ bool ec_disable_peer_modules(ProcessContext *context)
         {
             TRACE(DL_ERROR, "Request to disable module %s, failed with error: %s",
                   elem->module_name,
-                  err_str?err_str:"unknown");
+                  SAFE_STRING(err_str));
             goto Exit;
         }
     }
