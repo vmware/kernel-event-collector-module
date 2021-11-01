@@ -30,6 +30,7 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__hashtbl_refcount_double_del(context));
     RUN_TEST(test__hashtbl_refcount(context));
     RUN_TEST(test__hashtbl_add_duplicate(context));
+    RUN_TEST(test__hashtbl_lru_lookup(context));
 
     RUN_TEST(test__proc_track_report_double_exit(context));
 

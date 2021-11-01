@@ -333,10 +333,12 @@ Exit:
     return;
 }
 
+#define LRU_REORDERLIMIT 10
 
 HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u32 hash, const void *key)
 {
     HashTableNode *tableNode = NULL;
+    HashTableNode *prevNode = NULL;
     struct hlist_node *hlistTmp = NULL;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     struct hlist_node *hlistNode = NULL;
@@ -349,8 +351,27 @@ HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u
         if (hash == tableNode->hash &&
             memcmp(key, __ec_get_key_ptr(hashTblp, __ec_get_datap(hashTblp, tableNode)), hashTblp->key_len) == 0)
         {
+            // 1. The cache entry's activity counter is incremented
+            // 2. The previous (higher ranking) entry's activity counter is decremented
+            // 3. If the difference between the two activity counters is geater than
+            //    LRU_REORDERLIMIT the two entries are swapped
+            tableNode->activity += 1;
+            if (prevNode)
+            {
+                if (prevNode->activity > 0)
+                {
+                    prevNode->activity -= 1;
+                }
+                if (tableNode->activity > prevNode->activity &&
+                    tableNode->activity - prevNode->activity > LRU_REORDERLIMIT)
+                {
+                    hlist_del(&tableNode->link);
+                    hlist_add_before(&tableNode->link, &prevNode->link);
+                }
+            }
             return tableNode;
         }
+        prevNode = tableNode;
     }
 
     return NULL;
@@ -596,6 +617,7 @@ uint64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context)
 void *ec_hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
 {
     void *datap;
+    HashTableNode *nodep;
 
     CANCEL(hashTblp != NULL, NULL);
     CANCEL(atomic64_read(&(hashTblp->tableShutdown)) != 1, NULL);
@@ -603,7 +625,9 @@ void *ec_hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
     datap = ec_mem_cache_alloc(&hashTblp->hash_cache, context);
     CANCEL(datap, NULL);
 
-    INIT_HLIST_NODE(&__ec_get_nodep(hashTblp, datap)->link);
+    nodep = __ec_get_nodep(hashTblp, datap);
+    nodep->activity = 0;
+    INIT_HLIST_NODE(&nodep->link);
     return datap;
 }
 

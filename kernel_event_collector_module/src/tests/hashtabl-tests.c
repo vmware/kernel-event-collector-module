@@ -276,3 +276,42 @@ CATCH_DEFAULT:
     }
     return passed;
 }
+
+bool __init test__hashtbl_lru_lookup(ProcessContext *context)
+{
+    bool passed = false;
+    Entry *tdata   = NULL;
+    Entry *tdata2  = NULL;
+    HashTbl *table = init_hashtbl(context, HASHTBL_DISABLE_REF_COUNT, NULL);
+
+    ASSERT_TRY(table);
+
+    tdata = (Entry *)ec_hashtbl_alloc_generic(table, context);
+    tdata2 = (Entry *)ec_hashtbl_alloc_generic(table, context);
+    ASSERT_TRY(tdata);
+    ASSERT_TRY(tdata2);
+
+    tdata->key.id = 1;
+    tdata2->key.id = 1;
+
+    ASSERT_TRY(ec_hashtbl_add_generic(table, tdata, context) == 0);
+    ASSERT_TRY(ec_hashtbl_add_generic_safe(table, tdata2, context) == -EEXIST);
+    passed = true;
+
+CATCH_DEFAULT:
+    if (table)
+    {
+        if(tdata)
+        {
+            ec_hashtbl_del_generic(table, tdata, context);
+            ec_hashtbl_free_generic(table, tdata, context);
+        }
+        if(tdata2)
+        {
+            ec_hashtbl_del_by_key_generic(table, &tdata2->key, context);
+            ec_hashtbl_free_generic(table, tdata2, context);
+        }
+        ec_hashtbl_shutdown_generic(table, context);
+    }
+    return passed;
+}

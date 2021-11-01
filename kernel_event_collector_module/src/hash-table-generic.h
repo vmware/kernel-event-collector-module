@@ -59,6 +59,7 @@ typedef struct hashtbl {
 typedef struct hash_table_node {
     struct hlist_node link;
     u32 hash;
+    u32 activity;
 } HashTableNode;
 
 void ec_hashtbl_generic_init(ProcessContext *context);
