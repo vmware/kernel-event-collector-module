@@ -3,9 +3,15 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "priv.h"
+#include "cb-spinlock.h"
+#include "event-factory.h"
 #include "net-helper.h"
+#include "net-tracking.h"
+#include "process-tracking.h"
 
+#include <linux/fdtable.h>
 #include <linux/inet.h>
+#include <linux/inetdevice.h>
 #include <net/ip.h>
 
 #define IPV6_SCOPE_DELIMITER '%'
@@ -169,10 +175,8 @@ void ec_print_address(
 
     ec_ntop(remoteAddr, raddr_str, sizeof(raddr_str), &rport);
     ec_ntop(localAddr,  laddr_str, sizeof(laddr_str), &lport);
-    TRACE(DL_NET, "%s proc=%s pid=%d %s-%s laddr=%s:%u raddr=%s:%u",
+    TRACE(DL_NET, "%s %s-%s laddr=%s:%u raddr=%s:%u",
        (msg ? msg : ""),
-       current->comm,
-       current->pid,
        PROTOCOL_STR(sk->sk_protocol),
        TYPE_STR(sk->sk_type),
        laddr_str, ntohs(lport), raddr_str, ntohs(rport));
@@ -277,3 +281,57 @@ CATCH_DEFAULT:
     return false;
 }
 
+typedef struct socket_iterate_data {
+    struct task_struct *task;
+    ProcessHandle *handle;
+    ProcessContext *context;
+} SocketIterateData;
+
+int __ec_report_task_socket(const void *p, struct file *file, unsigned int fd)
+{
+    SocketIterateData const *data = p;
+    int err;
+    struct socket *socket = sock_from_file(file, &err);
+    struct sock   *sk;
+    struct inet_sock *inetsk;
+    CB_SOCK_ADDR  localAddr;
+    CB_SOCK_ADDR  remoteAddr;
+
+    TRY(socket && socket->state == SS_CONNECTED);
+
+    sk = socket->sk;
+
+    TRY(CHECK_SK_FAMILY(sk) && CHECK_SK_PROTO_TCP(sk));
+
+    inetsk = inet_sk(sk);
+
+    TRACE(DL_NET, "%d: %08X:%04X %08X:%04X %08X:%04X", ec_process_tracking_exec_pid(data->handle, data->context),
+     ntohl(inetsk->inet_rcv_saddr), ntohs(inetsk->inet_sport),
+          ntohl(inetsk->inet_saddr), ntohs(inetsk->inet_num),
+              ntohl(inetsk->inet_daddr), ntohs(inetsk->inet_dport));
+
+    ec_getsockname(sk, &localAddr);
+    ec_getpeername(sk, &remoteAddr);
+
+    //We can't use net tracking because we don't know the direction this socket was created in
+
+    ec_event_send_net(data->handle,
+                      "DISCOVER",
+                      CB_EVENT_TYPE_NET_CONNECT_PRE,
+                      &localAddr,
+                      &remoteAddr,
+                      sk->sk_protocol,
+                      sk,
+                      data->context);
+
+CATCH_DEFAULT:
+    return 0;
+}
+
+void ec_enumerate_task_sockets(struct task_struct *task, ProcessHandle *handle, ProcessContext *context)
+{
+    int n = 0;
+    SocketIterateData data = {task, handle, context};
+
+    iterate_fd(task->files, n, __ec_report_task_socket, &data);
+}

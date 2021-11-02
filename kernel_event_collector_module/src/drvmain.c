@@ -13,6 +13,7 @@
 #include "file-process-tracking.h"
 #include "cb-isolation.h"
 #include "mem-cache.h"
+#include "net-helper.h"
 #include "path-buffers.h"
 #include "cb-spinlock.h"
 #include "cb-banning.h"

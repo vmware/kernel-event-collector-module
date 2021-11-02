@@ -3,6 +3,7 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "task-helper.h"
+#include "net-helper.h"
 #include "priv.h"
 #include "process-tracking.h"
 #include "path-buffers.h"
@@ -482,6 +483,8 @@ void __ec_add_tracking_for_task(
                 FAKE_START,
                 context);
     }
+
+    ec_enumerate_task_sockets(task, handle, context);
 
     ec_process_tracking_put_handle(handle, context);
 }
