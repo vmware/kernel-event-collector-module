@@ -7,7 +7,8 @@
 #include "priv.h"
 #include "findsyms.h"
 #include "process-tracking.h"
-#include "network-tracking.h"
+#include "net-tracking.h"
+#include "net-hooks.h"
 #include "file-process-tracking.h"
 #include "cb-isolation.h"
 #include "mem-cache.h"
@@ -531,8 +532,9 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
     TRY_STEP(PROC_DIR,  ec_user_comm_initialize(context));
     TRY_STEP(USER_COMM, ec_logger_initialize(context));
     TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
-    TRY_STEP(PROC,      ec_network_tracking_initialize(context));
-    TRY_STEP(NET_TR,    ec_banning_initialize(context));
+    TRY_STEP(PROC,      ec_net_tracking_initialize(context));
+    TRY_STEP(NET_TR,    ec_network_hooks_initialize(context));
+    TRY_STEP(NET_HOOK,  ec_banning_initialize(context));
     TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
     TRY_STEP(NET_IS,    ec_file_helper_init(context));
     TRY_STEP(NET_IS,    ec_task_initialize(context));
@@ -552,7 +554,9 @@ CATCH_NET_IS:
 CATCH_BAN:
     ec_banning_shutdown(context);
 CATCH_NET_TR:
-    ec_network_tracking_shutdown(context);
+    ec_net_tracking_shutdown(context);
+CATCH_NET_HOOK:
+    ec_network_hooks_shutdown(context);
 CATCH_PROC:
     ec_process_tracking_shutdown(context);
 CATCH_LOGGER:
@@ -579,7 +583,7 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
     ec_DestroyNetworkIsolation(context);
     ec_banning_shutdown(context);
     ec_user_comm_shutdown(context);
-    ec_network_tracking_shutdown(context);
+    ec_net_tracking_shutdown(context);
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
     ec_file_tracking_shutdown(context);

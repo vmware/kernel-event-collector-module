@@ -91,6 +91,7 @@ set(SOURCE_FILES drvmain.c
         cb-spinlock.c
         net-helper.c
         net-hooks.c
+        net-tracking.c
         process-hooks.c
         task-helper.c
         fops-comm.c
