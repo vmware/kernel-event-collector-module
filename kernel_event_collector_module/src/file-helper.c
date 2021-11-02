@@ -35,7 +35,7 @@ bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen
 
     // If we failed to resolve the symbol, i.e. we're on a 2.6.32 kernel or it just doesn't resolve,
     // default to the d_path option
-    if (CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
+    if (current->nsproxy && CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
     {
         (*pathname) = ec_dentry_to_path(path->dentry, buffer, buflen);
     } else
