@@ -66,6 +66,7 @@ static const special_file_t special_files[] = {
     ENABLE_SPECIAL_FILE_SETUP("/srv/bit9/data"),
     ENABLE_SPECIAL_FILE_SETUP("/sys"),
     ENABLE_SPECIAL_FILE_SETUP("/proc"),
+    ENABLE_SPECIAL_FILE_SETUP("/var/opt/carbonblack"),
     DISABLE_SPECIAL_FILE_SETUP(""),
     DISABLE_SPECIAL_FILE_SETUP(""),
     DISABLE_SPECIAL_FILE_SETUP(""),
