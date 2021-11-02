@@ -969,6 +969,10 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
     }
 #endif
 
+    if (!file) {
+        goto out;
+    }
+
     if (!(prot & PROT_EXEC)) {
         goto out;
     }

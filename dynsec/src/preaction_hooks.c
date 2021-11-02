@@ -275,8 +275,7 @@ DEF_DYNSEC_SYS(delete_module, const char __user *name_user, unsigned int flags)
     }
     name_kernel[MODULE_NAME_LEN - 1] = 0;
 
-    // THIS_MODULE->name should work instead of CB_APP_MODULE_NAME
-    if (strncmp(name_kernel, CB_APP_MODULE_NAME, MODULE_NAME_LEN) != 0) {
+    if (strncmp(name_kernel, THIS_MODULE->name, MODULE_NAME_LEN) != 0) {
         goto out;
     }
 
