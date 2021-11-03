@@ -354,60 +354,15 @@ HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u
     return NULL;
 }
 
-int ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
+int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessContext *context)
 {
     u32 hash;
     uint64_t bucket_indx;
     HashTableBkt *bucketp = NULL;
     HashTableNode *nodep;
     char *key_str;
-
-    if (!hashTblp || !datap)
-    {
-        return -EINVAL;
-    }
-
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return -1;
-    }
-
-    hash = ec_hashtbl_hash_key(hashTblp, __ec_get_key_ptr(hashTblp, datap));
-    bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
-    bucketp = &(hashTblp->tablePtr[bucket_indx]);
-
-    nodep = __ec_get_nodep(hashTblp, datap);
-    nodep->hash = hash;
-
-    if (debug)
-    {
-        key_str = __ec_key_in_hex(context, __ec_get_key_ptr(hashTblp, datap), hashTblp->key_len);
-        HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        ec_mem_cache_free_generic(key_str);
-    }
-
-    ec_hashtbl_bkt_write_lock(bucketp, context);
-    hlist_add_head(&nodep->link, &bucketp->head);
-    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-    {
-        atomic64_inc(__ec_get_refcountp(hashTblp, datap));
-    }
-    atomic64_inc(&(hashTblp->tableInstance));
-    ec_hashtbl_bkt_write_unlock(bucketp, context);
-
-    return 0;
-}
-
-int ec_hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *context)
-{
-    u32 hash;
-    uint64_t bucket_indx;
-    HashTableBkt *bucketp = NULL;
-    HashTableNode *nodep = NULL;
-    HashTableNode *old_node;
-    char *key_str;
     void *key;
-    int ret;
+    int ret = 0;
 
     if (!hashTblp || !datap)
     {
@@ -434,23 +389,35 @@ int ec_hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *
         ec_mem_cache_free_generic(key_str);
     }
 
-    ret = -EEXIST;
-
     ec_hashtbl_bkt_write_lock(bucketp, context);
-    old_node = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
-    if (!old_node)
+    if (forceUnique)
     {
-        ret = 0;
-        hlist_add_head(&nodep->link, &bucketp->head);
-        if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-        {
-            atomic64_inc(__ec_get_refcountp(hashTblp, datap));
-        }
-        atomic64_inc(&(hashTblp->tableInstance));
+        HashTableNode *old_node = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
+
+        TRY_DO(!old_node, { ret = -EEXIST; });
     }
+
+    hlist_add_head(&nodep->link, &bucketp->head);
+    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
+    {
+        atomic64_inc(__ec_get_refcountp(hashTblp, datap));
+    }
+    atomic64_inc(&(hashTblp->tableInstance));
+
+CATCH_DEFAULT:
     ec_hashtbl_bkt_write_unlock(bucketp, context);
 
     return ret;
+}
+
+int ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, ProcessContext *context)
+{
+    return __ec_hashtbl_add_generic(hashTblp, datap, false, context);
+}
+
+int ec_hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *context)
+{
+    return __ec_hashtbl_add_generic(hashTblp, datap, true, context);
 }
 
 void *ec_hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *context)
