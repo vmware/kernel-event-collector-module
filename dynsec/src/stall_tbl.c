@@ -115,7 +115,6 @@ struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space)
     uint16_t payload;
 
     if (!stall_tbl_enabled(tbl)) {
-        pr_info("%s:%d", __func__, __LINE__);
         return NULL;
     }
 

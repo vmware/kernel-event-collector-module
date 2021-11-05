@@ -48,6 +48,7 @@
 // Event found there was a previous intent event via intent_req_id
 // where the two event's data can be combined by client
 #define DYNSEC_REPORT_INTENT_FOUND  0x0200
+#define DYNSEC_REPORT_LAST_TASK     0x0400
 
 
 // Response Type For Stalls

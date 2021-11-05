@@ -325,9 +325,12 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
                 return -EINVAL;
             }
 
-            mutex_lock(&dump_all_lock);
-            ret = dynsec_task_dump_all(hdr.opts, hdr.pid);
-            mutex_unlock(&dump_all_lock);
+            // Let userspace explicitly retry to prevent over-use.
+            ret = -EAGAIN;
+            if (mutex_trylock(&dump_all_lock)) {
+                ret = dynsec_task_dump_all(hdr.opts, hdr.pid);
+                mutex_unlock(&dump_all_lock);
+            }
         }
         break;
 

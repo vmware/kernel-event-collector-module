@@ -1070,9 +1070,11 @@ out:
 
 int dynsec_task_dump_all(uint16_t opts, pid_t start_pid)
 {
-    pid_t pid = start_pid;
     struct dynsec_event *dynsec_event;
-    int count = 0;
+    pid_t pid = start_pid;
+    pid_t last_sent = 0;
+    int ret = 0;
+    int err = 0;
 
     if (!may_iterate_tasks()) {
         return -EINVAL;
@@ -1085,29 +1087,53 @@ int dynsec_task_dump_all(uint16_t opts, pid_t start_pid)
             break;
         }
         pid += 1;
-        count += 1;
 
-        // We could dump kthreads but would want to provide task->comm
+        // We could dump kthreads but perhaps as an explicit option
         if (task->flags & PF_KTHREAD) {
             put_task_struct(task);
             continue;
         }
 
         dynsec_event = fill_in_dynsec_task_dump(task, GFP_KERNEL);
+        last_sent = task->pid;
         put_task_struct(task);
         if (!dynsec_event) {
+            err = -ENOMEM;
             break;
         }
         if (!enqueue_nonstall_event(stall_tbl, dynsec_event)) {
+            err = -EINVAL;
             break;
         }
 
         // Could be a lot of iterating so sleep when asked
         cond_resched();
     }
-    // pr_info("%s: count:%d\n", __func__, count);
 
-    return 0;
+    if (err) {
+        ret = err;
+        goto out;
+    }
+    // Check if we found a task
+    if (!last_sent) {
+        ret = -ENOENT;
+        goto out;
+    }
+
+    // Dummy Event.
+    dynsec_event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_TASK_DUMP, 0,
+                        DYNSEC_REPORT_AUDIT | DYNSEC_REPORT_LAST_TASK,
+                        GFP_KERNEL);
+    if (!dynsec_event) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    if (!enqueue_nonstall_event(stall_tbl, dynsec_event)) {
+        ret = -EINVAL;
+    }
+
+out:
+    return ret;
 }
 
 ssize_t dynsec_task_dump_one(uint16_t opts, pid_t start_pid,
@@ -1130,7 +1156,7 @@ ssize_t dynsec_task_dump_one(uint16_t opts, pid_t start_pid,
         }
         pid += 1;
 
-        // We could dump kthreads but would want to provide task->comm
+        // We could dump kthreads but perhaps as an explicit option
         if (task->flags & PF_KTHREAD) {
             put_task_struct(task);
             continue;
