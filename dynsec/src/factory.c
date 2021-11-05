@@ -56,6 +56,7 @@ static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_e
         EVENT->kmsg.hdr.req_id = EVENT->event.req_id;           \
         EVENT->kmsg.hdr.event_type = EVENT->event.event_type;   \
         EVENT->kmsg.hdr.tid = EVENT->event.tid;                 \
+        EVENT->kmsg.hdr.payload = sizeof(EVENT)->kmsg;          \
     } while (0)
 
 #define prepare_hdr_data(subevent) do { \
@@ -1766,8 +1767,6 @@ bool fill_in_bprm_set_creds(struct dynsec_event *dynsec_event,
     }
 
     exec = dynsec_event_to_exec(dynsec_event);
-
-    exec->kmsg.hdr.payload = sizeof(exec->kmsg);
     fill_in_task_ctx(&exec->kmsg.msg.task);
     fill_in_cred(&exec->kmsg.msg.new_cred, bprm->cred);
     fill_in_file_data(&exec->kmsg.msg.file, &bprm->file->f_path);
@@ -1795,7 +1794,6 @@ bool fill_in_inode_unlink(struct dynsec_event *dynsec_event,
     }
     unlink = dynsec_event_to_unlink(dynsec_event);
 
-    unlink->kmsg.hdr.payload = sizeof(unlink->kmsg);
     fill_in_task_ctx(&unlink->kmsg.msg.task);
 
     fill_in_dentry_data(&unlink->kmsg.msg.file, dentry);
@@ -1825,7 +1823,6 @@ bool fill_in_inode_rename(struct dynsec_event *dynsec_event,
     }
     rename = dynsec_event_to_rename(dynsec_event);
 
-    rename->kmsg.hdr.payload = sizeof(rename->kmsg);
     fill_in_task_ctx(&rename->kmsg.msg.task);
 
     fill_in_dentry_data(&rename->kmsg.msg.old_file, old_dentry);
@@ -1864,8 +1861,6 @@ bool fill_in_inode_setattr(struct dynsec_event *dynsec_event,
         return false;
     }
     setattr = dynsec_event_to_setattr(dynsec_event);
-
-    setattr->kmsg.hdr.payload = sizeof(setattr->kmsg);
 
     fill_in_task_ctx(&setattr->kmsg.msg.task);
 
@@ -1947,7 +1942,6 @@ bool fill_in_inode_create(struct dynsec_event *dynsec_event,
 
     create = dynsec_event_to_create(dynsec_event);
 
-    create->kmsg.hdr.payload = sizeof(create->kmsg);
     fill_in_task_ctx(&create->kmsg.msg.task);
 
     fill_in_dentry_data(&create->kmsg.msg.file, dentry);
@@ -1999,7 +1993,6 @@ bool fill_in_inode_link(struct dynsec_event *dynsec_event,
     }
 
     link = dynsec_event_to_link(dynsec_event);
-    link->kmsg.hdr.payload = sizeof(link->kmsg);
 
     fill_in_task_ctx(&link->kmsg.msg.task);
 
@@ -2041,7 +2034,6 @@ bool fill_in_inode_symlink(struct dynsec_event *dynsec_event,
     }
 
     symlink = dynsec_event_to_symlink(dynsec_event);
-    symlink->kmsg.hdr.payload = sizeof(symlink->kmsg);
 
     fill_in_task_ctx(&symlink->kmsg.msg.task);
 
@@ -2083,7 +2075,6 @@ bool fill_in_file_open(struct dynsec_event *dynsec_event, struct file *file,
     }
 
     open = dynsec_event_to_file(dynsec_event);
-    open->kmsg.hdr.payload = sizeof(open->kmsg);
 
     fill_in_task_ctx(&open->kmsg.msg.task);
     open->kmsg.msg.f_mode = file->f_mode;
@@ -2111,7 +2102,6 @@ bool fill_in_file_free(struct dynsec_event *dynsec_event, struct file *file,
     }
 
     close = dynsec_event_to_file(dynsec_event);
-    close->kmsg.hdr.payload = sizeof(close->kmsg);
 
     fill_in_task_ctx(&close->kmsg.msg.task);
     close->kmsg.msg.f_mode = file->f_mode;
@@ -2140,7 +2130,6 @@ bool fill_in_file_mmap(struct dynsec_event *dynsec_event, struct file *file,
     }
 
     mmap = dynsec_event_to_mmap(dynsec_event);
-    mmap->kmsg.hdr.payload = sizeof(mmap->kmsg);
 
     fill_in_task_ctx(&mmap->kmsg.msg.task);
 
@@ -2180,8 +2169,6 @@ bool fill_task_free(struct dynsec_event *dynsec_event,
     }
     exit = dynsec_event_to_task(dynsec_event);
 
-    exit->kmsg.hdr.payload = sizeof(exit->kmsg);
-
     __fill_in_task_ctx(task, true, &exit->kmsg.msg.task);
 
     return true;
@@ -2202,7 +2189,6 @@ bool fill_in_clone(struct dynsec_event *dynsec_event,
         return false;
     }
     clone = dynsec_event_to_task(dynsec_event);
-    clone->kmsg.hdr.payload = sizeof(clone->kmsg);
 
     clone->kmsg.msg.task.extra_ctx |= extra_ctx;
     if (parent) {
@@ -2239,7 +2225,6 @@ bool fill_in_ptrace(struct dynsec_event *dynsec_event,
         return false;
     }
     ptrace = dynsec_event_to_ptrace(dynsec_event);
-    ptrace->kmsg.hdr.payload = sizeof(ptrace->kmsg);
 
     __fill_in_task_ctx(source, true, &ptrace->kmsg.msg.source);
     __fill_in_task_ctx(target, true, &ptrace->kmsg.msg.target);
@@ -2257,7 +2242,6 @@ bool fill_in_task_kill(struct dynsec_event *dynsec_event,
         return false;
     }
     signal = dynsec_event_to_signal(dynsec_event);
-    signal->kmsg.hdr.payload = sizeof(signal->kmsg);
 
     // current task may not always be source of signal
     __fill_in_task_ctx(current, true, &signal->kmsg.msg.source);
@@ -2479,7 +2463,6 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
     }
     create = dynsec_event_to_create(dynsec_event);
 
-    create->kmsg.hdr.payload = sizeof(create->kmsg);
     fill_in_task_ctx(&create->kmsg.msg.task);
 
     create->path = build_preaction_path(dfd, filename, 0,
@@ -2517,7 +2500,6 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
     }
     rename = dynsec_event_to_rename(dynsec_event);
 
-    rename->kmsg.hdr.payload = sizeof(rename->kmsg);
     fill_in_task_ctx(&rename->kmsg.msg.task);
 
     fill_in_file_data(&rename->kmsg.msg.old_file, oldpath);
@@ -2567,7 +2549,6 @@ bool fill_in_preaction_unlink(struct dynsec_event *dynsec_event,
     }
     unlink = dynsec_event_to_unlink(dynsec_event);
 
-    unlink->kmsg.hdr.payload = sizeof(unlink->kmsg);
     fill_in_task_ctx(&unlink->kmsg.msg.task);
 
     fill_in_file_data(&unlink->kmsg.msg.file, path);
@@ -2593,7 +2574,6 @@ bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
     }
 
     symlink = dynsec_event_to_symlink(dynsec_event);
-    symlink->kmsg.hdr.payload = sizeof(symlink->kmsg);
 
     fill_in_task_ctx(&symlink->kmsg.msg.task);
 
@@ -2638,7 +2618,6 @@ bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
     }
 
     link = dynsec_event_to_link(dynsec_event);
-    link->kmsg.hdr.payload = sizeof(link->kmsg);
 
     fill_in_task_ctx(&link->kmsg.msg.task);
 
@@ -2678,8 +2657,6 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
         return false;
     }
     setattr = dynsec_event_to_setattr(dynsec_event);
-
-    setattr->kmsg.hdr.payload = sizeof(setattr->kmsg);
 
     fill_in_task_ctx(&setattr->kmsg.msg.task);
 
@@ -2776,8 +2753,6 @@ struct dynsec_event *fill_in_dynsec_task_dump(struct task_struct *task, gfp_t mo
 
     is_task_alive = pid_alive(task);
     task_dump = dynsec_event_to_task_dump(dynsec_event);
-
-    task_dump->kmsg.hdr.payload = sizeof(task_dump->kmsg);
 
     __fill_in_task_ctx(task, is_task_alive, &task_dump->kmsg.msg.task);
     task_dump->exec_path = fill_in_task_exe(task, &task_dump->kmsg.msg.exec_file,
