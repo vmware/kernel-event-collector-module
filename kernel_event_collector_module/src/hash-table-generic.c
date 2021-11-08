@@ -114,12 +114,18 @@ HashTbl *ec_hashtbl_init_generic(
     size_t tableSize;
     unsigned char *tbl_storage_p  = NULL;
     uint64_t cache_elem_size;
+    size_t lruStorageSize = 0;
 
     if (!is_power_of_2(numberOfBuckets))
     {
         numberOfBuckets = roundup_pow_of_two(numberOfBuckets);
     }
-    tableSize = ((numberOfBuckets * sizeof(HashTableBkt)) + sizeof(HashTbl));
+
+    if (lruSize > 0)
+    {
+        lruStorageSize = ec_plru_get_allocation_size(numberOfBuckets);
+    }
+    tableSize = ((numberOfBuckets * sizeof(HashTableBkt)) + lruStorageSize + sizeof(HashTbl));
 
     //Since we're not in an atomic context this is an acceptable alternative to
     //kmalloc however, it should be noted that this is a little less efficient. The reason for this is
@@ -159,6 +165,14 @@ HashTbl *ec_hashtbl_init_generic(
     hashTblp->base_size   = tableSize + sizeof(HashTbl);
     hashTblp->delete_callback = delete_callback;
     hashTblp->handle_callback = handle_callback;
+    hashTblp->lruSize = lruSize;
+
+    if (lruSize > 0)
+    {
+        void *plru_storage_p = tbl_storage_p + sizeof(HashTbl) + (numberOfBuckets * sizeof(HashTableBkt));
+
+        ec_plru_init(&hashTblp->plru, numberOfBuckets, plru_storage_p, context);
+    }
 
     if (cache_elem_size)
     {
@@ -216,6 +230,7 @@ void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
         ec_spinlock_destroy(&hashTblp->tablePtr[i].lock, context);
     }
 
+    ec_plru_destroy(&hashTblp->plru, context);
     ec_mem_cache_destroy(&hashTblp->hash_cache, context, NULL);
     ec_mem_cache_free_generic(hashTblp);
 }
@@ -397,10 +412,38 @@ int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, P
         return -1;
     }
 
+    if (hashTblp->lruSize > 0 && atomic64_read(&(hashTblp->tableInstance)) >= hashTblp->lruSize)
+    {
+        // Evict from the LRU
+        //  Note this happens before we enforce uniqueness, which may result in evicting an item without adding a new item.
+        bucket_indx = ec_plru_find_inactive_leaf(&hashTblp->plru, context);
+        bucketp = &(hashTblp->tablePtr[bucket_indx]);
+
+        ec_hashtbl_bkt_write_lock(bucketp, context);
+        if (!hlist_empty(&bucketp->head))
+        {
+            // If there are nodes in this bucket than evict one.
+            HashTableNode *tableNode = hlist_entry(*bucketp->head.first->pprev, HashTableNode, link);
+            void *datap = __ec_get_datap(hashTblp, tableNode);
+
+            ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
+
+            // If ref counting is disabled, we need to delete this item
+            if (hashTblp->refcount_offset == HASHTBL_DISABLE_REF_COUNT)
+            {
+                ec_hashtbl_free_generic(hashTblp, datap, context);
+            }
+        }
+        ec_hashtbl_bkt_write_unlock(bucketp, context);
+    }
+
     key = __ec_get_key_ptr(hashTblp, datap);
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
+
+    // Update the LRU to report this bucket as active
+    ec_plru_mark_active_path(&hashTblp->plru, bucket_indx, context);
 
     nodep = __ec_get_nodep(hashTblp, datap);
     nodep->hash = hash;
@@ -567,6 +610,9 @@ void *ec_hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
+
+    // Update the LRU to report this bucket as active
+    ec_plru_mark_active_path(&hashTblp->plru, bucket_indx, context);
 
     ec_hashtbl_bkt_write_lock(bucketp, context);
     nodep = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);

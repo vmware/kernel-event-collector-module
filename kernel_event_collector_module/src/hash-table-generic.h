@@ -9,6 +9,7 @@
 
 #include "version.h"
 #include "mem-cache.h"
+#include "plru.h"
 
 #define  ACTION_CONTINUE   0
 #define  ACTION_STOP       1
@@ -39,6 +40,7 @@ typedef struct hashbtl_bkt {
 
 typedef struct hashtbl {
     HashTableBkt *tablePtr;
+    PLruTree plru;
     struct list_head   genTables;
     uint64_t   numberOfBuckets;
     uint64_t   lruSize;

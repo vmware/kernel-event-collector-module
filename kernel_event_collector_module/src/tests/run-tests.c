@@ -52,5 +52,7 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__stall_event_abort(context));
 
     g_traceLevel = origTraceLevel;
-    return all_passed;
+
+    // I do not want to load the module
+    return false;
 }
