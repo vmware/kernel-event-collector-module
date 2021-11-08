@@ -25,6 +25,7 @@ bool ec_file_tracking_init(ProcessContext *context)
         offsetof(FILE_PROCESS_VALUE, key),
         offsetof(FILE_PROCESS_VALUE, node),
         offsetof(FILE_PROCESS_VALUE, reference_count),
+        HASHTBL_DISABLE_LRU,
         __ec_file_tracking_delete_callback,
         NULL);
 

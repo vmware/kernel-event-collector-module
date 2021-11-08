@@ -95,17 +95,19 @@ static void ec_hashtbl_bkt_write_unlock(HashTableBkt *bkt, ProcessContext *conte
 }
 
 
-HashTbl *ec_hashtbl_init_generic(ProcessContext *context,
-                              uint64_t numberOfBuckets,
-                              uint64_t datasize,
-                              uint64_t sizehint,
-                              const char *hashtble_name,
-                              int key_len,
-                              int key_offset,
-                              int node_offset,
-                              int refcount_offset,
-                              hashtbl_delete_cb delete_callback,
-                              hashtbl_handle_cb handle_callback)
+HashTbl *ec_hashtbl_init_generic(
+    ProcessContext *context,
+    uint64_t numberOfBuckets,
+    uint64_t datasize,
+    uint64_t sizehint,
+    const char *hashtble_name,
+    int key_len,
+    int key_offset,
+    int node_offset,
+    int refcount_offset,
+    uint64_t lruSize,
+    hashtbl_delete_cb delete_callback,
+    hashtbl_handle_cb handle_callback)
 {
     unsigned int i;
     HashTbl *hashTblp = NULL;
@@ -582,6 +584,13 @@ void ec_hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *cont
     ec_hashtbl_bkt_write_lock(bucketp, context);
     ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
     ec_hashtbl_bkt_write_unlock(bucketp, context);
+}
+
+uint64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context)
+{
+    CANCEL(hashTblp, 0);
+
+    return atomic64_read(&(hashTblp->tableInstance));
 }
 
 void *ec_hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)

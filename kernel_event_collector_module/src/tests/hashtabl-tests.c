@@ -29,6 +29,7 @@ HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_del
                               offsetof(Entry, key),
                               offsetof(Entry, link),
                               refcount_offset,
+                              HASHTBL_DISABLE_LRU,
                               delete_callback,
                               NULL);
 }
