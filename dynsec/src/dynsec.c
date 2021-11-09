@@ -53,6 +53,7 @@ module_param(process_hooks, uint, 0644);
 // Special Globals
 DEFINE_MUTEX(global_config_lock);
 DEFINE_DYNSEC_CONFIG(global_config);
+DEFINE_DYNSEC_CONFIG(preserved_config);
 
 static void print_config(struct dynsec_config *dynsec_config)
 {
@@ -136,6 +137,8 @@ static int __init dynsec_init(void)
 
     pr_info("Loaded DynSec\n");
     print_config(&global_config);
+    // struct copy the inital copy of the config data
+    preserved_config = global_config;
 
     return 0;
 }
