@@ -7,6 +7,7 @@
 extern struct mutex global_config_lock;
 
 extern struct dynsec_config global_config;
+extern struct dynsec_config preserved_config;
 
 #define DEFAULT_DISABLED 0
 #define DEFAULT_ENABLED  1

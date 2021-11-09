@@ -222,6 +222,9 @@ static int dynsec_stall_release(struct inode *inode, struct file *file)
     stall_tbl_disable(stall_tbl);
     task_cache_clear();
 
+    // Reset back to default settings
+    global_config = preserved_config;
+
     return 0;
 }
 
