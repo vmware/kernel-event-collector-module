@@ -111,6 +111,7 @@ namespace bpf_probe {
             case EVENT_FILE_DELETE: str = "FILE_DELETE"; break;
             case EVENT_FILE_CLOSE: str = "FILE_CLOSE"; break;
             case EVENT_FILE_RENAME: str = "FILE_RENAME"; break;
+            case EVENT_CONTAINER_CREATE: str = "CONTAINER_CREATE"; break;
             default: break;
             }// LCOV_EXCL_END
             return str;
