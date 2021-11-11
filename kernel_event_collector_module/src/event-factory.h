@@ -31,6 +31,7 @@ void ec_event_send_file(ProcessHandle  *process_handle,
                         CB_INTENT_TYPE   intent,
                         uint64_t         device,
                         uint64_t         inode,
+                        uint64_t         fs_magic,
                         const char *path,
                         ProcessContext *context);
 

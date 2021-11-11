@@ -202,6 +202,7 @@ void ec_event_send_file(
     CB_INTENT_TYPE   intent,
     uint64_t         device,
     uint64_t         inode,
+    uint64_t         fs_magic,
     const char      *path,
     ProcessContext  *context)
 {
@@ -215,9 +216,10 @@ void ec_event_send_file(
         status_msgp = status_message;
         snprintf(status_msgp,
              MSG_SIZE,
-             " [%llu:%llu] %s by",
+             " [%llu:%llu:%llx] %s by",
              device,
              inode,
+             fs_magic,
              path);
         status_msgp[MSG_SIZE] = 0;
     }
@@ -236,6 +238,7 @@ void ec_event_send_file(
     // Populate the event
     event->fileGeneric.device    = device;
     event->fileGeneric.inode     = inode;
+    event->fileGeneric.fs_magic  = fs_magic;
 
     if (path)
     {

@@ -81,6 +81,7 @@ namespace bpf_probe {
         uint32_t device;
         uint64_t flags; // MMAP only
         uint64_t prot;  // MMAP only
+        uint64_t fs_magic;
     };
 
     struct container_data {

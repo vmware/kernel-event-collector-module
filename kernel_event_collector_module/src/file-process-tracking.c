@@ -69,7 +69,7 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
         value->path          = ec_mem_cache_strdup(path, context);
         value->isSpecialFile = ec_is_special_file(value->path, ec_mem_cache_get_size_generic(value->path));
 
-        ec_get_devinfo_from_file(file, &value->device, &value->inode);
+        ec_get_devinfo_fs_magic_from_file(file, &value->device, &value->inode, &value->fs_magic);
 
         if (ec_hashtbl_add_generic(s_file_hash_table, value, context) < 0)
         {

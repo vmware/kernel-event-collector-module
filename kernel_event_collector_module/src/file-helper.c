@@ -160,10 +160,17 @@ struct inode const *ec_get_inode_from_file(struct file const *file)
 
 struct super_block const *ec_get_sb_from_dentry(struct dentry const *dentry);  // forward
 
-void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode)
+void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode, uint64_t *fs_magic)
 {
-    *device = new_encode_dev(ec_get_sb_from_dentry(path->dentry)->s_dev);
-    *inode  =                path->dentry->d_inode->i_ino;
+    const struct super_block *sb = NULL;
+
+    sb = ec_get_sb_from_dentry(path->dentry);
+    if (sb)
+    {
+        *device   = new_encode_dev(sb->s_dev);
+        *inode    = path->dentry->d_inode->i_ino;
+        *fs_magic = sb->s_magic;
+    }
 }
 
 void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode)
@@ -184,6 +191,23 @@ void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_
     if (sb)
     {
         *device = new_encode_dev(sb->s_dev);
+    }
+}
+
+void ec_get_devinfo_fs_magic_from_file(struct file const *file, uint64_t *device, uint64_t *inode, uint64_t *fs_magic)
+{
+    struct super_block const *sb = NULL;
+
+    CANCEL_VOID(fs_magic);
+
+    *fs_magic = 0;
+
+    ec_get_devinfo_from_file(file, device, inode);
+
+    sb = ec_get_sb_from_file(file);
+    if (sb)
+    {
+        *fs_magic = sb->s_magic;
     }
 }
 

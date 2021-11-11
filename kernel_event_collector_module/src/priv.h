@@ -266,7 +266,8 @@ extern char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int bufle
 extern char *ec_lsm_dentry_path(struct dentry const *dentry, char *path, int len);
 extern struct inode const *ec_get_inode_from_file(struct file const *file);
 extern void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode);
-extern void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode);
+extern void ec_get_devinfo_fs_magic_from_file(struct file const *file, uint64_t *device, uint64_t *inode, uint64_t *fs_magic);
+extern void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode, uint64_t *fs_magic);
 extern struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry);
 umode_t ec_get_mode_from_file(struct file const *file);
 extern struct super_block const *ec_get_sb_from_file(struct file const *file);

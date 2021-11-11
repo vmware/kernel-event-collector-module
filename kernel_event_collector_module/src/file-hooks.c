@@ -39,6 +39,7 @@ typedef struct file_data_t_ {
     struct filename *file_s;
     uint64_t         device;
     uint64_t         inode;
+    uint64_t         fs_magic;
     const char      *name;
     char            *generic_path_buffer; // on the GENERIC cache
 } file_data_t;
@@ -186,6 +187,7 @@ file_data_t *__ec_file_data_alloc(ProcessContext *context, const char __user *fi
     file_data->name                = NULL;
     file_data->device = 0;
     file_data->inode = 0;
+    file_data->fs_magic = 0;
 
     file_data->file_s = CB_RESOLVED(getname)(filename);
     TRY(!IS_ERR_OR_NULL(file_data->file_s));
@@ -223,7 +225,7 @@ void __ec_file_data_init(ProcessContext *context, file_data_t *file_data, struct
         file_data->name = file_data->file_s->name;
     }
 
-    ec_get_devinfo_from_file(file, &file_data->device, &file_data->inode);
+    ec_get_devinfo_fs_magic_from_file(file, &file_data->device, &file_data->inode, &file_data->fs_magic);
 }
 
 void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_data, struct path const *path); // forward
@@ -276,7 +278,7 @@ void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_da
         file_data->name = file_data->file_s->name;
     }
 
-    ec_get_devinfo_from_path(path, &file_data->device, &file_data->inode);
+    ec_get_devinfo_from_path(path, &file_data->device, &file_data->inode, &file_data->fs_magic);
 }
 
 file_data_t *__ec_get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd)
@@ -353,6 +355,7 @@ void __ec_do_generic_file_event(ProcessContext *context,
         intent,
         file_data->device,
         file_data->inode,
+        file_data->fs_magic,
         file_data->name,
         context);
 
@@ -462,6 +465,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                     INTENT_REPORT,
                     fileProcess->device,
                     fileProcess->inode,
+                    fileProcess->fs_magic,
                     fileProcess->path,
                     context);
             }
@@ -476,6 +480,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                 INTENT_REPORT,
                 fileProcess->device,
                 fileProcess->inode,
+                fileProcess->fs_magic,
                 fileProcess->path,
                 context);
         } else
