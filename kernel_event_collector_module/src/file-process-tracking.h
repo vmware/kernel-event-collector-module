@@ -18,6 +18,7 @@ typedef struct FILE_PROCESS_VALUE {
     uint32_t            pid;
     uint64_t            device;
     uint64_t            inode;
+    uint64_t            fs_magic;
     bool                isSpecialFile;
     char               *path;
     atomic64_t          reference_count;

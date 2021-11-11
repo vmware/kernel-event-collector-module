@@ -183,6 +183,7 @@ struct file_data {
 	u32 device;
 	u64 flags; // MMAP only
 	u64 prot;  // MMAP only
+	u64 fs_magic;
 };
 
 struct container_data {
@@ -226,7 +227,8 @@ struct rename_data {
     struct data_header header;
 
     u64 old_inode, new_inode;
-    u32 old_device, new_device;
+    u32 device;
+    u64 fs_magic;
 };
 
 // THis is a helper struct for the "file like" events.  These follow a pattern where 3+n events are sent.
@@ -933,6 +935,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	FILE_DATA(&data)->inode = __get_inode_from_file(file);
 	FILE_DATA(&data)->flags = file->f_flags;
 	FILE_DATA(&data)->prot = file->f_mode;
+	FILE_DATA(&data)->fs_magic = sb->s_magic;
 
 	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
@@ -997,6 +1000,7 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 				 struct dentry *new_dentry, unsigned int flags)
 {
 	DECLARE_FILE_EVENT(data);
+    struct super_block *sb = NULL;
 
     // send event for delete of source file
     if (!__send_dentry_delete(ctx, &data, old_dentry)) {
@@ -1005,21 +1009,23 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 
     __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
-    RENAME_DATA(&data)->old_device = __get_device_from_dentry(old_dentry);
-    RENAME_DATA(&data)->old_inode = __get_inode_from_dentry(old_dentry);
+    sb = _sb_from_dentry(old_dentry);
 
-    __file_tracking_delete(0, RENAME_DATA(&data)->old_device, RENAME_DATA(&data)->old_inode);
+    RENAME_DATA(&data)->device = __get_device_from_dentry(old_dentry);
+    RENAME_DATA(&data)->old_inode = __get_inode_from_dentry(old_dentry);
+    RENAME_DATA(&data)->fs_magic = sb ? sb->s_magic : 0;
+
+    __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->old_inode);
 
     // If the target destination already exists
     if (new_dentry)
     {
-        __file_tracking_delete(0, RENAME_DATA(&data)->new_device, RENAME_DATA(&data)->new_inode);
+        __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->new_inode);
 
-        RENAME_DATA(&data)->new_device = __get_device_from_dentry(new_dentry);
         RENAME_DATA(&data)->new_inode  = __get_inode_from_dentry(new_dentry);
-    } else
+    }
+    else
     {
-        RENAME_DATA(&data)->new_device = 0;
         RENAME_DATA(&data)->new_inode  = 0;
     }
 
