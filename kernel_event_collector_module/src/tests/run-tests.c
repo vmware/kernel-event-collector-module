@@ -32,6 +32,10 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__hashtbl_add_duplicate(context));
     RUN_TEST(test__hashtbl_lru_lookup(context));
 
+    RUN_TEST(test__plru_init(context));
+    RUN_TEST(test__plru_find_inactive(context));
+    RUN_TEST(test__plru_mark_active(context));
+
     RUN_TEST(test__proc_track_report_double_exit(context));
 
     RUN_TEST(test__begin_finish_macros(context));
