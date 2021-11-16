@@ -174,6 +174,7 @@ typedef struct _CB_EVENT_FILE_GENERIC {
     uint16_t path_offset;
     uint64_t device;
     uint64_t inode;
+    uint64_t fs_magic;
 } CB_EVENT_FILE_GENERIC, *PCB_EVENT_FILE_GENERIC;
 
 typedef struct _CB_EVENT_HEARTBEAT {

@@ -41,38 +41,33 @@ const char *ec_process_tracking_get_proc_name(const char *path)
 
 void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *context)
 {
-    struct seq_file    *seq_file     = (struct seq_file *)priv;
-    ProcessTracking    *procp        = ec_sorted_tracking_table_get_process(data, context);
-    SharedTrackingData *shared_data  = ec_process_tracking_get_shared_data(procp, context);
-    const char         *proc_name    = NULL;
-    struct task_struct const *task   = NULL;
-    uint64_t            shared_count = 0;
-    char               *path         = NULL;
+    struct seq_file     *seq_file     = (struct seq_file *)priv;
+    ProcessHandle       *process_handle = ec_sorted_tracking_table_get_handle(data, context);
+    const char          *proc_name    = NULL;
+    struct task_struct  const *task   = NULL;
+    uint64_t             shared_count = 0;
 
-    TRY(procp && shared_data && seq_file);
+    TRY(process_handle && seq_file);
 
-    task = ec_find_task(procp->posix_details.pid);
+    task = ec_find_task(ec_process_posix_identity(process_handle)->posix_details.pid);
 
-    path = ec_process_tracking_get_path(shared_data, context);
-    proc_name = ec_process_tracking_get_proc_name(path);
+    proc_name = ec_process_tracking_get_proc_name(ec_process_path(process_handle));
 
-    shared_count = atomic64_read(&shared_data->reference_count);
+    shared_count = atomic64_read(&ec_process_exec_identity(process_handle)->reference_count);
 
     seq_printf(seq_file, "%20s | %6llu | %12llu | %6llu | %6llu | %6llu | %10llu | %10llu | %5s |\n",
                   proc_name,
-                  (uint64_t)shared_data->exec_details.pid,
-                  (uint64_t)shared_data->exec_parent_details.pid,
-                  (uint64_t)procp->posix_details.pid,
-                  (uint64_t)procp->posix_parent_details.pid,
-                  (uint64_t)procp->tid,
-                  procp->posix_details.inode,
+                  (uint64_t)ec_process_exec_identity(process_handle)->exec_details.pid,
+                  (uint64_t)ec_process_exec_identity(process_handle)->exec_parent_details.pid,
+                  (uint64_t)ec_process_posix_identity(process_handle)->posix_details.pid,
+                  (uint64_t)ec_process_posix_identity(process_handle)->posix_parent_details.pid,
+                  (uint64_t)ec_process_posix_identity(process_handle)->tid,
+                  ec_process_posix_identity(process_handle)->posix_details.inode,
                   shared_count,
                   (ec_is_task_alive(task) ? "yes" : "no"));
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_path(path, context);
-    ec_process_tracking_put_shared_data(shared_data, context);
-    ec_process_tracking_put_process(procp, context);
+    ec_process_tracking_put_handle(process_handle, context);
     return;
 }
 

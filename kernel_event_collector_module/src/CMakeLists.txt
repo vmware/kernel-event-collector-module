@@ -91,6 +91,7 @@ set(SOURCE_FILES drvmain.c
         cb-spinlock.c
         net-helper.c
         net-hooks.c
+        net-tracking.c
         process-hooks.c
         task-helper.c
         fops-comm.c
@@ -99,7 +100,6 @@ set(SOURCE_FILES drvmain.c
         process-tracking-discovery.c
         process-tracking-show.c
         process-tracking-helpers.c
-        process-tracking-file-cache.c
         cb-isolation.c
         cb-banning.c
         netfilter.c
@@ -116,6 +116,8 @@ set(SOURCE_FILES drvmain.c
         tests/process-tracking-tests.c
         tests/module-state-tests.c
         tests/stall-tests.c)
+
+file(GLOB HEADER_FILES *.h ../include/*.h tests/*.h)
 
 do_build_kernel_module()
 do_post_build_kernel_module()

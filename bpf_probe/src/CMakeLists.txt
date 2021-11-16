@@ -76,3 +76,15 @@ target_link_libraries(check_probe
         z rt dl pthread m)
 
 add_subdirectory(tests)
+
+include(constants.cmake)
+
+install(TARGETS check_probe PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
+
+
+set(CPACK_OUTPUT_FILE_PREFIX $ENV{BUILD_DIR}/install-packages)
+set(CPACK_GENERATOR "TGZ")
+set(CPACK_PACKAGE_FILE_NAME ${CHECK_PROBE_KIT_FILE})
+set(CPACK_PACKAGE_DIRECTORY ${PROJECT_BINARY_DIR})
+
+include(CPack)

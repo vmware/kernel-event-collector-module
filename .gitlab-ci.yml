@@ -5,15 +5,17 @@
 # Include gitlab-ci-base.yml from cb-build-util.
 #  Update the git hash to use a newer version of the base yaml
 #  Note: This can be a branch name for testing but should be a git hash/tag for reproducability
-include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/raw/ddd923a59940d838c3fe32a0d7999ad46871569e/gitlab-ci-base.yml'
+include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/raw/f4f2b65c386b4c9a5b9a8a1a1c3cc6a5e4534801/gitlab-ci-base.yml'
 
 # Gitlab CI configuration script for event-collector-app.
 variables:
   ARTIFACTORY_PATH: https://${ARTIFACTORY_URL}/artifactory
+  ARTIFACTORY_PROBE_PATH: carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
   BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
 
 stages:
   - build_project
+  - deploy
   - deploy_release
   - build_downstream
   - deploy_branch
@@ -40,6 +42,30 @@ deploy_release:
   extends: .deploy_release_template
   stage: deploy_release
   when: on_success
+
+
+.deploy_check_probe_pkg: &deploy_check_probe_pkg |
+  get_ci_variables
+  if [[ ${PACKAGES_TO_BUILD} = *bpf_probe* ]]; then
+      echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+      filename=workspace/bpf_probe/build/install-packages/check-probe-${BUILD_VERSION}.tar.gz
+      echo $filename
+
+      curl -s -S -H "X-JFrog-Art-Api:$ARTIFACTORY_TOKEN" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+  else
+      echo "Skipping deployment because no new version of bpf_probe was built"
+  fi
+
+.deploy:
+  script: *deploy_check_probe_pkg
+  stage: deploy
+  tags:
+    - artifactory-pub
+  variables:
+    GIT_STRATEGY: none
+
+deploy_probe_test:
+  extends: .deploy
 
 # Build downstream
 build_endpoint_common:

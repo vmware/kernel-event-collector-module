@@ -1,5 +1,7 @@
 name: BpfProbe
 builder: centos7
+packagers:
+    - cmake
 file-replacements:
     CONAN_UTIL_VERSION:
     CPPUTEST_VERSION:

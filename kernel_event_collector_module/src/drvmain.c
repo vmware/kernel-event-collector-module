@@ -7,7 +7,8 @@
 #include "priv.h"
 #include "findsyms.h"
 #include "process-tracking.h"
-#include "network-tracking.h"
+#include "net-tracking.h"
+#include "net-hooks.h"
 #include "file-process-tracking.h"
 #include "cb-isolation.h"
 #include "mem-cache.h"
@@ -62,7 +63,9 @@ module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 
 INIT_CB_RESOLVED_SYMS();
-atomic64_t       module_used      = ATOMIC64_INIT(0);
+
+DEFINE_PER_CPU(atomic64_t, module_inuse);
+DEFINE_PER_CPU(atomic64_t, module_active_inuse);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
@@ -283,8 +286,6 @@ void ec_shutdown(ProcessContext *context)
 
 void __exit ec_cleanup(void)
 {
-    uint64_t l_module_used;
-
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     TRACE(DL_SHUTDOWN, "Cleaning up module...");
@@ -295,9 +296,22 @@ void __exit ec_cleanup(void)
     // We have to be sure we're not in a hook. Wait here until nothing is using our module.
     // NOTE: We only care about the actual hooks.  If our dev node is open, Linux will already
     //  prevent unloading.
-    while ((l_module_used = atomic64_read(&module_used)) != 0)
+    while (true)
     {
-        TRACE(DL_SHUTDOWN, "Module has %lld active hooks, delaying shutdown...", l_module_used);
+        uint64_t l_module_inuse = 0;
+        unsigned int cpu;
+
+        for_each_possible_cpu(cpu)
+        {
+            l_module_inuse += atomic64_read(&per_cpu(module_inuse, cpu));
+        }
+
+        if (!l_module_inuse)
+        {
+            break;
+        }
+
+        TRACE(DL_SHUTDOWN, "Module has %lld active hooks, delaying shutdown...", l_module_inuse);
         ssleep(5);
     }
 
@@ -378,8 +392,13 @@ int ec_disable_module(ProcessContext *context)
     while (true)
     {
         uint64_t l_active_call_count = 0;
+        unsigned int cpu;
 
-        l_active_call_count = atomic64_read(&g_module_state_info.module_active_call_count);
+        for_each_possible_cpu(cpu)
+        {
+            l_active_call_count += atomic64_read(&per_cpu(module_active_inuse, cpu));
+        }
+
         if (l_active_call_count != 0)
         {
             // Reduce how often we print a message about active hooks
@@ -513,12 +532,13 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
     TRY_STEP(PROC_DIR,  ec_user_comm_initialize(context));
     TRY_STEP(USER_COMM, ec_logger_initialize(context));
     TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
-    TRY_STEP(PROC,      ec_network_tracking_initialize(context));
-    TRY_STEP(NET_TR,    ec_banning_initialize(context));
+    TRY_STEP(PROC,      ec_net_tracking_initialize(context));
+    TRY_STEP(NET_TR,    ec_network_hooks_initialize(context));
+    TRY_STEP(NET_HOOK,  ec_banning_initialize(context));
     TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
     TRY_STEP(NET_IS,    ec_file_helper_init(context));
     TRY_STEP(NET_IS,    ec_task_initialize(context));
-    TRY_STEP(TASK,      ec_file_process_tracking_init(context));
+    TRY_STEP(TASK,      ec_file_tracking_init(context));
     TRY_STEP(FILE_PROC, ec_stats_proc_initialize(context));
     TRY_STEP(STALL,     ec_stall_events_initialize(context));
 
@@ -526,7 +546,7 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 CATCH_STALL:
     ec_stats_proc_shutdown(context);
 CATCH_FILE_PROC:
-    ec_file_process_tracking_shutdown(context);
+    ec_file_tracking_shutdown(context);
 CATCH_TASK:
     ec_task_shutdown(context);
 CATCH_NET_IS:
@@ -534,7 +554,9 @@ CATCH_NET_IS:
 CATCH_BAN:
     ec_banning_shutdown(context);
 CATCH_NET_TR:
-    ec_network_tracking_shutdown(context);
+    ec_net_tracking_shutdown(context);
+CATCH_NET_HOOK:
+    ec_network_hooks_shutdown(context);
 CATCH_PROC:
     ec_process_tracking_shutdown(context);
 CATCH_LOGGER:
@@ -561,10 +583,10 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
     ec_DestroyNetworkIsolation(context);
     ec_banning_shutdown(context);
     ec_user_comm_shutdown(context);
-    ec_network_tracking_shutdown(context);
+    ec_net_tracking_shutdown(context);
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
-    ec_file_process_tracking_shutdown(context);
+    ec_file_tracking_shutdown(context);
     ec_path_buffers_shutdown(context);
     ec_proc_shutdown(context);
 }
@@ -596,7 +618,7 @@ bool ec_disable_peer_modules(ProcessContext *context)
         {
             TRACE(DL_ERROR, "Request to disable module %s, failed with error: %s",
                   elem->module_name,
-                  err_str?err_str:"unknown");
+                  SAFE_STRING(err_str));
             goto Exit;
         }
     }

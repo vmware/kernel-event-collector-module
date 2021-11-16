@@ -102,6 +102,9 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
     BPF_LOOKUP_ENTRY_HOOK ("execveat", "syscall__on_sys_execveat"),
     BPF_LOOKUP_RETURN_HOOK("execveat", "after_sys_execve"),
 
+    // Container Hooks
+    BPF_ENTRY_HOOK("cgroup_attach_task", "on_cgroup_attach_task"),
+
     // Network Event Hooks (only for udp recv event)
     BPF_OPTIONAL_RETURN_HOOK("__skb_recv_udp",                         "trace_skb_recv_udp"),
     BPF_ALTERNATE_RETURN_HOOK("__skb_recv_udp", "__skb_recv_datagram", "trace_skb_recv_udp"),

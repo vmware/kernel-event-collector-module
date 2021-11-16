@@ -4,292 +4,153 @@
 
 #include "file-process-tracking.h"
 #include "process-tracking.h"
+#include "process-tracking-private.h"
 #include "hash-table-generic.h"
 #include "priv.h"
-#include "rbtree-helper.h"
 
-int _ec_file_process_tree_compare(void *left, void *right);
-void _ec_file_process_tree_put_ref(void *data, ProcessContext *context);
-void _ec_file_process_tree_get_ref(void *data, ProcessContext *context);
+void __ec_file_tracking_delete_callback(void *posix_identity, ProcessContext *context);
+int __ec_file_tracking_show(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
-static CB_MEM_CACHE s_file_process_cache;
+static HashTbl      *s_file_hash_table;
 
-FILE_PROCESS_VALUE *ec_file_process_alloc(ProcessContext *context);
-
-
-bool ec_file_process_tracking_init(ProcessContext *context)
+bool ec_file_tracking_init(ProcessContext *context)
 {
-    return ec_mem_cache_create(&s_file_process_cache, "file_process_cache", sizeof(FILE_PROCESS_VALUE), context);
+    s_file_hash_table = ec_hashtbl_init_generic(
+        context,
+        8192,
+        sizeof(FILE_PROCESS_VALUE),
+        0,
+        "file_tracking_table",
+        sizeof(FILE_PROCESS_KEY),
+        offsetof(FILE_PROCESS_VALUE, key),
+        offsetof(FILE_PROCESS_VALUE, node),
+        offsetof(FILE_PROCESS_VALUE, reference_count),
+        __ec_file_tracking_delete_callback,
+        NULL);
+
+    return s_file_hash_table != NULL;
 }
 
-void ec_file_process_tracking_shutdown(ProcessContext *context)
+void ec_file_tracking_shutdown(ProcessContext *context)
 {
-    ec_mem_cache_destroy(&s_file_process_cache, context, NULL);
+    ec_hashtbl_shutdown_generic(s_file_hash_table, context);
 }
 
-FILE_PROCESS_VALUE *ec_file_process_alloc(ProcessContext *context)
+void __ec_file_tracking_delete_callback(void *data, ProcessContext *context)
 {
-    FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)ec_mem_cache_alloc(&s_file_process_cache, context);
-
-    if (value)
+    if (data)
     {
-        RB_CLEAR_NODE(&value->node);
-    }
+        FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
 
-    return value;
-}
-
-void ec_file_process_free(FILE_PROCESS_VALUE *value, ProcessContext *context)
-{
-    if (value)
-    {
-        if (value->path)
-        {
-            ec_mem_cache_free_generic(value->path);
-            value->path = NULL;
-        }
-        ec_mem_cache_free(&s_file_process_cache, value, context);
+        ec_mem_cache_put_generic(value->path);
+        value->path = NULL;
     }
 }
 
 
 FILE_PROCESS_VALUE *ec_file_process_status_open(
-    uint64_t       device,
-    uint64_t       inode,
-    uint32_t       pid,
-    char *path,
-    bool           isSpecialFile,
+    struct file    *file,
+    uint32_t        pid,
+    char           *path,
     ProcessContext *context)
 {
-    FILE_PROCESS_VALUE *value = NULL;
-    FILE_TREE_HANDLE tree_handle;
-    FILE_PROCESS_KEY key = { device, inode };
-    char *process_path = NULL;
+    FILE_PROCESS_VALUE *value = ec_file_process_get(file, context);
 
-    TRY(ec_process_tracking_get_file_tree(pid, &tree_handle, context));
-
-    // This will increase the ref count
-    value = ec_rbtree_search(tree_handle.tree, &key, context);
     if (!value)
     {
-        value = ec_file_process_alloc(context);
+        value = ec_hashtbl_alloc_generic(s_file_hash_table, context);
         TRY(value);
 
         // Initialize the reference count
         atomic64_set(&value->reference_count, 1);
 
-        value->key.device    = device;
-        value->key.inode     = inode;
+        value->key.file      = (uint64_t)file;
         value->pid           = pid;
-        value->isSpecialFile = isSpecialFile;
-        value->didReadType   = false;
-        value->status        = OPENED;
-        value->path          = NULL;
+        value->path          = ec_mem_cache_strdup(path, context);
+        value->isSpecialFile = ec_is_special_file(value->path, ec_mem_cache_get_size_generic(value->path));
 
-        if (path && *path)
+        ec_get_devinfo_fs_magic_from_file(file, &value->device, &value->inode, &value->fs_magic);
+
+        if (ec_hashtbl_add_generic(s_file_hash_table, value, context) < 0)
         {
-            size_t len = strlen(path);
-
-            value->path = ec_mem_cache_alloc_generic(len + 1, context);
-            if (value->path)
+            if (MAY_TRACE_LEVEL(DL_FILE))
             {
-                value->path[0] = 0;
-                strncat(value->path, path, len);
-            }
-        }
-
-        // The insert will take a reference
-        if (!ec_rbtree_insert(tree_handle.tree, value, context))
-        {
-            // If the insert failed we free the local reference and clear
-            //  value
-            ec_file_process_put_ref(value, context);
-            value = NULL;
-            if (MAY_TRACE_LEVEL(DL_INFO))
-            {
-                if (tree_handle.shared_data)
-                {
-                    process_path = ec_process_tracking_get_path(tree_handle.shared_data, context);
-                }
-
                 // We are racing against other threads or processes
                 // to insert a similar entry on the same rb_tree.
-                TRACE(DL_INFO, "File entry already exists: [%llu:%llu] %s pid:%u (%s)",
-                    device, inode, path ? path : "(path unknown)", pid, process_path ? process_path : "<unknown>");
-                ec_process_tracking_put_path(process_path, context);
+                TRACE(DL_FILE, "File entry already exists: [%llu:%llu] %s pid:%u",
+                      value->device, value->inode, path ? path : "<unknown>", pid);
             }
+
+            // If the insert failed we free the local reference and clear
+            //  value
+            ec_hashtbl_free_generic(s_file_hash_table, value, context);
+            value = NULL;
         }
     }
 
 CATCH_DEFAULT:
-    ec_process_tracking_put_file_tree(&tree_handle, context);
-
     // Return holding a reference
     return value;
 }
 
-FILE_PROCESS_VALUE *ec_file_process_status(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context)
+FILE_PROCESS_VALUE *ec_file_process_get(
+    struct file    *file,
+    ProcessContext *context)
 {
+    FILE_PROCESS_KEY key = { (uint64_t)file };
+
+    return ec_hashtbl_get_generic(s_file_hash_table, &key, context);
+}
+
+void ec_file_process_status_close(
+    struct file    *file,
+    ProcessContext *context)
+{
+    FILE_PROCESS_KEY key = {(uint64_t)file};
     FILE_PROCESS_VALUE *value = NULL;
-    FILE_TREE_HANDLE tree_handle;
-    FILE_PROCESS_KEY key = {device, inode};
 
-    TRY(ec_process_tracking_get_file_tree(pid, &tree_handle, context));
+    value = ec_hashtbl_del_by_key_generic(s_file_hash_table, &key, context);
 
-    // This take a local reference and return it below
-    value = ec_rbtree_search(tree_handle.tree, &key, context);
-
-CATCH_DEFAULT:
-    ec_process_tracking_put_file_tree(&tree_handle, context);
-
-    return value;
-}
-
-void ec_file_process_status_close(uint64_t device, uint64_t inode, uint32_t pid, ProcessContext *context)
-{
-    FILE_TREE_HANDLE tree_handle;
-    FILE_PROCESS_KEY key = {device, inode};
-
-    CANCEL_VOID(ec_process_tracking_get_file_tree(pid, &tree_handle, context));
-
-    ec_rbtree_delete_by_key(tree_handle.tree, &key, context);
-
-    ec_process_tracking_put_file_tree(&tree_handle, context);
-}
-
-void ec_file_process_get_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
-{
-    if (value)
-    {
-        atomic64_inc(&value->reference_count);
-    }
+    // We still need to release it
+    ec_hashtbl_put_generic(s_file_hash_table, value, context);
 }
 
 void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
 {
-    CANCEL_VOID(value);
-
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&value->reference_count, {
-        ec_file_process_free(value, context);
-    });
+    ec_hashtbl_put_generic(s_file_hash_table, value, context);
 }
-
-// When a process exits we want to go over the list of open files that it owns and
-//  remove them.
-void ec_check_open_file_list_on_exit(CB_RBTREE *tree, ProcessContext *context)
-{
-    if (tree)
-    {
-         ec_rbtree_clear(tree, context);
-    }
-}
-
-void ec_file_process_tree_init(void **tree, ProcessContext *context)
-{
-    if (tree)
-    {
-        *tree = ec_mem_cache_alloc_generic(sizeof(CB_RBTREE), context);
-        if (*tree)
-        {
-            ec_rbtree_init(*tree,
-                           offsetof(FILE_PROCESS_VALUE, key),
-                           offsetof(FILE_PROCESS_VALUE, node),
-                           _ec_file_process_tree_compare,
-                           _ec_file_process_tree_get_ref,
-                           _ec_file_process_tree_put_ref,
-                           context);
-        }
-    }
-}
-
-void ec_file_process_tree_destroy(void **tree, ProcessContext *context)
-{
-    if (tree && *tree)
-    {
-        ec_rbtree_destroy(*tree, context);
-        ec_mem_cache_free_generic(*tree);
-        *tree = NULL;
-    }
-}
-
-// This helper function is used by the rbtree to find nodes
-int _ec_file_process_tree_compare(void *left, void *right)
-{
-    FILE_PROCESS_KEY *left_key  = (FILE_PROCESS_KEY *)left;
-    FILE_PROCESS_KEY *right_key = (FILE_PROCESS_KEY *)right;
-
-    if (left_key && right_key)
-    {
-        bool isDeviceEqual = (left_key->device == right_key->device);
-
-        if (left_key->device < right_key->device || (isDeviceEqual && left_key->inode < right_key->inode))
-        {
-            return -1;
-        } else if (left_key->device > right_key->device || (isDeviceEqual && left_key->inode > right_key->inode))
-        {
-            return 1;
-        } else if (isDeviceEqual && left_key->inode == right_key->inode)
-        {
-            return 0;
-        }
-    }
-    return -2;
-}
-
-void _ec_file_process_tree_get_ref(void *data, ProcessContext *context)
-{
-    ec_file_process_get_ref(data, context);
-}
-
-void _ec_file_process_tree_put_ref(void *data, ProcessContext *context)
-{
-    ec_file_process_put_ref(data, context);
-}
-
-void __ec_for_each_file_tree(void *tree, void *priv, ProcessContext *context);
-void __ec_show_file_tracking_table(void *data, void *priv, ProcessContext *context);
-
-struct _tree_priv {
-    struct seq_file *m;
-    uint64_t         count;
-};
 
 int ec_file_track_show_table(struct seq_file *m, void *v)
 {
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    seq_printf(m, "%40s | %10s | %10s | %6s | %10s | %10s |\n",
-                   "Path", "Device", "Inode", "PID", "Is Special", "Count");
+    seq_printf(m, "%50s | %10s | %10s | %6s | %10s | %10s |\n",
+                   "Path", "Device", "Inode", "PID", "Is Special", "File Pointer");
 
-    ec_process_tracking_for_each_file_tree(__ec_for_each_file_tree, m, &context);
+    ec_hashtbl_read_for_each_generic(
+        s_file_hash_table,
+        __ec_file_tracking_show,
+        m,
+        &context);
 
     return 0;
 }
 
-void __ec_for_each_file_tree(void *tree, void *priv, ProcessContext *context)
+int __ec_file_tracking_show(HashTbl *hashTblp, HashTableNode *data, void *m, ProcessContext *context)
 {
-    if (tree)
-    {
-        struct _tree_priv tree_priv = {priv, atomic64_read(&((CB_RBTREE *)tree)->count)};
-
-        ec_rbtree_read_for_each(tree, __ec_show_file_tracking_table, &tree_priv, context);
-    }
-}
-
-void __ec_show_file_tracking_table(void *data, void *priv, ProcessContext *context)
-{
-    if (data && priv)
+    if (data && m)
     {
         FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
-        struct _tree_priv *local_priv = (struct _tree_priv *)priv;
 
-        seq_printf(local_priv->m, "%40s | %10llu | %10llu | %6d | %10s| %10llu |\n",
+        seq_printf(m, "%50s | %10llu | %10llu | %6d | %10s | %10llx |\n",
                       value->path,
-                      value->key.device,
-                      value->key.inode,
+                      value->device,
+                      value->inode,
                       value->pid,
                       (value->isSpecialFile ? "YES" : "NO"),
-                      local_priv->count);
+                      value->key.file);
     }
+
+    return ACTION_CONTINUE;
 }

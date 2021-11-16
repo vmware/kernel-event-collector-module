@@ -10,13 +10,15 @@
 // same pid. We warn on 3.10 because we don't expect to see this scenario.
 // This test verifies:
 //      - ec_process_tracking_report_exit handling of active_process_count < 0
-//      - on 2.32 the extra exit event is ignored
 //      - on 3.10 a warning is issued
+//
+// After the switch to the probe exit hook, the double-exit problem should not be possible anymore, which is
+// what this test was originally written for.
 bool __init test__proc_track_report_double_exit(ProcessContext *context)
 {
     bool passed = false;
 
-    ProcessTracking *procp = ec_process_tracking_create_process(
+    ProcessHandle *handle = ec_process_tracking_create_process(
         200,
         100,
         200,
@@ -27,21 +29,19 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
         NULL,
         REAL_START,
         context);
-    SharedTrackingData *shared_data = ec_process_tracking_get_shared_data(procp, context);
 
-    ASSERT_TRY(procp && shared_data);
+    ASSERT_TRY(handle);
 
-    atomic64_set(&shared_data->active_process_count, 0);
-    ASSERT_TRY(!ec_process_tracking_report_exit(200, context));
-    ASSERT_TRY(atomic64_read(&shared_data->exit_event) == 0);
+    atomic64_set(&ec_process_exec_identity(handle)->active_process_count, 0);
+    ASSERT_TRY(ec_process_tracking_report_exit(200, context));
+    ASSERT_TRY(atomic64_read(&ec_process_exec_identity(handle)->exit_event) == 0);
 
     passed = true;
 CATCH_DEFAULT:
-    ec_process_tracking_put_shared_data(shared_data, context);
-    if (procp)
+    if (handle)
     {
-        ec_process_tracking_remove_process(procp, context);
-        ec_process_tracking_put_process(procp, context);
+        ec_process_tracking_remove_process(handle, context);
+        ec_process_tracking_put_handle(handle, context);
     }
 
     return passed;

@@ -35,7 +35,7 @@ bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen
 
     // If we failed to resolve the symbol, i.e. we're on a 2.6.32 kernel or it just doesn't resolve,
     // default to the d_path option
-    if (CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
+    if (current->nsproxy && CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
     {
         (*pathname) = ec_dentry_to_path(path->dentry, buffer, buflen);
     } else
@@ -160,61 +160,55 @@ struct inode const *ec_get_inode_from_file(struct file const *file)
 
 struct super_block const *ec_get_sb_from_dentry(struct dentry const *dentry);  // forward
 
-void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode)
+void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode, uint64_t *fs_magic)
 {
-    *device = new_encode_dev(ec_get_sb_from_dentry(path->dentry)->s_dev);
-    *inode  =                path->dentry->d_inode->i_ino;
+    const struct super_block *sb = NULL;
+
+    sb = ec_get_sb_from_dentry(path->dentry);
+    if (sb)
+    {
+        *device   = new_encode_dev(sb->s_dev);
+        *inode    = path->dentry->d_inode->i_ino;
+        *fs_magic = sb->s_magic;
+    }
 }
 
 void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     struct super_block const *sb = NULL;
-#else
-     int           ret = 0;
-     struct kstat  ks;
-#endif
 
     CANCEL_VOID(file && device && inode);
 
     *device = 0;
     *inode  = 0;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     if (file->f_inode)
     {
-        sb = file->f_inode->i_sb;
         *inode = file->f_inode->i_ino;
     }
-    if (!sb)
-    {
-        sb = file->f_path.dentry->d_inode->i_sb;
-        if (!sb)
-        {
-            // This might not exactly be the sb we are looking for
-            sb = file->f_path.dentry->d_sb;
-        }
-    }
+
+    sb = ec_get_sb_from_file(file);
     if (sb)
     {
         *device = new_encode_dev(sb->s_dev);
     }
+}
 
-#else
-    CANCEL_VOID(!ec_may_skip_unsafe_vfs_calls(file));
+void ec_get_devinfo_fs_magic_from_file(struct file const *file, uint64_t *device, uint64_t *inode, uint64_t *fs_magic)
+{
+    struct super_block const *sb = NULL;
 
-    // Note, on some kernels this will call the security callback inode_getattr
-    //  At this time we are not hooking that call.  But if we do in the future,
-    //  it may be an issue.
-    ret = VFS_GETATTR(&file->f_path, &ks);
+    CANCEL_VOID(fs_magic);
 
-    if (ret == 0)
+    *fs_magic = 0;
+
+    ec_get_devinfo_from_file(file, device, inode);
+
+    sb = ec_get_sb_from_file(file);
+    if (sb)
     {
-        // Encode the device the same way that it is encoded for the `stat` call
-        *device = new_encode_dev(ks.dev);
-        *inode  = ks.ino;
+        *fs_magic = sb->s_magic;
     }
-#endif
 }
 
 umode_t ec_get_mode_from_file(struct file const *file)
