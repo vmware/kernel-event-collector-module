@@ -9,17 +9,6 @@
 #include <linux/unistd.h>
 
 // checkpatch-ignore: AVOID_EXTERNS
-// For Network hooks
-extern long (*ec_orig_sys_recvfrom)(int, void __user *, size_t, unsigned int, struct sockaddr __user *, int __user *);
-extern long (*ec_orig_sys_recvmsg)(int fd, struct msghdr __user *msg, unsigned int flags);
-extern long (*ec_orig_sys_recvmmsg)(int fd, struct mmsghdr __user *msg, unsigned int vlen, unsigned int flags, struct timespec __user *timeout);
-
-extern asmlinkage long ec_sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned int flags,
-                                       struct sockaddr __user *addr, int __user *addr_len);
-extern asmlinkage long ec_sys_recvmsg(int fd, struct msghdr __user *msg, unsigned int flags);
-extern asmlinkage long ec_sys_recvmmsg(int fd, struct mmsghdr __user *msg,
-                                unsigned int vlen, unsigned int flags,
-                                struct timespec __user *timeout);
 
 // For File hooks
 extern long (*ec_orig_sys_open)(const char __user *filename, int flags, umode_t mode);
@@ -50,9 +39,6 @@ static unsigned long page_rw_set;
 void __ec_save_old_hooks(p_sys_call_table syscall_table)
 {
     ec_orig_sys_delete_module = syscall_table[__NR_delete_module];
-    ec_orig_sys_recvfrom      = syscall_table[__NR_recvfrom];
-    ec_orig_sys_recvmsg       = syscall_table[__NR_recvmsg];
-    ec_orig_sys_recvmmsg      = syscall_table[__NR_recvmmsg];
     ec_orig_sys_creat         = syscall_table[__NR_creat];
     ec_orig_sys_open          = syscall_table[__NR_open];
     ec_orig_sys_openat        = syscall_table[__NR_openat];
@@ -76,9 +62,6 @@ bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
     if (ec_set_page_state_rw(syscall_table, &page_rw_set))
     {
         if (enableHooks & CB__NR_delete_module) syscall_table[__NR_delete_module] = ec_sys_delete_module;
-        if (enableHooks & CB__NR_recvfrom) syscall_table[__NR_recvfrom]  = ec_sys_recvfrom;
-        if (enableHooks & CB__NR_recvmsg) syscall_table[__NR_recvmsg]   = ec_sys_recvmsg;
-        if (enableHooks & CB__NR_recvmmsg) syscall_table[__NR_recvmmsg]  = ec_sys_recvmmsg;
         if (enableHooks & CB__NR_creat) syscall_table[__NR_creat]    = ec_sys_creat;
         if (enableHooks & CB__NR_open) syscall_table[__NR_open]      = ec_sys_open;
         if (enableHooks & CB__NR_openat) syscall_table[__NR_openat]    = ec_sys_openat;
@@ -135,9 +118,6 @@ void __ec_restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 
     if (ec_set_page_state_rw(syscall_table, &page_rw_set))
     {
-        if (enableHooks & CB__NR_recvfrom) syscall_table[__NR_recvfrom]  = ec_orig_sys_recvfrom;
-        if (enableHooks & CB__NR_recvmsg) syscall_table[__NR_recvmsg]   = ec_orig_sys_recvmsg;
-        if (enableHooks & CB__NR_recvmmsg) syscall_table[__NR_recvmmsg]  = ec_orig_sys_recvmmsg;
         if (enableHooks & CB__NR_delete_module) syscall_table[__NR_delete_module] = ec_orig_sys_delete_module;
         if (enableHooks & CB__NR_creat) syscall_table[__NR_creat]     = ec_orig_sys_creat;
         if (enableHooks & CB__NR_open) syscall_table[__NR_open]      = ec_orig_sys_open;
@@ -220,10 +200,6 @@ bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks)
     syscall_table = CB_RESOLVED(sys_call_table);
 
     if (enableHooks & CB__NR_delete_module) changed |= syscall_table[__NR_delete_module] != ec_sys_delete_module;
-    if (enableHooks & CB__NR_recvfrom) changed |= syscall_table[__NR_recvfrom]  != ec_sys_recvfrom;
-    if (enableHooks & CB__NR_recvmsg) changed |= syscall_table[__NR_recvmsg]   != ec_sys_recvmsg;
-    if (enableHooks & CB__NR_recvmmsg) changed |= syscall_table[__NR_recvmmsg]  != ec_sys_recvmmsg;
-
 CATCH_DEFAULT:
     return changed;
 }
@@ -295,9 +271,6 @@ int getSyscall(uint64_t syscall, struct seq_file *m)
     return 0;
 }
 
-int ec_get_sys_recvfrom(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvfrom, m); }
-int ec_get_sys_recvmsg(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmsg,  m); }
-int ec_get_sys_recvmmsg(struct seq_file *m, void *v) { return getSyscall(CB__NR_recvmmsg, m); }
 int ec_get_sys_delete_module(struct seq_file *m, void *v) { return getSyscall(CB__NR_delete_module,    m); }
 int ec_get_sys_creat(struct seq_file *m, void *v) { return getSyscall(CB__NR_creat,       m); }
 int ec_get_sys_open(struct seq_file *m, void *v) { return getSyscall(CB__NR_open,         m); }
@@ -307,24 +280,6 @@ int ec_get_sys_unlinkat(struct seq_file *m, void *v) { return getSyscall(CB__NR_
 int ec_get_sys_rename(struct seq_file *m, void *v) { return getSyscall(CB__NR_rename,     m); }
 int ec_get_sys_renameat(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat, m); }
 int ec_get_sys_renameat2(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat2, m); }
-
-ssize_t ec_set_sys_recvfrom(struct file *file, const char *buf, size_t size, loff_t *ppos)
-{
-    setSyscall(buf, "recvfrom", CB__NR_recvfrom, __NR_recvfrom, ec_sys_recvfrom,       ec_orig_sys_recvfrom, CB_RESOLVED(sys_call_table));
-    return size;
-}
-
-ssize_t ec_set_sys_recvmsg(struct file *file, const char *buf, size_t size, loff_t *ppos)
-{
-    setSyscall(buf, "recvmsg", CB__NR_recvmsg, __NR_recvmsg,  ec_sys_recvmsg,          ec_orig_sys_recvmsg, CB_RESOLVED(sys_call_table));
-    return size;
-}
-
-ssize_t ec_set_sys_recvmmsg(struct file *file, const char *buf, size_t size, loff_t *ppos)
-{
-    setSyscall(buf, "recvmmsg", CB__NR_recvmmsg, __NR_recvmmsg, ec_sys_recvmmsg,       ec_orig_sys_recvmmsg, CB_RESOLVED(sys_call_table));
-    return size;
-}
 
 ssize_t ec_set_sys_delete_module(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {

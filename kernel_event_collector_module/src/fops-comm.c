@@ -405,7 +405,6 @@ CATCH_DEFAULT:
     {
         // If we still have an event at this point free it now
         atomic64_inc(&tx_dropped);
-        TRACE(DL_INFO, "Failed event insertion");
         ec_free_event(msg, context);
     }
 

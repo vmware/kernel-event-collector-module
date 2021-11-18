@@ -534,7 +534,7 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
     TRY_STEP(USER_COMM, ec_logger_initialize(context));
     TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
     TRY_STEP(PROC,      ec_net_tracking_initialize(context));
-    TRY_STEP(NET_TR,    ec_network_hooks_initialize(context));
+    TRY_STEP(NET_TR,    ec_network_hooks_initialize(context, g_enableHooks));
     TRY_STEP(NET_HOOK,  ec_banning_initialize(context));
     TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
     TRY_STEP(NET_IS,    ec_file_helper_init(context));
@@ -554,10 +554,10 @@ CATCH_NET_IS:
     ec_DestroyNetworkIsolation(context);
 CATCH_BAN:
     ec_banning_shutdown(context);
+CATCH_NET_HOOK:
+    ec_network_hooks_shutdown(context, g_enableHooks);
 CATCH_NET_TR:
     ec_net_tracking_shutdown(context);
-CATCH_NET_HOOK:
-    ec_network_hooks_shutdown(context);
 CATCH_PROC:
     ec_process_tracking_shutdown(context);
 CATCH_LOGGER:
@@ -582,17 +582,18 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
      */
     ec_stall_events_shutdown(context);
     ec_stats_proc_shutdown(context);
+    ec_file_tracking_shutdown(context);
     ec_task_shutdown(context);
     ec_DestroyNetworkIsolation(context);
     ec_banning_shutdown(context);
-    ec_user_comm_shutdown(context);
+    ec_network_hooks_shutdown(context, g_enableHooks);
     ec_net_tracking_shutdown(context);
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
-    ec_file_tracking_shutdown(context);
+    ec_user_comm_shutdown(context);
+    ec_proc_shutdown(context);
     ec_path_cache_shutdown(context);
     ec_path_buffers_shutdown(context);
-    ec_proc_shutdown(context);
 }
 
 bool ec_disable_peer_modules(ProcessContext *context)
