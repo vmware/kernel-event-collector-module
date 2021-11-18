@@ -67,12 +67,9 @@ static unsigned int ec_hook_func_local_out(
 #endif  //}
     )
 {
-    unsigned int    xcode         = NF_ACCEPT;
-    void *daddr         = NULL;
-    int             family;
-    uint8_t         protocol;
-    struct udphdr *udp_header;
-
+    unsigned int                  xcode = NF_ACCEPT;
+    CB_SOCK_ADDR                  localAddr;
+    CB_SOCK_ADDR                  remoteAddr;
     CB_ISOLATION_INTERCEPT_RESULT isolation_result;
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
@@ -80,53 +77,24 @@ static unsigned int ec_hook_func_local_out(
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(skb);
-    TRY(skb->sk);
-
-    family = skb->sk->sk_family;
-    TRY(family == AF_INET || family == AF_INET6);
-
-    if (family == AF_INET)
-    {
-        struct iphdr *ip_header = (struct iphdr *) skb_network_header(skb);
-
-        TRY(ip_header);
-
-        protocol = ip_header->protocol;
-        daddr    = &ip_header->daddr;
-    } else
-    {
-        struct ipv6hdr *ip_header = ipv6_hdr(skb);
-        int             ptr       = (u8 *)(ip_header + 1) - skb->data;
-
-        TRY(ip_header);
-        protocol = ip_header->nexthdr;
-        daddr    = &ip_header->daddr.s6_addr32[0];
-
-        // Use the ipv6_skip_exthdr function to skip past any extended headers that may be present.
-        // We dont actually care about the returned pointer, just the protocol for the next header
-        ec_ipv6_skip_exthdr(skb, ptr, &protocol);
-    }
+    TRY(CHECK_SK_FAMILY(skb->sk) && CHECK_SK_PROTO(skb->sk));
 
     if (g_cbIsolationStats.isolationEnabled)
     {
-        if (protocol == IPPROTO_UDP)
-        {
-            udp_header = (struct udphdr *) skb_transport_header(skb);
+        TRY(ec_get_addrs_from_skb(skb->sk, skb, &localAddr, &remoteAddr));
 
-            ec_IsolationInterceptByAddrProtoPort(&context, ntohl(*(uint32_t *)daddr), true, protocol, udp_header->dest, &isolation_result);
-            if (isolation_result.isolationAction == IsolationActionBlock)
-            {
-                xcode = NF_DROP;
-                goto CATCH_DEFAULT;
-            }
+        ec_IsolationInterceptByAddrProtoPort(&context, skb->sk->sk_protocol, &remoteAddr, &isolation_result);
+        if (isolation_result.isolationAction == IsolationActionBlock)
+        {
+            xcode = NF_DROP;
+            goto CATCH_DEFAULT;
         }
     }
 
-    if (protocol == IPPROTO_TCP)
+    if (skb->sk->sk_protocol == IPPROTO_TCP)
     {
         __ec_web_proxy_request_check(&context, skb);
     }
-
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
@@ -172,23 +140,39 @@ unsigned int ec_hook_func_local_in_v4(
 #endif  //}
     )
 {
-    struct iphdr *ip_header;
+    struct iphdr                  *ip_header;
+    unsigned int                  xcode = NF_ACCEPT;
+    CB_SOCK_ADDR                  localAddr;
+    CB_SOCK_ADDR                  remoteAddr;
+    CB_ISOLATION_INTERCEPT_RESULT isolation_result;
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(skb);
+    TRY(CHECK_SK_FAMILY(skb->sk) && CHECK_SK_PROTO(skb->sk));
 
     ip_header = (struct iphdr *) skb_network_header(skb);
-
     TRY(ip_header);
 
-    __ec_process_dns_packet(skb, ip_header->protocol, __ec_transport_offset(skb, ip_header), &context);
+    __ec_process_dns_packet(skb, skb->sk->sk_protocol, __ec_transport_offset(skb, ip_header), &context);
+
+    if (g_cbIsolationStats.isolationEnabled)
+    {
+        TRY(ec_get_addrs_from_skb(skb->sk, skb, &remoteAddr, &localAddr));
+
+        ec_IsolationInterceptByAddrProtoPort(&context, skb->sk->sk_protocol, &remoteAddr, &isolation_result);
+        if (isolation_result.isolationAction == IsolationActionBlock)
+        {
+            xcode = NF_DROP;
+            goto CATCH_DEFAULT;
+        }
+    }
 
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return NF_ACCEPT;
+    return xcode;
 }
 
 unsigned int ec_hook_func_local_in_v6(
@@ -213,15 +197,21 @@ unsigned int ec_hook_func_local_in_v6(
 #endif  //}
     )
 {
-    uint8_t         protocol;
-    int             payload_offset;
-    struct ipv6hdr *ip_header;
+    uint8_t                       protocol;
+    int                           payload_offset;
+    struct ipv6hdr                *ip_header;
+    unsigned int                  xcode = NF_ACCEPT;
+    CB_SOCK_ADDR                  localAddr;
+    CB_SOCK_ADDR                  remoteAddr;
+    CB_ISOLATION_INTERCEPT_RESULT isolation_result;
+
 
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(skb);
+    TRY(CHECK_SK_FAMILY(skb->sk) && CHECK_SK_PROTO(skb->sk));
 
     ip_header = ipv6_hdr(skb);
 
@@ -234,9 +224,21 @@ unsigned int ec_hook_func_local_in_v6(
 
     __ec_process_dns_packet(skb, protocol, payload_offset, &context);
 
+    if (g_cbIsolationStats.isolationEnabled)
+    {
+        TRY(ec_get_addrs_from_skb(skb->sk, skb, &remoteAddr, &localAddr));
+
+        ec_IsolationInterceptByAddrProtoPort(&context, skb->sk->sk_protocol, &remoteAddr, &isolation_result);
+        if (isolation_result.isolationAction == IsolationActionBlock)
+        {
+            xcode = NF_DROP;
+            goto CATCH_DEFAULT;
+        }
+    }
+
 CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return NF_ACCEPT;
+    return xcode;
 }
 
 // This hook only looks for DNS response packets.  If one is found, a message is sent to
@@ -259,7 +261,6 @@ void __ec_process_dns_packet(
     //  for the TCP packet.  I seemed to multiple packets with no payload, and then one with 108 bytes.
     //  However I could never get any records when I parsed it.
     TRY(protocol == IPPROTO_UDP);
-
     {
         struct udphdr udphdr;
 
@@ -478,25 +479,31 @@ bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
     nfho_local_out[3].pf       = PF_INET6;
     nfho_local_out[3].priority = NF_IP_PRI_FIRST;
 
+    if (enableHooks & CB__NF_local_out)
+    {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
-    if (enableHooks & CB__NF_local_out) nf_register_hooks(nfho_local_out, NUM_HOOKS);
+        nf_register_hooks(nfho_local_out, NUM_HOOKS);
 #else //}{
-    if (enableHooks & CB__NF_local_out) nf_register_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
+        nf_register_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
 #endif //}
+        TRACE(DL_INIT, "Netfilter hook has been inserted");
+    }
 
-    TRACE(DL_INIT, "Netfilter hook has been inserted");
 
     return true;
 }
 
 void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks)
 {
-    TRACE(DL_SHUTDOWN, "Netfilter hook has been unregistered");
+    if (enableHooks & CB__NF_local_out)
+    {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
-    if (enableHooks & CB__NF_local_out) nf_unregister_hooks(nfho_local_out, NUM_HOOKS);
+        nf_unregister_hooks(nfho_local_out, NUM_HOOKS);
 #else  //}{
-    if (enableHooks & CB__NF_local_out) nf_unregister_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
+        nf_unregister_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
 #endif  //}
+        TRACE(DL_SHUTDOWN, "Netfilter hook has been unregistered");
+    }
 }
 
 #ifdef HOOK_SELECTOR

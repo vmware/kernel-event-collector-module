@@ -117,7 +117,7 @@ NTSTATUS ec_ProcessIsolationIoctl(
 
     if (_pCurrentCbIsolationModeControl->isolationMode == IsolationModeOff)
     {
-        TRACE(DL_INFO, "%s: isolation OFF\n", __func__);
+        TRACE(DL_WARNING, "%s: isolation OFF\n", __func__);
     } else
     {
         char           str[INET_ADDRSTRLEN];
@@ -127,7 +127,7 @@ NTSTATUS ec_ProcessIsolationIoctl(
         {
             addr = (unsigned char *)&_pCurrentCbIsolationModeControl->allowedIpAddresses[i];
             snprintf(str, INET_ADDRSTRLEN, "%d.%d.%d.%d", addr[3], addr[2], addr[1], addr[0]);
-            TRACE(DL_INFO, "%s: isolation ON IP: %s\n", __func__, str);
+            TRACE(DL_WARNING, "%s: isolation ON IP: %s\n", __func__, str);
         }
     }
 
@@ -181,13 +181,26 @@ VOID ec_IsolationIntercept(ProcessContext *context,
 }
 
 VOID ec_IsolationInterceptByAddrProtoPort(
-    ProcessContext *context,
-    ULONG                                   remoteIpAddress,
-    bool                                    isIpV4,
-    UINT32                                  protocol,
-    UINT16                                  port,
+    ProcessContext                *context,
+    UINT32                         protocol,
+    CB_SOCK_ADDR                  *remoteAddr,
     CB_ISOLATION_INTERCEPT_RESULT *isolationResult)
 {
+    bool   isIpV4 = remoteAddr->sa_addr.sa_family == AF_INET;
+    ULONG  remoteIpAddress;
+    UINT16 port;
+
+    if (isIpV4)
+    {
+        remoteIpAddress = ntohl(remoteAddr->as_in4.sin_addr.s_addr);
+        port = remoteAddr->as_in4.sin_port;
+    } else
+    {
+        // it doesn't really matter what remoteIpAddress is set for IP6 since all IP6 addresses are blocked
+        remoteIpAddress = ntohl(*(uint32_t *)&remoteAddr->as_in6.sin6_addr.s6_addr32[0]);
+        port = remoteAddr->as_in6.sin6_port;
+    }
+
     // immediate allow if isolation mode is not on
     if (atomic_read((atomic_t *)&CBIsolationMode) == IsolationModeOff)
     {
@@ -199,7 +212,7 @@ VOID ec_IsolationInterceptByAddrProtoPort(
         ((isIpV4 == false) && (port == DHCP_CLIENT_PORT_V6 || port == DHCP_SERVER_PORT_V6)) ||
         port == DNS_SERVER_PORT))
     {
-        TRACE(DL_INFO, "ISOLATION ALLOWED:: %s ADDR: 0x%08x PROTO: %s PORT: %u",
+        TRACE(DL_INFO, "ISOLATION ALLOWED: %s ADDR: 0x%08x PROTO: %s PORT: %u",
             (isIpV4?"IPv4":"IPv6"),
             remoteIpAddress, (protocol == IPPROTO_UDP?"UDP":"TCP"), ntohs(port));
         isolationResult->isolationAction = IsolationActionAllow;
@@ -225,9 +238,6 @@ VOID ec_IsolationInterceptByAddrProtoPort(
                 RELEASE_RESOURCE(context);
                 return;
             }
-            //			TRACE(DL_INFO, "ISOLATION NO Match: ADDR: 0x%08x RADDR: 0x%08x PROTO: %u PORT: %u",
-            //				  ntohl(allowedIpAddress), ntohl(remoteIpAddress), protocol, ntohs(port));
-
         }
         RELEASE_RESOURCE(context);
     }

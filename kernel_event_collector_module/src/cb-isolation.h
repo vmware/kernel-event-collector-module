@@ -102,11 +102,9 @@ NTSTATUS ec_ProcessIsolationIoctl(
 //ULONG_PTR*  bytesXfered);
 
 VOID ec_IsolationInterceptByAddrProtoPort(
-    ProcessContext *context,
-    ULONG                                   remoteIpAddress,
-    bool                                    isIpV4,
-    UINT32                                  protocol,
-    UINT16                                  port,
+    ProcessContext                *context,
+    UINT32                         protocol,
+    CB_SOCK_ADDR                  *remoteAddr,
     CB_ISOLATION_INTERCEPT_RESULT *isolationResult);
 
 extern CB_ISOLATION_STATS g_cbIsolationStats;
