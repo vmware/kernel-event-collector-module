@@ -51,7 +51,7 @@ deploy_release:
       filename=workspace/bpf_probe/build/install-packages/check-probe-${BUILD_VERSION}.tar.gz
       echo $filename
 
-      curl -s -S -H "X-JFrog-Art-Api:$ARTIFACTORY_TOKEN" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+      curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
   else
       echo "Skipping deployment because no new version of bpf_probe was built"
   fi
