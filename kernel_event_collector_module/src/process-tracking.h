@@ -183,7 +183,7 @@ void ec_process_tracking_put_exec_handle(ExecHandle *exec_handle, ProcessContext
 void ec_process_exec_handle_clone(ExecHandle *from, ExecHandle *to, ProcessContext *context);
 
 // Event Helper
-void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
+void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
 void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVENT event, ProcessContext *context);
 bool ec_process_tracking_should_track_user(void);
 bool ec_process_tracking_has_active_process(PosixIdentity *posix_identity, ProcessContext *context);

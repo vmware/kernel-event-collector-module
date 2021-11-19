@@ -144,13 +144,8 @@ void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessConte
     }
 }
 
-bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType)
+bool ec_logger_should_log(CB_EVENT_TYPE eventType)
 {
-    if (intentType != INTENT_REPORT)
-    {
-        return false; //TODO
-    }
-
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START_FORK:
@@ -234,7 +229,7 @@ bool ec_shouldExcludeByUID(ProcessContext *context, uid_t uid)
     return ec_banning_IgnoreUid(context, uid);
 }
 
-PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, ProcessContext *context)
+PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
 {
     CB_EVENT_NODE *node = NULL;
     PCB_EVENT event = NULL;
@@ -245,7 +240,7 @@ PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, Pro
     //  Depending on the config structure, the ec_logger_should_log function may reject the
     //  event. The collector does not care about this extra granularitiy, so once
     //  we know the event should be logged, we set it to the more generic event type.
-    TRY(ec_logger_should_log(intentType, eventType));
+    TRY(ec_logger_should_log(eventType));
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START_FORK:

@@ -1017,7 +1017,7 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
             }
 
             TRACE(DL_INFO, "Got a heartbeat request.");
-            event = ec_alloc_event(INTENT_REPORT, CB_EVENT_TYPE_HEARTBEAT, &context);
+            event = ec_alloc_event(CB_EVENT_TYPE_HEARTBEAT, &context);
             if (event == NULL)
             {
                 TRACE(DL_ERROR, "Unable to alloc CB_EVENT_TYPE_HEARTBEAT.");

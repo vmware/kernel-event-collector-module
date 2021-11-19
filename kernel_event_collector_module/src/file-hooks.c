@@ -372,7 +372,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     CANCEL_VOID(file);
     CANCEL_VOID(!ec_banning_IgnoreProcess(context, pid));
 
-    CANCEL_VOID(ec_logger_should_log(INTENT_REPORT, eventType));
+    CANCEL_VOID(ec_logger_should_log(eventType));
 
     // Skip if not interesting
     CANCEL_VOID(ec_is_interesting_file(file));

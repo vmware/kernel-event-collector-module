@@ -385,15 +385,8 @@ typedef struct _CB_EVENT_GENERIC_DATA {
     char *data;
 } CB_EVENT_GENERIC_DATA;
 
-// intention of the event
-typedef enum CB_INTENT_TYPE {
-    INTENT_ACCESS_CHECK = 0, // we are requesting permission for this operation
-    INTENT_REPORT = 1        // we are reporting that an operation happened
-} CB_INTENT_TYPE;
-
 typedef struct CB_EVENT {
     CB_EVENT_API_VERSION apiVersion;
-    CB_INTENT_TYPE intentType; // INTENT_ACCESS_CHECK or INTENT_REPORT
     CB_EVENT_TYPE eventType;
     CB_EVENT_PROCESS_INFO procInfo;
 
