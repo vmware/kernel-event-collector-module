@@ -144,7 +144,7 @@ void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessConte
     }
 }
 
-bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType)
+bool ec_logger_should_log(CB_EVENT_TYPE eventType)
 {
     switch (eventType)
     {
@@ -198,11 +198,7 @@ bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType)
     case CB_EVENT_TYPE_FILE_WRITE:
     case CB_EVENT_TYPE_FILE_CLOSE:
     case CB_EVENT_TYPE_FILE_OPEN:
-        if (intentType == INTENT_PREACTION)
-        {
-            return g_driver_config.report_file_intent == ENABLE;
-        }
-        return (g_driver_config.file_mods == ENABLE);
+        return g_driver_config.file_mods == ENABLE;
 
     case CB_EVENT_TYPE_NET_CONNECT_PRE:
     case CB_EVENT_TYPE_NET_CONNECT_POST:
@@ -233,7 +229,7 @@ bool ec_shouldExcludeByUID(ProcessContext *context, uid_t uid)
     return ec_banning_IgnoreUid(context, uid);
 }
 
-PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, ProcessContext *context)
+PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
 {
     CB_EVENT_NODE *node = NULL;
     PCB_EVENT event = NULL;
@@ -244,7 +240,7 @@ PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, Pro
     //  Depending on the config structure, the ec_logger_should_log function may reject the
     //  event. The collector does not care about this extra granularitiy, so once
     //  we know the event should be logged, we set it to the more generic event type.
-    TRY(ec_logger_should_log(intentType, eventType));
+    TRY(ec_logger_should_log(eventType));
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START_FORK:

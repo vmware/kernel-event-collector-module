@@ -240,7 +240,7 @@ void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, Exe
     ec_process_exec_handle_clone(exec_handle, &ec_process_posix_identity(process_handle)->temp_exec_handle, context);
 }
 
-void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
+void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
 {
     TRY(process_handle && event);
 
@@ -289,8 +289,6 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_INTENT
             context);
         break;
     }
-
-    event->intentType = intentType;
 
 CATCH_DEFAULT:
     // In some cases we expect this function to be called with a NULL event
