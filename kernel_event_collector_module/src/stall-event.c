@@ -65,6 +65,7 @@ bool ec_stall_events_initialize(ProcessContext *context)
                                         offsetof(struct stall_event, key),
                                         offsetof(struct stall_event, link),
                                         HASHTBL_DISABLE_REF_COUNT,
+                                        HASHTBL_DISABLE_LRU,
                                         ec_stall_tbl_delete_callback,
                                         NULL);
     enabled = false;

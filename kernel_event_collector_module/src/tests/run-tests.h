@@ -26,6 +26,11 @@ bool test__hashtbl_double_del(ProcessContext *context) __init;
 bool test__hashtbl_refcount_double_del(ProcessContext *context) __init;
 bool test__hashtbl_refcount(ProcessContext *context) __init;
 bool test__hashtbl_add_duplicate(ProcessContext *context) __init;
+bool test__hashtbl_lru_lookup(ProcessContext *context) __init;
+
+bool test__plru_init(ProcessContext *context) __init;
+bool test__plru_find_inactive(ProcessContext *context) __init;
+bool test__plru_mark_active(ProcessContext *context) __init;
 
 bool test__proc_track_report_double_exit(ProcessContext *context) __init;
 

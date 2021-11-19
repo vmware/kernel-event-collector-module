@@ -30,6 +30,11 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__hashtbl_refcount_double_del(context));
     RUN_TEST(test__hashtbl_refcount(context));
     RUN_TEST(test__hashtbl_add_duplicate(context));
+    RUN_TEST(test__hashtbl_lru_lookup(context));
+
+    RUN_TEST(test__plru_init(context));
+    RUN_TEST(test__plru_find_inactive(context));
+    RUN_TEST(test__plru_mark_active(context));
 
     RUN_TEST(test__proc_track_report_double_exit(context));
 
@@ -47,5 +52,7 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__stall_event_abort(context));
 
     g_traceLevel = origTraceLevel;
-    return all_passed;
+
+    // I do not want to load the module
+    return false;
 }

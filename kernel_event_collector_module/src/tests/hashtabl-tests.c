@@ -4,7 +4,7 @@
 #include "run-tests.h"
 
 typedef struct table_key {
-    int id;
+    uint64_t id;
 } TableKey;
 
 typedef struct table_value {
@@ -29,6 +29,7 @@ HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_del
                               offsetof(Entry, key),
                               offsetof(Entry, link),
                               refcount_offset,
+                              HASHTBL_DISABLE_LRU,
                               delete_callback,
                               NULL);
 }
@@ -75,12 +76,12 @@ bool __init test__hash_table(ProcessContext *context)
 
         if (!entry_ptr)
         {
-            pr_alert("ec_hashtbl_get_generic failed %d %d\n", i, keys[i].id);
+            pr_alert("ec_hashtbl_get_generic failed %d %llu\n", i, keys[i].id);
         }
 
         if (memcmp(&entry_ptr->value, &values[i], sizeof(struct table_key)) != 0)
         {
-            pr_alert("Get value does not match %d %d\n", i, keys[i].id);
+            pr_alert("Get value does not match %d %llu\n", i, keys[i].id);
             goto test_exit;
         }
     }
@@ -273,5 +274,99 @@ CATCH_DEFAULT:
         }
         ec_hashtbl_shutdown_generic(table, context);
     }
+    return passed;
+}
+
+bool __init __test__hashtbl_lru_lookup(
+    uint64_t lru_size,
+    uint64_t bucket_size,
+    uint64_t insertion_count,
+    ProcessContext *context)
+{
+    bool passed = false;
+    Entry *tdata   = NULL;
+    int i;
+    uint64_t *data;
+    int data_size = 1024;
+
+    HashTbl *table = ec_hashtbl_init_generic(
+        context,
+        bucket_size,
+        sizeof(Entry),
+        sizeof(Entry),
+        "hash_table_testing",
+        sizeof(TableKey),
+        offsetof(Entry, key),
+        offsetof(Entry, link),
+        HASHTBL_DISABLE_REF_COUNT,
+        lru_size,
+        NULL,
+        NULL);
+    uint64_t count;
+    uint64_t overage;
+
+    ASSERT_TRY(table);
+
+    data = ec_mem_cache_alloc_generic(data_size * sizeof(uint64_t), context);
+
+    for (i = 0; i < insertion_count; ++i)
+    {
+        tdata = (Entry *) ec_hashtbl_alloc_generic(table, context);
+        TRY_MSG(tdata, DL_ERROR, "hashtbl [%s:%d] failed to allocate data", __func__, __LINE__);
+
+        if (i % data_size == 0)
+        {
+            get_random_bytes(data, ec_mem_cache_get_size_generic(data));
+        }
+        tdata->key.id = data[i % data_size];
+
+        // This prevents duplicates, which will trigger an access instead
+        if (ec_hashtbl_add_generic_safe(table, tdata, context) != 0)
+        {
+            ec_hashtbl_free_generic(table, tdata, context);
+        }
+    }
+    ec_mem_cache_free_generic(data);
+
+    count = ec_hashtbl_get_count(table, context);
+    overage = (count - lru_size) * 100 / lru_size;
+    TRACE(DL_INFO, "hashtbl lru test: lru_size=%llu, bucket_size=%llu, insertions=%llu, total_over=%lld (%llu percent)",
+        lru_size, bucket_size, insertion_count, count - lru_size, overage);
+
+
+    passed = true;
+
+CATCH_DEFAULT:
+    ec_hashtbl_shutdown_generic(table, context);
+    return passed;
+}
+
+bool __init test__hashtbl_lru_lookup(ProcessContext *context)
+{
+    int i;
+    bool passed = true;
+    uint64_t data[][3] = {
+        // LRU Size, Bucket Size, Insertion Count
+        { 2048, 16, 4 },  // 0% over
+        { 2048, 8, 4 },   // 4% over
+        { 2048, 4, 4 },   // 13% over
+        { 2048, 2, 4 },   // 30% over
+        { 2048, 1, 4 },   // 60% over
+        { 262144, 16, 4 },// 0% over
+        { 262144, 8, 4 }, // 4% over
+        { 262144, 4, 4 }, // 13% over
+        { 262144, 2, 4 }, // 30% over
+        { 262144, 1, 4 }, // 60% over
+        { 0 }
+    };
+    for (i = 0; data[i][0] != 0; ++i)
+    {
+        uint64_t lru_size = data[i][0];
+        uint64_t bucket_size = lru_size / data[i][1];
+        uint64_t insertion_count = lru_size * data[i][2];
+
+        passed &= __test__hashtbl_lru_lookup(lru_size, bucket_size, insertion_count, context);
+    }
+
     return passed;
 }

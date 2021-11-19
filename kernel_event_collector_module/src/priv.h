@@ -196,10 +196,8 @@ time_t ec_get_null_time(void);
 extern int     ec_proc_show_events_avg(struct seq_file *m, void *v);
 extern int     ec_proc_show_events_det(struct seq_file *m, void *v);
 extern ssize_t ec_proc_show_events_rst(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern ssize_t ec_net_track_purge_age(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern ssize_t ec_net_track_purge_all(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int     ec_net_track_show_new(struct seq_file *m, void *v);
-extern int     ec_net_track_show_old(struct seq_file *m, void *v);
+extern ssize_t ec_net_track_purge(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int     ec_net_track_show(struct seq_file *m, void *v);
 
 extern int ec_get_syscall_clone(struct seq_file *m, void *v);
 extern ssize_t ec_set_syscall_clone(struct file *file, const char *buf, size_t size, loff_t *ppos);

@@ -9,12 +9,14 @@
 
 #include "version.h"
 #include "mem-cache.h"
+#include "plru.h"
 
 #define  ACTION_CONTINUE   0
 #define  ACTION_STOP       1
 #define  ACTION_DELETE     4
 
 #define  HASHTBL_DISABLE_REF_COUNT  -1
+#define  HASHTBL_DISABLE_LRU        0
 
 
 // hash-table-generic provides interfaces for hash tables. It supports arbitary
@@ -38,8 +40,10 @@ typedef struct hashbtl_bkt {
 
 typedef struct hashtbl {
     HashTableBkt *tablePtr;
+    PLruTree plru;
     struct list_head   genTables;
     uint64_t   numberOfBuckets;
+    uint64_t   lruSize;
     uint32_t   secret;
     atomic64_t tableInstance;
     atomic64_t tableShutdown;  // shutting down = 1 running = 0
@@ -57,6 +61,7 @@ typedef struct hashtbl {
 typedef struct hash_table_node {
     struct hlist_node link;
     u32 hash;
+    u32 activity;
 } HashTableNode;
 
 void ec_hashtbl_generic_init(ProcessContext *context);
@@ -64,13 +69,21 @@ void ec_hashtbl_generic_destoy(ProcessContext *context);
 
 typedef int (*hashtbl_for_each_generic_cb)(HashTbl *tblp, HashTableNode *datap, void *priv, ProcessContext *context);
 
-HashTbl *ec_hashtbl_init_generic(ProcessContext *context,
-                              uint64_t numberOfBuckets, uint64_t datasize,
-                              uint64_t sizehint, const char *hashtble_name, int key_len,
-                              int key_offset, int node_offset, int refcount_offset,
-                              hashtbl_delete_cb delete_callback,
-                              hashtbl_handle_cb handle_callback);
+HashTbl *ec_hashtbl_init_generic(
+    ProcessContext *context,
+    uint64_t numberOfBuckets,
+    uint64_t datasize,
+    uint64_t sizehint,
+    const char *hashtble_name,
+    int key_len,
+    int key_offset,
+    int node_offset,
+    int refcount_offset,
+    uint64_t lruSize,
+    hashtbl_delete_cb delete_callback,
+    hashtbl_handle_cb handle_callback);
 void *ec_hashtbl_alloc_generic(HashTbl *tblp, ProcessContext *context);
+uint64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context);
 int ec_hashtbl_add_generic(HashTbl *tblp, void *datap, ProcessContext *context);
 
 // Like ec_hashtbl_add_generic but returns -EEXIST on a duplicate entry.

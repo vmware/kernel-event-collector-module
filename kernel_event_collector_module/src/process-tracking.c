@@ -53,6 +53,7 @@ bool ec_process_tracking_initialize(ProcessContext *context)
                                                     offsetof(PosixIdentity, pt_key),
                                                     offsetof(PosixIdentity, pt_link),
                                                     offsetof(PosixIdentity, reference_count),
+                                                    HASHTBL_DISABLE_LRU,
                                                     ec_hashtbl_delete_callback,
                                                     ec_hashtbl_handle_callback);
     TRY(g_process_tracking_data.table);
