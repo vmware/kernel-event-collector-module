@@ -146,6 +146,11 @@ void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessConte
 
 bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType)
 {
+    if (intentType != INTENT_REPORT)
+    {
+        return false; //TODO
+    }
+
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START_FORK:
@@ -198,11 +203,7 @@ bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType)
     case CB_EVENT_TYPE_FILE_WRITE:
     case CB_EVENT_TYPE_FILE_CLOSE:
     case CB_EVENT_TYPE_FILE_OPEN:
-        if (intentType == INTENT_PREACTION)
-        {
-            return g_driver_config.report_file_intent == ENABLE;
-        }
-        return (g_driver_config.file_mods == ENABLE);
+        return g_driver_config.file_mods == ENABLE;
 
     case CB_EVENT_TYPE_NET_CONNECT_PRE:
     case CB_EVENT_TYPE_NET_CONNECT_POST:

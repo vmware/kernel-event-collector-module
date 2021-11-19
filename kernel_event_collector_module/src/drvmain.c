@@ -48,7 +48,6 @@ CB_DRIVER_CONFIG g_driver_config = {
     .file_mods =            ENABLE,
     .net_conns =            ENABLE,
     .report_process_user =  ENABLE,
-    .report_file_intent =   DISABLE,
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);

@@ -28,7 +28,6 @@ void ec_event_send_block(ProcessHandle  *process_handle,
 
 void ec_event_send_file(ProcessHandle  *process_handle,
                         CB_EVENT_TYPE    event_type,
-                        CB_INTENT_TYPE   intent,
                         uint64_t         device,
                         uint64_t         inode,
                         uint64_t         fs_magic,

@@ -199,7 +199,6 @@ void ec_event_send_block(
 void ec_event_send_file(
     ProcessHandle  * process_handle,
     CB_EVENT_TYPE    event_type,
-    CB_INTENT_TYPE   intent,
     uint64_t         device,
     uint64_t         inode,
     uint64_t         fs_magic,
@@ -226,7 +225,7 @@ void ec_event_send_file(
 
     event = ec_factory_alloc_event(
         process_handle,
-        intent,
+        INTENT_REPORT,
         event_type,
         DL_FILE,
         ec_event_type_to_str(event_type),
