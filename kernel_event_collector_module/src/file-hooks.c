@@ -361,8 +361,6 @@ CATCH_DEFAULT:
     ec_process_tracking_put_handle(process_handle, context);
 }
 
-#define SANE_PATH(PATH) PATH ? PATH : "<unknown>"
-
 void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
 {
     FILE_PROCESS_VALUE *fileProcess    = NULL;
