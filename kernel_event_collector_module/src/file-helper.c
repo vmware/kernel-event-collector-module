@@ -5,6 +5,7 @@
 #include "priv.h"
 #include "cb-banning.h"
 #include <linux/magic.h>
+#include <linux/namei.h>
 
 bool ec_file_helper_init(ProcessContext *context)
 {
@@ -312,4 +313,124 @@ bool ec_may_skip_unsafe_vfs_calls(struct file const *file)
 
     // Eventually expand to stacked file systems
     return ec_is_network_filesystem(sb);
+}
+
+#define ENABLE_SPECIAL_FILE_SETUP(x)   {x, sizeof(x)-1, 1}
+#define DISABLE_SPECIAL_FILE_SETUP(x)  {x, sizeof(x)-1, 0}
+#define N_ELEM(x) (sizeof(x) / sizeof(*x))
+
+typedef struct special_file_t_ {
+    char *name;
+    int   len;
+    int   enabled;
+
+} special_file_t;
+
+//
+// be sure to keep this value set to the smallest 'len' value in the
+// special_files[] array below
+//
+#define MIN_SPECIAL_FILE_LEN 4
+static const special_file_t special_files[] = {
+
+    ENABLE_SPECIAL_FILE_SETUP("/var/log/messages"),
+    ENABLE_SPECIAL_FILE_SETUP("/var/lib/cb"),
+    ENABLE_SPECIAL_FILE_SETUP("/var/log"),
+    ENABLE_SPECIAL_FILE_SETUP("/srv/bit9/data"),
+    ENABLE_SPECIAL_FILE_SETUP("/sys"),
+    ENABLE_SPECIAL_FILE_SETUP("/proc"),
+    ENABLE_SPECIAL_FILE_SETUP("/var/opt/carbonblack"),
+    DISABLE_SPECIAL_FILE_SETUP(""),
+    DISABLE_SPECIAL_FILE_SETUP(""),
+    DISABLE_SPECIAL_FILE_SETUP(""),
+    DISABLE_SPECIAL_FILE_SETUP(""),
+};
+
+//
+// FUNCTION:
+//   ec_is_special_file()
+//
+// DESCRIPTION:
+//   we'll skip any file that lives below any of the directories listed in
+//   in the special_files[] array.
+//
+// PARAMS:
+//   char *pathname - full path + filename to test
+//   int len - length of the full path and filename
+//
+// RETURNS:
+//   0 == no match
+//
+//
+int ec_is_special_file(char *pathname, int len)
+{
+    int i;
+
+    CANCEL(pathname, 0);
+
+    //
+    // bail out if we've got no chance of a match
+    //
+    if (len < MIN_SPECIAL_FILE_LEN)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < N_ELEM(special_files); i++)
+    {
+        //
+        // Skip disabled elements
+        //
+        if (!special_files[i].enabled)
+        {
+            continue;
+        }
+
+        //
+        // if the length of the path we're testing is shorter than this special
+        // file, it can't possibly be a match
+        //
+        if (special_files[i].len > len)
+        {
+            continue;
+        }
+
+        //
+        // still here, do the compare. We know that the path passed in is >=
+        // this special_file[].len so we'll just compare up the length of the
+        // special file itself. If we match up to that point, the path being
+        // tested is or is below this special_file[].name
+        //
+        if (strncmp(pathname, special_files[i].name, special_files[i].len) == 0)
+        {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+bool ec_file_exists(int dfd, const char __user *filename)
+{
+    bool         exists     = false;
+    struct path path;
+
+    TRY(filename);
+
+    exists = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path) == 0;
+
+CATCH_DEFAULT:
+    if (exists)
+    {
+        path_put(&path);
+    }
+
+    return exists;
+}
+
+bool ec_is_interesting_file(struct file *file)
+{
+    umode_t mode = ec_get_mode_from_file(file);
+
+    return (S_ISREG(mode) && (!S_ISDIR(mode)) && (!S_ISLNK(mode)));
 }

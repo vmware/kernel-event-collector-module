@@ -23,3 +23,4 @@ struct super_block const *ec_get_sb_from_file(struct file const *file);
 bool ec_is_interesting_file(struct file *file);
 int ec_is_special_file(char *pathname, int len);
 bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
+bool ec_file_exists(int dfd, const char __user *filename);

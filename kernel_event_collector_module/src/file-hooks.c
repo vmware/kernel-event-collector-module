@@ -13,10 +13,6 @@
 #include <linux/file.h>
 #include <linux/namei.h>
 
-bool ec_file_exists(int dfd, const char __user *filename);
-
-#define N_ELEM(x) (sizeof(x) / sizeof(*x))
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 #define DENTRY(a)    (a)
 #else
@@ -24,13 +20,6 @@ bool ec_file_exists(int dfd, const char __user *filename);
 #define DENTRY(a)    (a)->dentry, (a)->mnt
 // checkpatch-no-ignore: COMPLEX_MACRO
 #endif
-
-typedef struct special_file_t_ {
-    char *name;
-    int   len;
-    int   enabled;
-
-} special_file_t;
 
 // We collect data about a file in some of the syscall hooks.  We use this struct
 //  so that we can collect data before modifying the file, but not actually use
@@ -48,99 +37,6 @@ file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __
 file_data_t *__ec_get_file_data_from_name_at(ProcessContext *context, int dfd, const char __user *filename);
 file_data_t *__ec_get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
 void __ec_put_file_data(ProcessContext *context, file_data_t *file_data);
-
-#define ENABLE_SPECIAL_FILE_SETUP(x)   {x, sizeof(x)-1, 1}
-#define DISABLE_SPECIAL_FILE_SETUP(x)  {x, sizeof(x)-1, 0}
-
-
-//
-// be sure to keep this value set to the smallest 'len' value in the
-// special_files[] array below
-//
-#define MIN_SPECIAL_FILE_LEN 5
-static const special_file_t special_files[] = {
-
-    ENABLE_SPECIAL_FILE_SETUP("/var/log/messages"),
-    ENABLE_SPECIAL_FILE_SETUP("/var/lib/cb"),
-    ENABLE_SPECIAL_FILE_SETUP("/var/log"),
-    ENABLE_SPECIAL_FILE_SETUP("/srv/bit9/data"),
-    ENABLE_SPECIAL_FILE_SETUP("/sys"),
-    ENABLE_SPECIAL_FILE_SETUP("/proc"),
-    ENABLE_SPECIAL_FILE_SETUP("/var/opt/carbonblack"),
-    DISABLE_SPECIAL_FILE_SETUP(""),
-    DISABLE_SPECIAL_FILE_SETUP(""),
-    DISABLE_SPECIAL_FILE_SETUP(""),
-    DISABLE_SPECIAL_FILE_SETUP(""),
-};
-
-//
-// FUNCTION:
-//   ec_is_special_file()
-//
-// DESCRIPTION:
-//   we'll skip any file that lives below any of the directories listed in
-//   in the special_files[] array.
-//
-// PARAMS:
-//   char *pathname - full path + filename to test
-//   int len - length of the full path and filename
-//
-// RETURNS:
-//   0 == no match
-//
-//
-int ec_is_special_file(char *pathname, int len)
-{
-    int i;
-
-    //
-    // bail out if we've got no chance of a match
-    //
-    if (len < MIN_SPECIAL_FILE_LEN)
-    {
-        return 0;
-    }
-
-    for (i = 0; i < N_ELEM(special_files); i++)
-    {
-        //
-        // Skip disabled elements
-        //
-        if (!special_files[i].enabled)
-        {
-            continue;
-        }
-
-        //
-        // if the length of the path we're testing is shorter than this special
-        // file, it can't possibly be a match
-        //
-        if (special_files[i].len > len)
-        {
-            continue;
-        }
-
-        //
-        // still here, do the compare. We know that the path passed in is >=
-        // this special_file[].len so we'll just compare up the length of the
-        // special file itself. If we match up to that point, the path being
-        // tested is or is below this special_file[].name
-        //
-        if (strncmp(pathname, special_files[i].name, special_files[i].len) == 0)
-        {
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
-bool ec_is_interesting_file(struct file *file)
-{
-    umode_t mode = ec_get_mode_from_file(file);
-
-    return (S_ISREG(mode) && (!S_ISDIR(mode)) && (!S_ISLNK(mode)));
-}
 
 char *ec_event_type_to_str(CB_EVENT_TYPE event_type)
 {
@@ -892,22 +788,4 @@ CATCH_DEFAULT:
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
-}
-
-bool ec_file_exists(int dfd, const char __user *filename)
-{
-    bool         exists     = false;
-    struct path path;
-
-    TRY(filename);
-
-    exists = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path) == 0;
-
-CATCH_DEFAULT:
-    if (exists)
-    {
-        path_put(&path);
-    }
-
-    return exists;
 }
