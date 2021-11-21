@@ -33,7 +33,6 @@ typedef struct file_data_t_ {
     char            *generic_path_buffer; // on the GENERIC cache
 } file_data_t;
 
-file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename);  // forward
 file_data_t *__ec_get_file_data_from_name_at(ProcessContext *context, int dfd, const char __user *filename);
 file_data_t *__ec_get_file_data_from_fd(ProcessContext *context, const char __user *filename, unsigned int fd);
 void __ec_put_file_data(ProcessContext *context, file_data_t *file_data);
@@ -150,10 +149,6 @@ file_data_t *__ec_get_file_data_from_name_at(ProcessContext *context, int dfd, c
 CATCH_DEFAULT:
     __ec_put_file_data(context, file_data);  // de-allocate file_data
     return NULL;
-}
-file_data_t *__ec_get_file_data_from_name(ProcessContext *context, const char __user *filename)
-{
-    return __ec_get_file_data_from_name_at(context, AT_FDCWD, filename);
 }
 
 void __ec_file_data_init_from_path(ProcessContext *context, file_data_t *file_data, struct path const *path)
@@ -417,85 +412,51 @@ CATCH_DEFAULT:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
 }
 
-asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode)
+struct open_argblock {
+    int dfd;
+    const char __user *filename;
+    int flags;
+    umode_t mode;
+};
+
+long __ec_sys_open(
+    long (*call_open_func)(struct open_argblock *args),
+    struct open_argblock   *args,
+    ProcessContext         *context)
 {
     long                fd;
     CB_EVENT_TYPE       eventType = 0;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DISABLED);
 
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-
-    if ((flags & O_CREAT) && !ec_file_exists(AT_FDCWD, filename))
+    if ((args->flags & O_CREAT) && !ec_file_exists(args->dfd, args->filename))
     {
         // If this is opened with create mode AND it does not already exist we will report a create event
         eventType = CB_EVENT_TYPE_FILE_CREATE;
-    } else if (flags & (O_RDWR | O_WRONLY))
+    } else if (args->flags & (O_RDWR | O_WRONLY))
     {
         eventType = CB_EVENT_TYPE_FILE_WRITE;
-    } else if (!(flags & (O_RDWR | O_WRONLY)))
+    } else if (!(args->flags & (O_RDWR | O_WRONLY)))
     {
         // If the file is opened with read-only mode we will report an open event
         eventType = CB_EVENT_TYPE_FILE_OPEN;
     }
 
 CATCH_DISABLED:
-    fd = ec_orig_sys_open(filename, flags, mode);
+    fd = call_open_func(args);
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    if (!IS_ERR_VALUE(fd) && eventType)
-    {
-        struct file *file = fget(fd);
-
-        TRY(!IS_ERR_OR_NULL(file));
-        __ec_do_file_event(&context, file, eventType);
-        fput(file);
-    }
-
-CATCH_DEFAULT:
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return fd;
-}
-
-asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, umode_t mode)
-{
-    long                fd;
-    CB_EVENT_TYPE       eventType = 0;
-
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-
-    if ((flags & O_CREAT) && !ec_file_exists(dfd, filename))
-    {
-        // If this is opened with create mode AND it does not already exist we will report a create event
-        eventType = CB_EVENT_TYPE_FILE_CREATE;
-    } else if (flags & (O_RDWR | O_WRONLY))
-    {
-        eventType = CB_EVENT_TYPE_FILE_WRITE;
-    } else if (!(flags & (O_RDWR | O_WRONLY)))
-    {
-        // If the file is opened with read-only mode we will report an open event
-        eventType = CB_EVENT_TYPE_FILE_OPEN;
-    }
-
-CATCH_DISABLED:
-    fd = ec_orig_sys_openat(dfd, filename, flags, mode);
-
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+    IF_MODULE_DISABLED_GOTO(context, CATCH_DEFAULT);
 
     if (!IS_ERR_VALUE(fd) && eventType)
     {
         struct file *file = fget(fd);
 
         TRY(!IS_ERR_OR_NULL(file));
-        __ec_do_file_event(&context, file, eventType);
+        __ec_do_file_event(context, file, eventType);
         fput(file);
     }
 
 CATCH_DEFAULT:
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return fd;
 }
 
@@ -537,132 +498,161 @@ CATCH_DEFAULT:
     return fd;
 }
 
-asmlinkage long ec_sys_unlink(const char __user *filename)
+struct unlink_argblock {
+    int dfd;
+    const char __user *filename;
+    int flags;
+};
+
+long __ec_sys_unlink(
+    long (*call_unlink_func)(struct unlink_argblock *args),
+    struct unlink_argblock *args,
+    ProcessContext         *context)
 {
     long         ret;
     file_data_t *file_data = NULL;
-
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
-    // so do not begin hook tracking yet, to avoid blocking module disable
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-
-    // Collect data about the file before it is modified.  The event will be sent
-    //  after a successful operation
-    file_data = __ec_get_file_data_from_name(&context, filename);
-
-CATCH_DISABLED:
-    ret = ec_orig_sys_unlink(filename);
-
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    // Now the active count is incremented and the hook is being tracked
-
-    if (!IS_ERR_VALUE(ret) && file_data)
-    {
-        __ec_do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_DELETE);
-    }
-
-CATCH_DEFAULT:
-    // Note: file_data is destroyed by __ec_do_generic_file_event
-    __ec_put_file_data(&context, file_data);
-
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return ret;
-}
-
-asmlinkage long ec_sys_unlinkat(int dfd, const char __user *filename, int flag)
-{
-    long         ret;
-    file_data_t *file_data = NULL;
-
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, since that can block module disable
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
-    file_data = __ec_get_file_data_from_name_at(&context, dfd, filename);
+    file_data = __ec_get_file_data_from_name_at(context, args->dfd, args->filename);
 
 CATCH_DISABLED:
-    ret = ec_orig_sys_unlinkat(dfd, filename, flag);
+    ret = call_unlink_func(args);
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+    IF_MODULE_DISABLED_GOTO(context, CATCH_DEFAULT);
 
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && file_data)
     {
-        __ec_do_generic_file_event(&context, file_data, CB_EVENT_TYPE_FILE_DELETE);
+        __ec_do_generic_file_event(context, file_data, CB_EVENT_TYPE_FILE_DELETE);
     }
 
 CATCH_DEFAULT:
     // Note: file_data is destroyed by __ec_do_generic_file_event
-    __ec_put_file_data(&context, file_data);
+    __ec_put_file_data(context, file_data);
 
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
 }
 
-asmlinkage long ec_sys_renameat(int olddirfd, char __user const *oldname, int newdirfd, char __user const *newname)
+struct rename_argblock {
+    int olddirfd;
+    char __user const *oldname;
+    int newdirfd;
+    char __user const *newname;
+    unsigned int flags;
+};
+
+long __ec_sys_rename(
+    long (*call_rename_func)(struct rename_argblock *args),
+    struct rename_argblock *args,
+    ProcessContext         *context)
 {
     long         ret;
     file_data_t *old_file_data = NULL;
     file_data_t *new_file_data_pre_rename = NULL;
     file_data_t *new_file_data_post_rename = NULL;
 
-    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
-
     // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, since that can block module disable
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
     //  after a successful operation
-    old_file_data = __ec_get_file_data_from_name_at(&context, olddirfd, oldname);
+    old_file_data = __ec_get_file_data_from_name_at(context, args->olddirfd, args->oldname);
 
     // Only lookup new path when old path was found
     if (old_file_data)
     {
-        new_file_data_pre_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
+        new_file_data_pre_rename = __ec_get_file_data_from_name_at(context, args->newdirfd, args->newname);
     }
     // Old path must exist but still execute syscall
 
 CATCH_DISABLED:
-    ret = ec_orig_sys_renameat(olddirfd, oldname, newdirfd, newname);
+    ret = call_rename_func(args);
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+    IF_MODULE_DISABLED_GOTO(context, CATCH_DEFAULT);
 
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && old_file_data)
     {
-        __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
+        __ec_do_generic_file_event(context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
 
         // Send a delete for the destination if the renameat will overwrite an existing file
         if (new_file_data_pre_rename)
         {
-            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
+            __ec_do_generic_file_event(context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
         }
 
-        FINISH_MODULE_DISABLE_CHECK(&context);
+        FINISH_MODULE_DISABLE_CHECK(context);
 
         // This could block so call it outside the disable tracking
-        new_file_data_post_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
+        new_file_data_post_rename = __ec_get_file_data_from_name_at(context, args->newdirfd, args->newname);
 
-        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
+        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DEFAULT);
 
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CLOSE);
+        __ec_do_generic_file_event(context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
+        __ec_do_generic_file_event(context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CLOSE);
     }
 
 CATCH_DEFAULT:
-    __ec_put_file_data(&context, old_file_data);
-    __ec_put_file_data(&context, new_file_data_pre_rename);
-    __ec_put_file_data(&context, new_file_data_post_rename);
+    __ec_put_file_data(context, old_file_data);
+    __ec_put_file_data(context, new_file_data_pre_rename);
+    __ec_put_file_data(context, new_file_data_post_rename);
+
+    return ret;
+}
+
+long __ec_call_orig_sys_renameat(struct rename_argblock *args)
+{
+    return ec_orig_sys_renameat(args->olddirfd, args->oldname, args->newdirfd, args->newname);
+}
+
+long __ec_call_orig_sys_renameat2(struct rename_argblock *args)
+{
+    return ec_orig_sys_renameat2(args->olddirfd, args->oldname, args->newdirfd, args->newname, args->flags);
+}
+
+long __ec_call_orig_sys_rename(struct rename_argblock *args)
+{
+    return ec_orig_sys_rename(args->oldname, args->newname);
+}
+
+long __ec_call_orig_sys_open(struct open_argblock *args)
+{
+    return ec_orig_sys_open(args->filename, args->flags, args->mode);
+}
+
+long __ec_call_orig_sys_openat(struct open_argblock *args)
+{
+    return ec_orig_sys_openat(args->dfd, args->filename, args->flags, args->mode);
+}
+
+long __ec_call_orig_sys_unlink(struct unlink_argblock *args)
+{
+    return ec_orig_sys_unlink(args->filename);
+}
+
+long __ec_call_orig_sys_unlinkat(struct unlink_argblock *args)
+{
+    return ec_orig_sys_unlinkat(args->dfd, args->filename, args->flags);
+}
+
+asmlinkage long ec_sys_renameat(int olddirfd, char __user const *oldname, int newdirfd, char __user const *newname)
+{
+    long ret = 0;
+    struct rename_argblock ab = {olddirfd, oldname, newdirfd, newname, 0};
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    MODULE_GET(&context);
+
+    ret = __ec_sys_rename(__ec_call_orig_sys_renameat, &ab, &context);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
@@ -670,60 +660,14 @@ CATCH_DEFAULT:
 
 asmlinkage long ec_sys_renameat2(int olddirfd, char __user const *oldname, int newdirfd, char __user const *newname, unsigned int flags)
 {
-    long         ret;
-    file_data_t *old_file_data = NULL;
-    file_data_t *new_file_data_pre_rename = NULL;
-    file_data_t *new_file_data_post_rename = NULL;
+    long ret = 0;
+    struct rename_argblock ab = {olddirfd, oldname, newdirfd, newname, flags};
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
-    // so do not begin hook tracking yet, since that can block module disable
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
+    MODULE_GET(&context);
 
-    // Collect data about the file before it is modified.  The event will be sent
-    //  after a successful operation
-    old_file_data = __ec_get_file_data_from_name_at(&context, olddirfd, oldname);
-
-    // Only lookup new path when old path was found
-    if (old_file_data)
-    {
-        new_file_data_pre_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
-    }
-    // Old path must exist but still execute syscall
-
-CATCH_DISABLED:
-    ret = ec_orig_sys_renameat2(olddirfd, oldname, newdirfd, newname, flags);
-
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    // Now the active count is incremented and the hook is being tracked
-
-    if (!IS_ERR_VALUE(ret) && old_file_data)
-    {
-        __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
-
-        // Send a delete for the destination if the renameat will overwrite an existing file
-        if (new_file_data_pre_rename)
-        {
-            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
-        }
-
-        FINISH_MODULE_DISABLE_CHECK(&context);
-
-        // This could block so call it outside the disable tracking
-        new_file_data_post_rename = __ec_get_file_data_from_name_at(&context, newdirfd, newname);
-
-        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CLOSE);
-    }
-
-CATCH_DEFAULT:
-    __ec_put_file_data(&context, old_file_data);
-    __ec_put_file_data(&context, new_file_data_pre_rename);
-    __ec_put_file_data(&context, new_file_data_post_rename);
+    ret = __ec_sys_rename(__ec_call_orig_sys_renameat2, &ab, &context);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
@@ -731,61 +675,76 @@ CATCH_DEFAULT:
 
 asmlinkage long ec_sys_rename(const char __user *oldname, const char __user *newname)
 {
-    long         ret;
-    file_data_t *old_file_data = NULL;
-    file_data_t *new_file_data_pre_rename = NULL;
-    file_data_t *new_file_data_post_rename = NULL;
+    long ret = 0;
+    struct rename_argblock ab = {AT_FDCWD, oldname, AT_FDCWD, newname, 0};
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
-    // so do not begin hook tracking yet, since that can block module disable
-    MODULE_GET_AND_IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
+    MODULE_GET(&context);
 
-    // Collect data about the file before it is modified.  The event will be sent
-    //  after a successful operation
-    old_file_data = __ec_get_file_data_from_name(&context, oldname);
-
-    // Only lookup new path when old path was found
-    if (old_file_data)
-    {
-        new_file_data_pre_rename = __ec_get_file_data_from_name(&context, newname);
-    }
-    // Old path must exist but still execute syscall
-
-CATCH_DISABLED:
-    ret = ec_orig_sys_rename(oldname, newname);
-
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-    // Now the active count is incremented and the hook is being tracked
-
-    if (!IS_ERR_VALUE(ret) && old_file_data)
-    {
-        __ec_do_generic_file_event(&context, old_file_data, CB_EVENT_TYPE_FILE_DELETE);
-
-        // Send a delete for the destination if the rename will overwrite an existing file
-        if (new_file_data_pre_rename)
-        {
-            __ec_do_generic_file_event(&context, new_file_data_pre_rename, CB_EVENT_TYPE_FILE_DELETE);
-        }
-
-        FINISH_MODULE_DISABLE_CHECK(&context);
-
-        // This could block so call it outside the disable tracking
-        new_file_data_post_rename = __ec_get_file_data_from_name(&context, newname);
-
-        BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
-
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CREATE);
-        __ec_do_generic_file_event(&context, new_file_data_post_rename, CB_EVENT_TYPE_FILE_CLOSE);
-   }
-
-CATCH_DEFAULT:
-    __ec_put_file_data(&context, old_file_data);
-    __ec_put_file_data(&context, new_file_data_pre_rename);
-    __ec_put_file_data(&context, new_file_data_post_rename);
+    ret = __ec_sys_rename(__ec_call_orig_sys_rename, &ab, &context);
 
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
 }
+
+asmlinkage long ec_sys_open(const char __user *filename, int flags, umode_t mode)
+{
+    long ret = 0;
+    struct open_argblock ab = {AT_FDCWD, filename, flags, mode};
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    MODULE_GET(&context);
+
+    ret = __ec_sys_open(__ec_call_orig_sys_open, &ab, &context);
+
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return ret;
+}
+
+asmlinkage long ec_sys_openat(int dfd, const char __user *filename, int flags, umode_t mode)
+{
+    long ret = 0;
+    struct open_argblock ab = {dfd, filename, flags, mode};
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    MODULE_GET(&context);
+
+    ret = __ec_sys_open(__ec_call_orig_sys_openat, &ab, &context);
+
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return ret;
+}
+
+asmlinkage long ec_sys_unlink(const char __user *filename)
+{
+    long ret = 0;
+    struct unlink_argblock ab = {AT_FDCWD, filename, 0};
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    MODULE_GET(&context);
+
+    ret = __ec_sys_unlink(__ec_call_orig_sys_unlink, &ab, &context);
+
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return ret;
+}
+
+asmlinkage long ec_sys_unlinkat(int dfd, const char __user *filename, int flag)
+{
+    long ret = 0;
+    struct unlink_argblock ab = {dfd, filename, flag};
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    MODULE_GET(&context);
+
+    ret = __ec_sys_unlink(__ec_call_orig_sys_unlinkat, &ab, &context);
+
+    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
+    return ret;
+}
+
