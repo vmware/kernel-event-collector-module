@@ -18,6 +18,7 @@
 #include "hook-tracking.h"
 #include "tests/run-tests.h"
 #include "stall-event.h"
+#include "path-cache.h"
 
 #ifdef HOOK_SELECTOR
 #define HOOK_MASK  0x0000000000000000
@@ -527,7 +528,8 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
     TRY_STEP(DEFAULT,   ec_disable_peer_modules(context));
     TRY_STEP(DEFAULT,   ec_path_buffers_init(context));
-    TRY_STEP(BUFFERS,   ec_proc_initialize(context));
+    TRY_STEP(BUFFERS,   ec_path_cache_init(context));
+    TRY_STEP(FILE_CACHE, ec_proc_initialize(context));
     TRY_STEP(PROC_DIR,  ec_user_comm_initialize(context));
     TRY_STEP(USER_COMM, ec_logger_initialize(context));
     TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
@@ -564,6 +566,8 @@ CATCH_USER_COMM:
     ec_user_comm_shutdown(context);
 CATCH_PROC_DIR:
     ec_proc_shutdown(context);
+CATCH_FILE_CACHE:
+    ec_path_cache_shutdown(context);
 CATCH_BUFFERS:
     ec_path_buffers_shutdown(context);
 CATCH_DEFAULT:
@@ -586,6 +590,7 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
     ec_file_tracking_shutdown(context);
+    ec_path_cache_shutdown(context);
     ec_path_buffers_shutdown(context);
     ec_proc_shutdown(context);
 }

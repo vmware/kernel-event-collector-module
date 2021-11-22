@@ -34,6 +34,7 @@ static const struct _ec_procs proc_callbacks[] = {
     { "mem",                      ec_proc_current_memory_avg,       NULL                            },
     { "mem-detail",               ec_proc_current_memory_det,       NULL                            },
     { "active-hooks",             ec_show_active_hooks,             NULL                            },
+    { "file-cache",               ec_path_cache_show,               NULL                            },
 
 #ifdef HOOK_SELECTOR
     { "syscall-clone",            ec_get_syscall_clone,             ec_set_syscall_clone            },

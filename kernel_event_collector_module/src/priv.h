@@ -146,6 +146,7 @@ void ec_stats_proc_shutdown(ProcessContext *context);
 int ec_proc_track_show_table(struct seq_file *m, void *v);
 int ec_proc_track_show_stats(struct seq_file *m, void *v);
 int ec_file_track_show_table(struct seq_file *m, void *v);
+int ec_path_cache_show(struct seq_file *m, void *v);
 
 int ec_proc_current_memory_avg(struct seq_file *m, void *v);
 int ec_proc_current_memory_det(struct seq_file *m, void *v);
