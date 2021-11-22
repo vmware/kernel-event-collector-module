@@ -84,24 +84,21 @@ void ec_get_starttime(struct timespec *start_time)
     set_normalized_timespec(start_time, current_time.tv_sec, current_time.tv_nsec);
 }
 
-bool ec_task_get_path(struct task_struct const *task, char *buffer, unsigned int buflen, char **pathname)
+PathData *ec_task_get_path_data(struct task_struct const *task, char *path_buffer, ProcessContext *context)
 {
-    bool ret = true;
+    PathData *path_data = NULL;
 
     CANCEL(task, false);
-    CANCEL(buffer, false);
-    CANCEL(pathname, false);
 
-    ret = ec_file_get_path(__ec_get_file_from_mm(task->mm), buffer, buflen, pathname);
+    path_data = ec_file_get_path_data_with_buffer(__ec_get_file_from_mm(task->mm), path_buffer, context);
 
-    if (!ret)
+    if (path_data && !path_data->path_found)
     {
-        buffer[0] = 0;
-        strncat(buffer, task->comm, buflen-1);
-        (*pathname) = buffer;
+        // If we did not find a path, set in now.
+        path_data->path = ec_mem_cache_strdup(task->comm, context);
     }
 
-    return ret;
+    return path_data;
 }
 
 void ec_get_devinfo_from_task(struct task_struct const *task, uint64_t *device, uint64_t *inode)
@@ -430,21 +427,7 @@ void __ec_add_tracking_for_task(
     char               *path_buffer,
     ProcessContext     *context)
 {
-    ProcessHandle *handle;
-    char *path = NULL;
-    bool             path_found = false;
-
-    if (path_buffer)
-    {
-        // ec_task_get_path() uses dpath which builds the path efficently
-        //  by walking back to the root. It starts with a string terminator
-        //  in the last byte of the target buffer.
-        //
-        // The `path` variable will point to the start of the string, so we will
-        //  use that directly later to copy into the tracking entry and event.
-        path_found = ec_task_get_path(task, path_buffer, PATH_MAX, &path);
-        path_buffer[PATH_MAX] = 0;
-    }
+    ProcessHandle *handle = NULL;
 
     // If the current task reports that it actually exec'ed or
     //  this task has reparented to init we want to record it as an exec
@@ -460,31 +443,29 @@ void __ec_add_tracking_for_task(
     //     only be one.
     if (!(task->flags & PF_FORKNOEXEC) || ec_getppid(task) == 1)
     {
-        uint64_t device;
-        uint64_t inode;
+        PathData *path_data = ec_task_get_path_data(task, path_buffer, context);
 
-        ec_get_devinfo_from_task(task, &device, &inode);
-        handle = ec_process_tracking_update_process(
-                ec_getpid(task),
-                ec_gettid(task),
-                TASK_UID(task),
-                TASK_EUID(task),
-                device,
-                inode,
-                path,
-                path_found,
-                start_time,
-                CB_PROCESS_START_BY_EXEC,
-                task,
-                CB_EVENT_TYPE_PROCESS_START_EXEC,
-                FAKE_START,
-                context);
-
-        if (handle && path_buffer)
+        if (path_data)
         {
-            if (__ec_get_cmdline_from_task(task, path_buffer, PATH_MAX))
+            handle = ec_process_tracking_update_process(
+                    ec_getpid(task),
+                    ec_gettid(task),
+                    TASK_UID(task),
+                    TASK_EUID(task),
+                    path_data,
+                    start_time,
+                    CB_PROCESS_START_BY_EXEC,
+                    task,
+                    CB_EVENT_TYPE_PROCESS_START_EXEC,
+                    FAKE_START,
+                    context);
+
+            if (handle && path_buffer)
             {
-                ec_process_tracking_set_proc_cmdline(handle, path_buffer, context);
+                if (__ec_get_cmdline_from_task(task, path_buffer, PATH_MAX))
+                {
+                    ec_process_tracking_set_proc_cmdline(handle, path_buffer, context);
+                }
             }
         }
     } else

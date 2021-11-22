@@ -7,6 +7,8 @@
 #include "cb-test.h"
 #include "priv.h"
 
+PathData * __ec_process_tracking_get_path_data(ExecIdentity * exec_identity, ProcessContext *context);
+
 bool ec_is_process_tracked(pid_t pid, ProcessContext *context)
 {
     bool ret = false;
@@ -192,7 +194,7 @@ void ec_process_tracking_put_exec_handle(ExecHandle *exec_handle, ProcessContext
 {
     if (exec_handle)
     {
-        ec_mem_cache_put_generic(exec_handle->path);
+        ec_path_cache_put(exec_handle->path_data, context);
         ec_mem_cache_put_generic(exec_handle->cmdline);
         ec_process_tracking_put_exec_identity(exec_handle->identity, context);
 
@@ -209,7 +211,7 @@ void ec_process_exec_handle_clone(ExecHandle *from, ExecHandle *to, ProcessConte
         // Note: I do not want to call ec_process_exec_handle_set_exec_identity here because I want to clone the current
         //  handle and not get pointers from from->identity
         to->identity = ec_process_tracking_get_exec_identity_ref(from->identity, context);
-        to->path = ec_mem_cache_get_generic(from->path, context);
+        to->path_data = ec_path_cache_get(from->path_data, context);
         to->cmdline = ec_mem_cache_get_generic(from->cmdline, context);
     }
 }
@@ -221,7 +223,7 @@ void ec_process_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdent
         ec_process_tracking_put_exec_handle(exec_handle, context);
 
         exec_handle->identity = ec_process_tracking_get_exec_identity_ref(exec_identity, context);
-        exec_handle->path = ec_process_tracking_get_path(exec_identity, context);
+        exec_handle->path_data = __ec_process_tracking_get_path_data(exec_identity, context);
         exec_handle->cmdline = ec_process_tracking_get_cmdline(exec_identity, context);
     }
 }
@@ -252,7 +254,7 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
     event->procInfo.all_process_details.array[EXEC_GRANDPARENT] = ec_process_exec_identity(process_handle)->exec_grandparent_details;
 
 
-    event->procInfo.path_found      = ec_process_exec_identity(process_handle)->path_found;
+    event->procInfo.path_found      = ec_process_exec_identity(process_handle)->path_data->path_found;
     event->procInfo.path            = ec_mem_cache_get_generic(ec_process_path(process_handle), context);// hold reference
     event->procInfo.path_size       = ec_mem_cache_get_size_generic(event->procInfo.path);
 
@@ -304,25 +306,39 @@ char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *
     if (exec_identity)
     {
         ec_read_lock(&exec_identity->string_lock, context);
-        path = ec_mem_cache_get_generic(exec_identity->path, context);
+        path = ec_mem_cache_get_generic(exec_identity->path_data->path, context);
         ec_read_unlock(&exec_identity->string_lock, context);
     }
 
     return path;
 }
 
-void ec_process_tracking_set_path(ProcessHandle *process_handle, char *path, ProcessContext *context)
+PathData *__ec_process_tracking_get_path_data(ExecIdentity *exec_identity, ProcessContext *context)
+{
+    PathData *path_data = NULL;
+
+    if (exec_identity)
+    {
+        ec_read_lock(&exec_identity->string_lock, context);
+        path_data = ec_path_cache_get(exec_identity->path_data, context);
+        ec_read_unlock(&exec_identity->string_lock, context);
+    }
+
+    return path_data;
+}
+
+void ec_process_tracking_set_path(ProcessHandle *process_handle, PathData *path_data, ProcessContext *context)
 {
      if (process_handle)
      {
          ec_write_lock(&ec_process_exec_identity(process_handle)->string_lock, context);
-         ec_mem_cache_put_generic(ec_process_exec_identity(process_handle)->path);
-         ec_process_exec_identity(process_handle)->path = ec_mem_cache_get_generic(path, context);
+         ec_path_cache_put(ec_process_exec_identity(process_handle)->path_data, context);
+         ec_process_exec_identity(process_handle)->path_data = ec_path_cache_get(path_data, context);
          ec_write_unlock(&ec_process_exec_identity(process_handle)->string_lock, context);
 
          // We do not need to be locked to update the handle
-         ec_mem_cache_put_generic(ec_process_exec_handle(process_handle)->path);
-         ec_process_exec_handle(process_handle)->path = ec_mem_cache_get_generic(path, context);
+         ec_path_cache_put(ec_process_exec_handle(process_handle)->path_data, context);
+         ec_process_exec_handle(process_handle)->path_data = ec_path_cache_get(path_data, context);
      }
 }
 
@@ -505,7 +521,7 @@ ExecHandle *ec_process_exec_handle(ProcessHandle *process_handle)
 
 char *ec_process_path(ProcessHandle *process_handle)
 {
-    return process_handle ? process_handle->exec_handle.path : NULL;
+    return process_handle ? ec_exec_path(&process_handle->exec_handle) : NULL;
 }
 
 char *ec_process_cmdline(ProcessHandle *process_handle)
@@ -520,5 +536,5 @@ ExecIdentity *ec_exec_identity(ExecHandle *exec_handle)
 
 char *ec_exec_path(ExecHandle *exec_handle)
 {
-    return exec_handle ? exec_handle->path : NULL;
+    return exec_handle ? exec_handle->path_data->path : NULL;
 }

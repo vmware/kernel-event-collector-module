@@ -179,14 +179,19 @@ ProcessHandle *ec_process_tracking_create_process(
 
         exec_identity->exec_parent_details.pid         = (gparent_task ? ec_getpid(gparent_task) : 1);
         exec_identity->exec_parent_details.start_time  = ec_get_null_time();
-        ec_get_devinfo_from_task(parent_task, &exec_identity->exec_details.device, &exec_identity->exec_details.inode);
+
+        exec_identity->path_data = ec_task_get_path_data(taskp, NULL, context);
+        if (exec_identity->path_data)
+        {
+            exec_identity->exec_details.device = exec_identity->path_data->key.device;
+            exec_identity->exec_details.inode = exec_identity->path_data->key.inode;
+        }
 
         exec_identity->exec_grandparent_details.pid         = 0;
         exec_identity->exec_grandparent_details.device      = 0;
         exec_identity->exec_grandparent_details.inode       = 0;
         exec_identity->exec_grandparent_details.start_time  = ec_get_null_time();
 
-        exec_identity->path_found   = false;
         exec_identity->exec_count   = 1;
 
         posix_parent_details      = exec_identity->exec_details;
@@ -285,10 +290,7 @@ ProcessHandle *ec_process_tracking_update_process(
     pid_t               tid,
     uid_t               uid,
     uid_t               euid,
-    uint64_t            device,
-    uint64_t            inode,
-    char               *path,
-    bool                path_found,
+    PathData           *path_data,
     time_t              start_time,
     int                 action,
     struct task_struct *taskp,
@@ -304,6 +306,8 @@ ProcessHandle *ec_process_tracking_update_process(
     char               *msg                 = "";
     bool                isExecOther         = false;
     bool was_last_active_process = false;
+
+    TRY_MSG(path_data, DL_ERROR, "Bad file data");
 
     process_handle = ec_process_tracking_get_handle(pid, context);
     if (!process_handle)
@@ -372,19 +376,11 @@ ProcessHandle *ec_process_tracking_update_process(
 
 
     exec_identity->exec_details.pid         = pid;
-    exec_identity->exec_details.device      = device;
-    exec_identity->exec_details.inode       = inode;
+    exec_identity->exec_details.device      = path_data->key.device;
+    exec_identity->exec_details.inode       = path_data->key.inode;
     exec_identity->exec_details.start_time  = start_time;
-
-    exec_identity->path_found               = path_found;
     exec_identity->exec_count               = (!isExecOther ? 1 : ec_exec_identity(&parent_exec_handle)->exec_count + 1);
-
-    if (!path && ec_is_task_valid(taskp))
-    {
-        path = taskp->comm;
-    }
-
-    exec_identity->path = ec_mem_cache_strdup(path, context);
+    exec_identity->path_data                = ec_path_cache_get(path_data, context);
 
     // If this is was the last remaining process of the exec identity we want to
     //  send an exit for it.
@@ -418,9 +414,8 @@ ProcessHandle *ec_process_tracking_update_process(
     // Mark us as an active process
     atomic64_inc(&exec_identity->active_process_count);
 
-    ec_process_posix_identity(process_handle)->posix_details.inode   = inode;
-    ec_process_posix_identity(process_handle)->posix_details.device  = device;
-    ec_process_posix_identity(process_handle)->posix_details.inode   = inode;
+    ec_process_posix_identity(process_handle)->posix_details.device  = path_data->key.device;
+    ec_process_posix_identity(process_handle)->posix_details.inode   = path_data->key.inode;
 
     ec_process_posix_identity(process_handle)->tid            = tid;
     ec_process_posix_identity(process_handle)->uid            = uid;
@@ -531,18 +526,14 @@ ProcessHandle *ec_get_procinfo_and_create_process_start_if_needed(pid_t pid, con
 
 ProcessHandle *ec_create_process_start_by_exec_event(struct task_struct *task, ProcessContext *context)
 {
-    uint64_t device = 0;
-    uint64_t inode = 0;
     time_t start_time = ec_get_current_time();
     uid_t uid = 0;
     uid_t euid = 0;
     pid_t pid = 0;
     pid_t tid = 0;
 
-    char *path = NULL;
-    bool path_found = false;
+    PathData *path_data = NULL;
     ProcessHandle *process_handle = NULL;
-    char *path_buffer = NULL;
 
     TRY_MSG(task, DL_WARNING, "cannot create process start with null task");
 
@@ -551,58 +542,20 @@ ProcessHandle *ec_create_process_start_by_exec_event(struct task_struct *task, P
     pid = ec_getpid(task);
     tid = ec_gettid(task);
 
-    // PSCLNX-5220
-    //  If we are in the clone hook it is possible for the ec_task_get_path functon
-    //  to schedule. (Softlock!)  For now I am catching this here and just useing
-    //  the command name.  I want to make the decision down in ec_task_get_path, but
-    //  I need to pass the context.  (Which is too invasive for right now!)
-    //
-    //  Also this would need to be able to understand when we would be looking up
-    //  the path for a task not our own.
-    if (!ALLOW_WAKE_UP(context))
-    {
-        path = task->comm;
-    } else
-    {
-        path_buffer = ec_get_path_buffer(context);
-        if (path_buffer)
-        {
-            // ec_task_get_path() uses dpath which builds the path efficently
-            //  by walking back to the root. It starts with a string terminator
-            //  in the last byte of the target buffer.
-            //
-            // The `path` variable will point to the start of the string, so we will
-            //  use that directly later to copy into the tracking entry and event.
-            path_found = ec_task_get_path(task, path_buffer, PATH_MAX, &path);
-            path_buffer[PATH_MAX] = 0;
-
-            if (!path_found)
-            {
-                TRACE(DL_INFO, "Failed to retrieve path for pid: %d", pid);
-            }
-        }
-    }
-
-    ec_get_devinfo_from_task(task, &device, &inode);
+    path_data = ec_task_get_path_data(task, NULL, context);
 
     process_handle = ec_process_tracking_update_process(
         pid,
         tid,
         uid,
         euid,
-        device,
-        inode,
-        path,
-        path_found,
+        path_data,
         start_time,
         CB_PROCESS_START_BY_EXEC,
         task,
         CB_EVENT_TYPE_PROCESS_START_EXEC,
         FAKE_START,
         context);
-
-    ec_put_path_buffer(path_buffer);
-    path = path_buffer = NULL;
 
     TRY(process_handle);
 
@@ -632,7 +585,7 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
         atomic64_set(&exec_identity->active_process_count, 0);
         atomic64_set(&exec_identity->exit_event, 0);
         ec_spinlock_init(&exec_identity->string_lock, context);
-        exec_identity->path               = NULL;
+        exec_identity->path_data          = NULL;
         exec_identity->cmdline            = NULL;
         exec_identity->is_interpreter     = false;
 
@@ -668,7 +621,7 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
         ec_spinlock_destroy(&exec_identity->string_lock, context);
 
         // Free the path and commandline
-        ec_mem_cache_put_generic(exec_identity->path);
+        ec_path_cache_put(exec_identity->path_data, context);
         ec_mem_cache_put_generic(exec_identity->cmdline);
 
         exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);

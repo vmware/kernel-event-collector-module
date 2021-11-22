@@ -8,6 +8,7 @@
 #include "hash-table-generic.h"
 #include "rbtree-helper.h"
 #include "raw_event.h"
+#include "path-cache.h"
 
 typedef struct pt_table_key {
     pid_t    pid;
@@ -36,9 +37,8 @@ typedef struct exec_identity {
 
 
     uint64_t          string_lock;
-    char             *path;
+    PathData         *path_data;
     char             *cmdline;
-    bool              path_found;
 
     // Processes with this set report file open events
     bool              is_interpreter;
@@ -65,7 +65,7 @@ typedef struct exec_identity {
 // This handle holds reference counts to the exec_identity and some internal pointers
 typedef struct ExecIdentity_handle {
     ExecIdentity *identity;
-    char         *path;
+    PathData     *path_data;
     char         *cmdline;
 } ExecHandle;
 
@@ -144,10 +144,7 @@ ProcessHandle *ec_process_tracking_update_process(
         pid_t               tid,
         uid_t               uid,
         uid_t               euid,
-        uint64_t            device,
-        uint64_t            inode,
-        char               *path,
-        bool                path_found,
+        PathData           *path_data,
         time_t              start_time,
         int                 action,
         struct task_struct *taskp,
@@ -162,7 +159,7 @@ bool ec_is_process_tracked(pid_t pid, ProcessContext *context);
 void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context);
 bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context);
 char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *context);
-void ec_process_tracking_set_path(ProcessHandle *process_handle, char *path, ProcessContext *context);
+void ec_process_tracking_set_path(ProcessHandle *process_handle, PathData *path_data, ProcessContext *context);
 char *ec_process_tracking_get_cmdline(ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_set_cmdline(ExecHandle *exec_handle, char *cmdline, ProcessContext *context);
 void ec_process_tracking_set_proc_cmdline(ProcessHandle *process_handle, char *cmdline, ProcessContext *context);

@@ -43,8 +43,8 @@ void __ec_file_tracking_delete_callback(void *data, ProcessContext *context)
     {
         FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
 
-        ec_mem_cache_put_generic(value->path);
-        value->path = NULL;
+        ec_path_cache_put(value->path_data, context);
+        value->path_data = NULL;
     }
 }
 
@@ -52,7 +52,7 @@ void __ec_file_tracking_delete_callback(void *data, ProcessContext *context)
 FILE_PROCESS_VALUE *ec_file_process_status_open(
     struct file    *file,
     uint32_t        pid,
-    char           *path,
+    PathData       *path_data,
     ProcessContext *context)
 {
     FILE_PROCESS_VALUE *value = ec_file_process_get(file, context);
@@ -67,10 +67,7 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
 
         value->key.file      = (uint64_t)file;
         value->pid           = pid;
-        value->path          = ec_mem_cache_strdup(path, context);
-        value->isSpecialFile = ec_is_special_file(value->path, ec_mem_cache_get_size_generic(value->path));
-
-        ec_get_devinfo_fs_magic_from_file(file, &value->device, &value->inode, &value->fs_magic);
+        value->path_data     = ec_path_cache_get(path_data, context);
 
         if (ec_hashtbl_add_generic(s_file_hash_table, value, context) < 0)
         {
@@ -79,7 +76,10 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
                 // We are racing against other threads or processes
                 // to insert a similar entry on the same rb_tree.
                 TRACE(DL_FILE, "File entry already exists: [%llu:%llu] %s pid:%u",
-                      value->device, value->inode, path ? path : "<unknown>", pid);
+                      value->path_data->key.device,
+                      value->path_data->key.inode,
+                      SANE_PATH(value->path_data->path),
+                      pid);
             }
 
             // If the insert failed we free the local reference and clear
@@ -145,11 +145,11 @@ int __ec_file_tracking_show(HashTbl *hashTblp, HashTableNode *data, void *m, Pro
         FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
 
         seq_printf(m, "%50s | %10llu | %10llu | %6d | %10s | %10llx |\n",
-                      value->path,
-                      value->device,
-                      value->inode,
+                      SANE_PATH(value->path_data->path),
+                      value->path_data->key.device,
+                      value->path_data->key.inode,
                       value->pid,
-                      (value->isSpecialFile ? "YES" : "NO"),
+                      value->path_data->is_special_file ? "YES" : "NO",
                       value->key.file);
     }
 

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "process-context.h"
+#include "path-cache.h"
 
 #define SANE_PATH(PATH) PATH ? PATH : "<unknown>"
 
@@ -24,3 +25,14 @@ bool ec_is_interesting_file(struct file *file);
 int ec_is_special_file(char *pathname, int len);
 bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
 bool ec_file_exists(int dfd, const char __user *filename);
+
+PathData *ec_file_get_path_data(
+    struct file const *file,
+    ProcessContext    *context);
+PathData *ec_file_get_path_data_with_buffer(
+    struct file const  *file,
+    char               *path_buffer,
+    ProcessContext     *context);
+PathData *ec_file_get_path_data_from_path(
+    struct path const  *path,
+    ProcessContext     *context);

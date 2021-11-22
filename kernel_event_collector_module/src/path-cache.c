@@ -130,7 +130,7 @@ void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
     }
 }
 
-int __ec_path_cache_print(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
+int __ec_path_cache_print(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
 
 int ec_path_cache_show(struct seq_file *m, void *v)
 {

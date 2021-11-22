@@ -46,4 +46,4 @@ PathData *ec_path_cache_get(
     ProcessContext     *context);
 void ec_path_cache_put(
     PathData           *path_data,
-    ProcessContext     *context);-
+    ProcessContext     *context);

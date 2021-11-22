@@ -9,6 +9,7 @@
 #include <linux/binfmts.h>
 
 #include "process-context.h"
+#include "path-cache.h"
 
 // ------------------------------------------------
 //
@@ -25,7 +26,7 @@ extern void ec_get_task_struct(struct task_struct *task);
 extern void ec_put_task_struct(struct task_struct *task);
 extern void ec_get_starttime(struct timespec *start_time);
 extern uint64_t ec_get_path_buffer_memory_usage(void);
-bool ec_task_get_path(struct task_struct const *task, char *buffer, unsigned int buflen, char **pathname);
+PathData *ec_task_get_path_data(struct task_struct const *task, char *path_buffer, ProcessContext *context);
 extern bool ec_is_task_valid(struct task_struct const *task);
 extern bool ec_is_task_alive(struct task_struct const *task);
 struct task_struct const *ec_find_task(pid_t pid);
