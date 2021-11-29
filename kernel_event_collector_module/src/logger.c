@@ -269,11 +269,9 @@ PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     event->eventType  = resolvedEventType;
     event->canary     = 0;
 
+    memset(&event->procInfo, 0, sizeof(event->procInfo));
     event->procInfo.event_time  = ec_get_current_time();
-    event->procInfo.path_found = false;
-    event->procInfo.path       = NULL;
     event->generic_data.data   = NULL;
-    memset(&event->procInfo.all_process_details, 0, sizeof(AllProcessDetails));
 
 CATCH_DEFAULT:
     return event;

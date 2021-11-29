@@ -532,6 +532,8 @@ void *ec_hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *conte
 
 void *ec_hashtbl_get_generic_ref(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
+    CANCEL(hashTblp && datap, NULL);
+
     if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
     {
         atomic64_inc(__ec_get_refcountp(hashTblp, datap));

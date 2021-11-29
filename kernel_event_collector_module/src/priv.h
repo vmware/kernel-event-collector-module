@@ -33,6 +33,7 @@
 #include "version.h"
 #include "task-helper.h"
 #include "module_state.h"
+#include "file-helper.h"
 
 extern const char DRIVER_NAME[];
 
@@ -145,6 +146,7 @@ void ec_stats_proc_shutdown(ProcessContext *context);
 int ec_proc_track_show_table(struct seq_file *m, void *v);
 int ec_proc_track_show_stats(struct seq_file *m, void *v);
 int ec_file_track_show_table(struct seq_file *m, void *v);
+int ec_path_cache_show(struct seq_file *m, void *v);
 
 int ec_proc_current_memory_avg(struct seq_file *m, void *v);
 int ec_proc_current_memory_det(struct seq_file *m, void *v);
@@ -252,26 +254,6 @@ ssize_t ec_set_lsm_file_mmap(struct file *file, const char *buf, size_t size, lo
 #endif
 
 bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason);
-
-// ------------------------------------------------
-// File Helpers
-//
-extern bool ec_file_helper_init(ProcessContext *context);
-extern bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname);
-extern bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen, char **pathname);
-extern bool ec_dentry_get_path(struct dentry const *dentry, char *buffer, unsigned int buflen, char **pathname);
-extern char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen);
-extern char *ec_lsm_dentry_path(struct dentry const *dentry, char *path, int len);
-extern struct inode const *ec_get_inode_from_file(struct file const *file);
-extern void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode);
-extern void ec_get_devinfo_fs_magic_from_file(struct file const *file, uint64_t *device, uint64_t *inode, uint64_t *fs_magic);
-extern void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode, uint64_t *fs_magic);
-extern struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry);
-umode_t ec_get_mode_from_file(struct file const *file);
-extern struct super_block const *ec_get_sb_from_file(struct file const *file);
-extern bool ec_is_interesting_file(struct file *file);
-extern int ec_is_special_file(char *pathname, int len);
-extern bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
 
 // schedulers
 extern const struct sched_class idle_sched_class;

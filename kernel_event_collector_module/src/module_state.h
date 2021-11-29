@@ -5,6 +5,7 @@
 #pragma once
 
 #include "process-context.h"
+#include "cb-spinlock.h"
 #include "hook-tracking.h"
 
 typedef enum {
