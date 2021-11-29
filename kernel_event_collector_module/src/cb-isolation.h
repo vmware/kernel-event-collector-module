@@ -81,7 +81,7 @@ NTSTATUS ec_InitializeNetworkIsolation(ProcessContext *context);
 
 VOID ec_DestroyNetworkIsolation(ProcessContext *context);
 
-VOID ec_SetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode);
+VOID ec_SetNetworkIsolationMode(ProcessContext *context, CB_ISOLATION_MODE isolationMode);
 
 VOID ec_DisableNetworkIsolation(ProcessContext *context);
 

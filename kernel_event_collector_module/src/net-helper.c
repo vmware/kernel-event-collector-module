@@ -154,7 +154,7 @@ void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right)
     }
 }
 
-void __ec_print_address(
+void ec_print_address(
     char                  *msg,
     const struct sock     *sk,
     const struct sockaddr *localAddr,
@@ -242,7 +242,7 @@ bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *s
 
     if (family == AF_INET)
     {
-        struct iphdr *ip_header = (struct iphdr *) skb_network_header(skb);
+        struct iphdr *ip_header = ip_hdr(skb);
 
         TRY(ip_header);
 
@@ -259,7 +259,7 @@ bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *s
     }
 
     //Both UDP and TCP header begin with source|dest port and that's all we need this for
-    udp_header = (struct udphdr *) skb_transport_header(skb);
+    udp_header = udp_hdr(skb);
     TRY(udp_header);
 
     if (family == AF_INET)
@@ -276,3 +276,4 @@ bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *s
 CATCH_DEFAULT:
     return false;
 }
+

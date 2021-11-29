@@ -6,6 +6,11 @@
 #include "net-helper.h"
 #include "mem-cache.h"
 #include "path-buffers.h"
+#include "cb-isolation.h"
+#include "cb-spinlock.h"
+#include "event-factory.h"
+
+#include "netfilter.h"
 
 #include <linux/skbuff.h>
 #undef __KERNEL__
@@ -20,30 +25,15 @@
 #include <linux/string.h>
 #include <net/ip.h>
 
-#include "cb-isolation.h"
-#include "cb-spinlock.h"
-#include "event-factory.h"
-#include "dns-parser.h"
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-    #define ec_ipv6_skip_exthdr(skb, ptr, pProtocol) (ptr = ipv6_skip_exthdr(skb, ptr, pProtocol))
-#else
-    #define ec_ipv6_skip_exthdr(skb, ptr, pProtocol) do {     \
-        __be16          frag_off;                               \
-        ptr = ipv6_skip_exthdr(skb, ptr, pProtocol, &frag_off); \
-    } while (0)
-#endif
+bool g_webproxy_enabled;
 
 #define NUM_HOOKS     4
 static struct nf_hook_ops nfho_local_out[NUM_HOOKS];
+static bool               s_netfilter_registered;
+static uint64_t           s_netfilter_lock;
 
 int __ec_find_char_offset(const struct sk_buff *skb, int offset, char target);
 int __ec_web_proxy_request_check(ProcessContext *context, struct sk_buff *skb);
-void __ec_process_dns_packet(
-    struct sk_buff *skb,
-    uint8_t         protocol,
-    int             payload_offset,
-    ProcessContext *context);
 
 static unsigned int ec_hook_func_local_out(
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{ RHEL8
@@ -67,53 +57,35 @@ static unsigned int ec_hook_func_local_out(
 #endif  //}
     )
 {
-    unsigned int                  xcode = NF_ACCEPT;
-    CB_SOCK_ADDR                  localAddr;
-    CB_SOCK_ADDR                  remoteAddr;
-    CB_ISOLATION_INTERCEPT_RESULT isolation_result;
-
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(skb);
     TRY(CHECK_SK_FAMILY(skb->sk) && CHECK_SK_PROTO(skb->sk));
 
     if (g_cbIsolationStats.isolationEnabled)
     {
+        CB_SOCK_ADDR                  localAddr;
+        CB_SOCK_ADDR                  remoteAddr;
+        CB_ISOLATION_INTERCEPT_RESULT isolation_result;
+
         TRY(ec_get_addrs_from_skb(skb->sk, skb, &localAddr, &remoteAddr));
 
         ec_IsolationInterceptByAddrProtoPort(&context, skb->sk->sk_protocol, &remoteAddr, &isolation_result);
         if (isolation_result.isolationAction == IsolationActionBlock)
         {
-            xcode = NF_DROP;
-            goto CATCH_DEFAULT;
+            return NF_DROP;
         }
     }
 
-    if (skb->sk->sk_protocol == IPPROTO_TCP)
+    if (g_webproxy_enabled && skb->sk->sk_protocol == IPPROTO_TCP)
     {
         __ec_web_proxy_request_check(&context, skb);
     }
 
 CATCH_DEFAULT:
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return xcode;
+    return NF_ACCEPT;
 }
 
-int __ec_transport_offset(struct sk_buff *skb, struct iphdr *ip_header)
-{
-    int transport_offset = skb_transport_offset(skb);
-
-    // In earlier kernels the transport header is not set up correctly, so we may need to calculate it.
-    // https://stackoverflow.com/a/29663558/13177212
-    if (skb_transport_header(skb) == (unsigned char *)ip_header)
-    {
-        transport_offset += (ip_header->ihl * 4);
-    }
-
-    return transport_offset;
-}
 
 // This hook only looks for DNS response packets.  If one is found, a message is sent to
 //  user space for processing.  NOTE: Process ID and such will be added to the event but
@@ -140,39 +112,28 @@ unsigned int ec_hook_func_local_in_v4(
 #endif  //}
     )
 {
-    struct iphdr                  *ip_header;
-    unsigned int                  xcode = NF_ACCEPT;
-    CB_SOCK_ADDR                  localAddr;
-    CB_SOCK_ADDR                  remoteAddr;
-    CB_ISOLATION_INTERCEPT_RESULT isolation_result;
-
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(skb);
     TRY(CHECK_SK_FAMILY(skb->sk) && CHECK_SK_PROTO(skb->sk));
 
-    ip_header = (struct iphdr *) skb_network_header(skb);
-    TRY(ip_header);
-
-    __ec_process_dns_packet(skb, skb->sk->sk_protocol, __ec_transport_offset(skb, ip_header), &context);
-
     if (g_cbIsolationStats.isolationEnabled)
     {
+        CB_SOCK_ADDR                  localAddr;
+        CB_SOCK_ADDR                  remoteAddr;
+        CB_ISOLATION_INTERCEPT_RESULT isolation_result;
+
         TRY(ec_get_addrs_from_skb(skb->sk, skb, &remoteAddr, &localAddr));
 
         ec_IsolationInterceptByAddrProtoPort(&context, skb->sk->sk_protocol, &remoteAddr, &isolation_result);
         if (isolation_result.isolationAction == IsolationActionBlock)
         {
-            xcode = NF_DROP;
-            goto CATCH_DEFAULT;
+            return NF_DROP;
         }
     }
 
 CATCH_DEFAULT:
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return xcode;
+    return NF_ACCEPT;
 }
 
 unsigned int ec_hook_func_local_in_v6(
@@ -197,105 +158,28 @@ unsigned int ec_hook_func_local_in_v6(
 #endif  //}
     )
 {
-    uint8_t                       protocol;
-    int                           payload_offset;
-    struct ipv6hdr                *ip_header;
-    unsigned int                  xcode = NF_ACCEPT;
-    CB_SOCK_ADDR                  localAddr;
-    CB_SOCK_ADDR                  remoteAddr;
-    CB_ISOLATION_INTERCEPT_RESULT isolation_result;
-
-
     DECLARE_ATOMIC_CONTEXT(context, ec_getpid(current));
-
-    MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     TRY(skb);
     TRY(CHECK_SK_FAMILY(skb->sk) && CHECK_SK_PROTO(skb->sk));
 
-    ip_header = ipv6_hdr(skb);
-
-    TRY(ip_header);
-
-    payload_offset = skb_transport_offset(skb);
-
-    // Use the ipv6_skip_exthdr function to skip past any extended headers that may be present.
-    ec_ipv6_skip_exthdr(skb, payload_offset, &protocol);
-
-    __ec_process_dns_packet(skb, protocol, payload_offset, &context);
-
     if (g_cbIsolationStats.isolationEnabled)
     {
+        CB_SOCK_ADDR                  localAddr;
+        CB_SOCK_ADDR                  remoteAddr;
+        CB_ISOLATION_INTERCEPT_RESULT isolation_result;
+
         TRY(ec_get_addrs_from_skb(skb->sk, skb, &remoteAddr, &localAddr));
 
         ec_IsolationInterceptByAddrProtoPort(&context, skb->sk->sk_protocol, &remoteAddr, &isolation_result);
         if (isolation_result.isolationAction == IsolationActionBlock)
         {
-            xcode = NF_DROP;
-            goto CATCH_DEFAULT;
+            return NF_DROP;
         }
     }
 
 CATCH_DEFAULT:
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
-    return xcode;
-}
-
-// This hook only looks for DNS response packets.  If one is found, a message is sent to
-//  user space for processing.  NOTE: Process ID and such will be added to the event but
-//  it is not used by the daemon.  This is only used for internal caching.
-void __ec_process_dns_packet(
-    struct sk_buff *skb,
-    uint8_t         protocol,
-    int             payload_offset,
-    ProcessContext *context)
-{
-    CB_EVENT_DNS_RESPONSE  response = { 0 };
-    char                  *dns_data = NULL;
-    int                    port     = 0;
-    size_t                 length   = 0;
-
-    // TODO: Add support for TCP
-    //  DNS can use TCP, though it generally does not use TCP for the records we care about.
-    //  I did spend some time attempting to get it working, but I had difficulty getting the payload
-    //  for the TCP packet.  I seemed to multiple packets with no payload, and then one with 108 bytes.
-    //  However I could never get any records when I parsed it.
-    TRY(protocol == IPPROTO_UDP);
-    {
-        struct udphdr udphdr;
-
-        // Copy the packet for inspection
-        TRY_MSG(!skb_copy_bits(skb, payload_offset, &udphdr, sizeof(udphdr)),
-                DL_WARNING, "Error copying UDP packet bits");
-
-        port           = ntohs(udphdr.source);
-        length         = min((size_t)PATH_MAX, (size_t)(ntohs(udphdr.len) - sizeof(struct udphdr)));
-        payload_offset = payload_offset + sizeof(udphdr);
-    }
-
-    if (port == 53)
-    {
-        TRY_MSG(length > 0, DL_WARNING, "invalid length:%ld for UDP response", length);
-        dns_data = ec_get_path_buffer(context);
-        if (dns_data)
-        {
-            TRY_MSG(!skb_copy_bits(skb, payload_offset, dns_data, length),
-                    DL_ERROR, "Error copying UDP DNS response data");
-
-            TRY_MSG(!ec_dns_parse_data(dns_data, length, &response, context),
-                     DL_INFO, "No DNS record found");
-
-            ec_event_send_dns(
-                CB_EVENT_TYPE_DNS_RESPONSE,
-                &response,
-                context);
-        }
-    }
-
-
-CATCH_DEFAULT:
-    ec_put_path_buffer(dns_data);
-    ec_mem_cache_free_generic(response.records);
+    return NF_ACCEPT;
 }
 
 int __ec_web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
@@ -407,7 +291,7 @@ int __ec_web_proxy_request_check(ProcessContext *context, struct sk_buff *skb)
             &remoteAddr,
             IPPROTO_TCP,
             url,
-            0, //TODO: actual_port will be obained at cbdaemon based on actual_server url.
+            0, //TODO: actual_port will be obtained at cbdaemon based on actual_server url.
             skb->sk,
             context);
     }
@@ -456,8 +340,14 @@ int __ec_find_char_offset(const struct sk_buff *skb, int offset, char target)
     return -1;
 }
 
-bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
+bool ec_netfilter_enable(ProcessContext *context)
 {
+    bool result = true;
+    int ret;
+
+    ec_write_lock(&s_netfilter_lock, context);
+
+    TRY(!s_netfilter_registered && (g_cbIsolationStats.isolationEnabled || g_webproxy_enabled));
 
     nfho_local_out[0].hook     = ec_hook_func_local_out;
     nfho_local_out[0].hooknum  = NF_INET_LOCAL_OUT;
@@ -479,72 +369,50 @@ bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks)
     nfho_local_out[3].pf       = PF_INET6;
     nfho_local_out[3].priority = NF_IP_PRI_FIRST;
 
-    if (enableHooks & CB__NF_local_out)
-    {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
-        nf_register_hooks(nfho_local_out, NUM_HOOKS);
-#else //}{
-        nf_register_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
-#endif //}
-        TRACE(DL_INIT, "Netfilter hook has been inserted");
-    }
+    ret = nf_register_hooks(nfho_local_out, NUM_HOOKS);
+    TRY_DO_MSG(ret == 0, { result = false; }, DL_ERROR, "Failed to register netfilter hooks %d", ret);
 
+    s_netfilter_registered = true;
+    TRACE(DL_INIT, "Netfilter hooks have been registered");
 
-    return true;
+CATCH_DEFAULT:
+    ec_write_unlock(&s_netfilter_lock, context);
+
+    return result;
 }
 
-void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks)
+void __ec_netfilter_unregister(ProcessContext *context)
 {
-    if (enableHooks & CB__NF_local_out)
+    ec_write_lock(&s_netfilter_lock, context);
+
+    if (s_netfilter_registered)
     {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
         nf_unregister_hooks(nfho_local_out, NUM_HOOKS);
-#else  //}{
-        nf_unregister_net_hooks(&init_net, nfho_local_out, NUM_HOOKS);
-#endif  //}
-        TRACE(DL_SHUTDOWN, "Netfilter hook has been unregistered");
+        s_netfilter_registered = false;
+        TRACE(DL_SHUTDOWN, "Netfilter hooks have been unregistered");
     }
+
+    ec_write_unlock(&s_netfilter_lock, context);
 }
 
-#ifdef HOOK_SELECTOR
-void setNetfilter(const char *buf, const char *name, uint32_t call, void *cb_hook, int cb_hook_nr)
+void ec_netfilter_disable(ProcessContext *context)
 {
-    if ('1' == buf[0])
+    if (g_cbIsolationStats.isolationEnabled || g_webproxy_enabled)
     {
-        pr_info("Adding %s\n", name);
-        g_enableHooks |= call;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
-        nf_register_hooks(cb_hook, cb_hook_nr);
-#else  //}{
-        nf_register_net_hooks(&init_net, cb_hook, cb_hook_nr);
-#endif  //}
-    } else if ('0' == buf[0])
-    {
-        pr_info("Removing %s\n", name);
-        g_enableHooks &= ~call;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0) // {
-        nf_unregister_hooks(cb_hook, cb_hook_nr);
-#else  //}{
-        nf_unregister_net_hooks(&init_net, cb_hook, cb_hook_nr);
-#endif  //}
-    } else
-    {
-        pr_err("Error adding %s to %s\n", buf, name);
         return;
     }
+
+    __ec_netfilter_unregister(context);
 }
 
-int getNetfilter(uint32_t call, struct seq_file *m)
+bool ec_netfilter_initialize(ProcessContext *context)
 {
-    seq_printf(m, (g_enableHooks & call ? "1\n" : "0\n"));
-    return 0;
+    ec_spinlock_init(&s_netfilter_lock, context);
+    return s_netfilter_lock != 0;
 }
 
-int ec_netfilter_local_out_get(struct seq_file *m, void *v) { return getNetfilter(CB__NF_local_out, m); }
-
-ssize_t ec_netfilter_local_out_set(struct file *file, const char *buf, size_t size, loff_t *ppos)
+void ec_netfilter_cleanup(ProcessContext *context)
 {
-    setNetfilter(buf, "local_out", CB__NF_local_out, nfho_local_out, NUM_HOOKS);
-    return size;
+    __ec_netfilter_unregister(context);
+    ec_spinlock_destroy(&s_netfilter_lock, context);
 }
-#endif

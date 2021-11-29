@@ -350,7 +350,7 @@ void ec_event_send_net_proxy(
         }
     }
 
-    ec_print_address(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
+    PRINT_ADDRESS(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);

@@ -134,12 +134,6 @@ extern void ec_sys_clone(ProcessContext *context, struct task_struct *task);
 extern struct security_operations *g_original_ops_ptr;
 
 // ------------------------------------------------
-// Netfilter Module Helpers
-//
-extern bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks);
-
-// ------------------------------------------------
 // Stats Proc Helper
 bool ec_stats_proc_initialize(ProcessContext *context);
 void ec_stats_proc_shutdown(ProcessContext *context);

@@ -8,6 +8,7 @@
 #include "priv.h"
 #include "mem-cache.h"
 #include "cb-spinlock.h"
+#include "netfilter.h"
 
 #include "cb-isolation.h"
 
@@ -61,17 +62,28 @@ VOID ec_DestroyNetworkIsolation(ProcessContext *context)
     ec_spinlock_destroy(&_pControlLock, context);
 }
 
-VOID ec_SetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode)
+VOID ec_SetNetworkIsolationMode(ProcessContext *context, CB_ISOLATION_MODE isolationMode)
 {
     atomic_set((atomic_t *)&CBIsolationMode, isolationMode);
     g_cbIsolationStats.isolationEnabled = isolationMode == IsolationModeOn;
-    TRACE(DL_INFO, "CB ISOLATION MODE: %s", isolationMode == IsolationModeOff ? "DISABLED" : "ENABLED");
+
+    if (g_cbIsolationStats.isolationEnabled)
+    {
+        ec_netfilter_enable(context);
+    } else
+    {
+        ec_netfilter_disable(context);
+    }
+
+    TRACE(DL_INIT, "CB ISOLATION MODE: %s", isolationMode == IsolationModeOff ? "DISABLED" : "ENABLED");
 }
 
 VOID ec_DisableNetworkIsolation(ProcessContext *context)
 {
     atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
     g_cbIsolationStats.isolationEnabled = FALSE;
+    ec_netfilter_disable(context);
+
     TRACE(DL_INFO, "CB ISOLATION MODE: DISABLED");
 }
 
@@ -113,12 +125,9 @@ NTSTATUS ec_ProcessIsolationIoctl(
 
     _pCurrentCbIsolationModeControl = tmpIsolationModeControl;
     tmpIsolationModeControl         = NULL;
-    ec_SetNetworkIsolationMode(_pCurrentCbIsolationModeControl->isolationMode);
+    ec_SetNetworkIsolationMode(context, _pCurrentCbIsolationModeControl->isolationMode);
 
-    if (_pCurrentCbIsolationModeControl->isolationMode == IsolationModeOff)
-    {
-        TRACE(DL_WARNING, "%s: isolation OFF\n", __func__);
-    } else
+    if (_pCurrentCbIsolationModeControl->isolationMode == IsolationModeOn)
     {
         char           str[INET_ADDRSTRLEN];
         unsigned char *addr, i;
@@ -127,7 +136,7 @@ NTSTATUS ec_ProcessIsolationIoctl(
         {
             addr = (unsigned char *)&_pCurrentCbIsolationModeControl->allowedIpAddresses[i];
             snprintf(str, INET_ADDRSTRLEN, "%d.%d.%d.%d", addr[3], addr[2], addr[1], addr[0]);
-            TRACE(DL_WARNING, "%s: isolation ON IP: %s\n", __func__, str);
+            TRACE(DL_INFO, "%s: isolation ON IP: %s\n", __func__, str);
         }
     }
 
@@ -190,6 +199,13 @@ VOID ec_IsolationInterceptByAddrProtoPort(
     ULONG  remoteIpAddress;
     UINT16 port;
 
+    // immediate allow if isolation mode is not on
+    if (atomic_read((atomic_t *)&CBIsolationMode) == IsolationModeOff)
+    {
+        isolationResult->isolationAction = IsolationActionDisabled;
+        return;
+    }
+
     if (isIpV4)
     {
         remoteIpAddress = ntohl(remoteAddr->as_in4.sin_addr.s_addr);
@@ -199,13 +215,6 @@ VOID ec_IsolationInterceptByAddrProtoPort(
         // it doesn't really matter what remoteIpAddress is set for IP6 since all IP6 addresses are blocked
         remoteIpAddress = ntohl(*(uint32_t *)&remoteAddr->as_in6.sin6_addr.s6_addr32[0]);
         port = remoteAddr->as_in6.sin6_port;
-    }
-
-    // immediate allow if isolation mode is not on
-    if (atomic_read((atomic_t *)&CBIsolationMode) == IsolationModeOff)
-    {
-        isolationResult->isolationAction = IsolationActionDisabled;
-        return;
     }
 
     if (protocol == IPPROTO_UDP && (((isIpV4 == true) && (port == DHCP_CLIENT_PORT_V4 || port == DHCP_SERVER_PORT_V4)) ||

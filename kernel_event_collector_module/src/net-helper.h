@@ -59,14 +59,14 @@ void ec_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port);
 void ec_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right);
 void ec_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right);
 void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right);
-void __ec_print_address(
+void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr);
+bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *srcAddr, CB_SOCK_ADDR *dstAddr);
+void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr);
+
+void ec_print_address(
     char                  *msg,
     const struct sock     *sk,
     const struct sockaddr *localAddr,
     const struct sockaddr *remoteAddr);
 
-#define ec_print_address(msg, sk, localAddr, remoteAddr) do { if (MAY_TRACE_LEVEL(DL_NET)) __ec_print_address(msg, sk, localAddr, remoteAddr); } while (0)
-
-void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr);
-bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *srcAddr, CB_SOCK_ADDR *dstAddr);
-void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr);
+#define PRINT_ADDRESS(msg, sk, localAddr, remoteAddr) do { if (MAY_TRACE_LEVEL(DL_NET)) ec_print_address(msg, sk, localAddr, remoteAddr); } while (0)
