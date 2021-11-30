@@ -3,5 +3,5 @@
 
 #pragma once
 
-bool ec_network_hooks_initialize(ProcessContext *context);
-void ec_network_hooks_shutdown(ProcessContext *context);
+bool ec_network_hooks_initialize(ProcessContext *context, uint64_t enableHooks);
+void ec_network_hooks_shutdown(ProcessContext *context, uint64_t enableHooks);

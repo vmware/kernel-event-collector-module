@@ -69,9 +69,6 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__NR_clone                      0x0000000000000001
 #define CB__NR_fork                       0x0000000000000002
 #define CB__NR_vfork                      0x0000000000000004
-#define CB__NR_recvfrom                   0x0000000000000008
-#define CB__NR_recvmsg                    0x0000000000000010
-#define CB__NR_recvmmsg                   0x0000000000000020
 #define CB__NR_delete_module              0x0000000000000080
 #define CB__NR_creat                      0x0000000000000200
 #define CB__NR_open                       0x0000000000000400
@@ -86,6 +83,13 @@ extern uint32_t g_max_queue_size_pri2;
 
 #define CB__NF_local_out                  0x0000000100000000
 
+#define CB__KP_udp_recv                   0x0000001000000000
+#define CB__KP_udp_sendmsg                0x0000002000000000
+#define CB__KP_udpv6_sendmsg              0x0000004000000000
+#define CB__KP_tcp_accept                 0x0000010000000000
+#define CB__KP_tcp_connect                0x0000020000000000
+#define CB__KP_tcpv6_connect              0x0000040000000000
+
 #define CB__LSM_bprm_check_security       0x0000100000000000
 #define CB__LSM_bprm_committed_creds      0x0000200000000000
 
@@ -93,11 +97,7 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__LSM_file_mmap                 0x0000800000000000
 #define CB__LSM_file_permission           0x0001000000000000
 #define CB__LSM_socket_connect            0x0002000000000000
-#define CB__LSM_inet_conn_request         0x0004000000000000
-#define CB__LSM_socket_sock_rcv_skb       0x0008000000000000
 #define CB__LSM_socket_post_create        0x0010000000000000
-#define CB__LSM_socket_sendmsg            0x0020000000000000
-#define CB__LSM_socket_recvmsg            0x0040000000000000
 #define CB__LSM_file_free_security        0x0080000000000000
 
 #define SAFE_STRING(PATH) (PATH) ? (PATH) : "<unknown>"
@@ -132,12 +132,6 @@ extern bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHook
 extern void ec_sys_clone(ProcessContext *context, struct task_struct *task);
 
 extern struct security_operations *g_original_ops_ptr;
-
-// ------------------------------------------------
-// Netfilter Module Helpers
-//
-extern bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks);
 
 // ------------------------------------------------
 // Stats Proc Helper

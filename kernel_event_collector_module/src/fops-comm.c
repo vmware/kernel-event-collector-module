@@ -26,7 +26,7 @@
 #include "process-tracking.h"
 #include "mem-cache.h"
 #include "cb-spinlock.h"
-
+#include "netfilter.h"
 #include "InodeState.h"
 
 const char DRIVER_NAME[] = CB_APP_MODULE_NAME;
@@ -405,7 +405,6 @@ CATCH_DEFAULT:
     {
         // If we still have an event at this point free it now
         atomic64_inc(&tx_dropped);
-        TRACE(DL_INFO, "Failed event insertion");
         ec_free_event(msg, context);
     }
 
@@ -1108,6 +1107,21 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
 
             TRACE(DL_INFO, "pathData=%p path=%s", pathData, pathData->path);
             free_page((unsigned long)page);
+        }
+        break;
+
+    case CB_DRIVER_REQUEST_WEBPROXY_ENABLED:
+        {
+            g_webproxy_enabled = data.value;
+            if (g_webproxy_enabled)
+            {
+                ec_netfilter_enable(&context);
+            } else
+            {
+                ec_netfilter_disable(&context);
+            }
+
+            TRACE(DL_INFO, "Web proxy processing %s", g_webproxy_enabled ? "enabled" : "disabled");
         }
         break;
 

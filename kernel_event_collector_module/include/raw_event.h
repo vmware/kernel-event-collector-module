@@ -493,6 +493,7 @@ typedef enum CB_DRIVER_REQUEST {
   CB_DRIVER_REQUEST_ACTION = 14,             // two way
   CB_DRIVER_REQUEST_CONFIG = 15, // one way
   CB_DRIVER_REQUEST_SET_BANNED_INODE_WITHOUT_KILL = 16, // one way but called multiple times
+  CB_DRIVER_REQUEST_WEBPROXY_ENABLED = 17, // one way
 
   CB_DRIVER_REQUEST_MAX
 

@@ -8,6 +8,7 @@
 #include "priv.h"
 #include "mem-cache.h"
 #include "cb-spinlock.h"
+#include "netfilter.h"
 
 #include "cb-isolation.h"
 
@@ -61,17 +62,28 @@ VOID ec_DestroyNetworkIsolation(ProcessContext *context)
     ec_spinlock_destroy(&_pControlLock, context);
 }
 
-VOID ec_SetNetworkIsolationMode(CB_ISOLATION_MODE isolationMode)
+VOID ec_SetNetworkIsolationMode(ProcessContext *context, CB_ISOLATION_MODE isolationMode)
 {
     atomic_set((atomic_t *)&CBIsolationMode, isolationMode);
     g_cbIsolationStats.isolationEnabled = isolationMode == IsolationModeOn;
-    TRACE(DL_INFO, "CB ISOLATION MODE: %s", isolationMode == IsolationModeOff ? "DISABLED" : "ENABLED");
+
+    if (g_cbIsolationStats.isolationEnabled)
+    {
+        ec_netfilter_enable(context);
+    } else
+    {
+        ec_netfilter_disable(context);
+    }
+
+    TRACE(DL_INIT, "CB ISOLATION MODE: %s", isolationMode == IsolationModeOff ? "DISABLED" : "ENABLED");
 }
 
 VOID ec_DisableNetworkIsolation(ProcessContext *context)
 {
     atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
     g_cbIsolationStats.isolationEnabled = FALSE;
+    ec_netfilter_disable(context);
+
     TRACE(DL_INFO, "CB ISOLATION MODE: DISABLED");
 }
 
@@ -113,12 +125,9 @@ NTSTATUS ec_ProcessIsolationIoctl(
 
     _pCurrentCbIsolationModeControl = tmpIsolationModeControl;
     tmpIsolationModeControl         = NULL;
-    ec_SetNetworkIsolationMode(_pCurrentCbIsolationModeControl->isolationMode);
+    ec_SetNetworkIsolationMode(context, _pCurrentCbIsolationModeControl->isolationMode);
 
-    if (_pCurrentCbIsolationModeControl->isolationMode == IsolationModeOff)
-    {
-        TRACE(DL_INFO, "%s: isolation OFF\n", __func__);
-    } else
+    if (_pCurrentCbIsolationModeControl->isolationMode == IsolationModeOn)
     {
         char           str[INET_ADDRSTRLEN];
         unsigned char *addr, i;
@@ -181,13 +190,15 @@ VOID ec_IsolationIntercept(ProcessContext *context,
 }
 
 VOID ec_IsolationInterceptByAddrProtoPort(
-    ProcessContext *context,
-    ULONG                                   remoteIpAddress,
-    bool                                    isIpV4,
-    UINT32                                  protocol,
-    UINT16                                  port,
+    ProcessContext                *context,
+    UINT32                         protocol,
+    CB_SOCK_ADDR                  *remoteAddr,
     CB_ISOLATION_INTERCEPT_RESULT *isolationResult)
 {
+    bool   isIpV4 = remoteAddr->sa_addr.sa_family == AF_INET;
+    ULONG  remoteIpAddress;
+    UINT16 port;
+
     // immediate allow if isolation mode is not on
     if (atomic_read((atomic_t *)&CBIsolationMode) == IsolationModeOff)
     {
@@ -195,11 +206,22 @@ VOID ec_IsolationInterceptByAddrProtoPort(
         return;
     }
 
+    if (isIpV4)
+    {
+        remoteIpAddress = ntohl(remoteAddr->as_in4.sin_addr.s_addr);
+        port = remoteAddr->as_in4.sin_port;
+    } else
+    {
+        // it doesn't really matter what remoteIpAddress is set for IP6 since all IP6 addresses are blocked
+        remoteIpAddress = ntohl(*(uint32_t *)&remoteAddr->as_in6.sin6_addr.s6_addr32[0]);
+        port = remoteAddr->as_in6.sin6_port;
+    }
+
     if (protocol == IPPROTO_UDP && (((isIpV4 == true) && (port == DHCP_CLIENT_PORT_V4 || port == DHCP_SERVER_PORT_V4)) ||
         ((isIpV4 == false) && (port == DHCP_CLIENT_PORT_V6 || port == DHCP_SERVER_PORT_V6)) ||
         port == DNS_SERVER_PORT))
     {
-        TRACE(DL_INFO, "ISOLATION ALLOWED:: %s ADDR: 0x%08x PROTO: %s PORT: %u",
+        TRACE(DL_INFO, "ISOLATION ALLOWED: %s ADDR: 0x%08x PROTO: %s PORT: %u",
             (isIpV4?"IPv4":"IPv6"),
             remoteIpAddress, (protocol == IPPROTO_UDP?"UDP":"TCP"), ntohs(port));
         isolationResult->isolationAction = IsolationActionAllow;
@@ -225,9 +247,6 @@ VOID ec_IsolationInterceptByAddrProtoPort(
                 RELEASE_RESOURCE(context);
                 return;
             }
-            //			TRACE(DL_INFO, "ISOLATION NO Match: ADDR: 0x%08x RADDR: 0x%08x PROTO: %u PORT: %u",
-            //				  ntohl(allowedIpAddress), ntohl(remoteIpAddress), protocol, ntohs(port));
-
         }
         RELEASE_RESOURCE(context);
     }
