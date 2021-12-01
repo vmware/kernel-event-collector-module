@@ -7,6 +7,7 @@
 #include <linux/types.h>
 #include "priv.h"
 #include "hash-table-generic.h"
+#include "path-cache.h"
 
 typedef struct FILE_PROCESS_KEY {
     uint64_t            file;
@@ -16,11 +17,7 @@ typedef struct FILE_PROCESS_VALUE {
     HashTableNode       node;
     FILE_PROCESS_KEY    key;
     uint32_t            pid;
-    uint64_t            device;
-    uint64_t            inode;
-    uint64_t            fs_magic;
-    bool                isSpecialFile;
-    char               *path;
+    PathData           *path_data;
     atomic64_t          reference_count;
 } FILE_PROCESS_VALUE;
 
@@ -34,7 +31,7 @@ FILE_PROCESS_VALUE *ec_file_process_get(
 FILE_PROCESS_VALUE *ec_file_process_status_open(
     struct file    *file,
     uint32_t        pid,
-    char           *path,
+    PathData       *path_data,
     ProcessContext *context);
 void ec_file_process_status_close(
     struct file    *file,

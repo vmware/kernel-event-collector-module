@@ -34,7 +34,7 @@ typedef enum CB_CONFIG_OPTION {
     ALL_FORKS_AND_EXITS       = 3,
     EXECS_ONLY                = 4,
     COLLAPSED_EXITS_ALL_FORKS = 5,
-    COLLAPSED_EXITS_NO_FORKS  = 6,
+    COLLAPSED_EXITS_NO_FORKS  = 6
 } CB_CONFIG_OPTION;
 
 typedef struct CB_DRIVER_CONFIG {
@@ -43,7 +43,6 @@ typedef struct CB_DRIVER_CONFIG {
     CB_CONFIG_OPTION file_mods;
     CB_CONFIG_OPTION net_conns;
     CB_CONFIG_OPTION report_process_user;
-    CB_CONFIG_OPTION report_file_intent;
 
     #ifdef __cplusplus
         bool operator == (struct CB_DRIVER_CONFIG & other)
@@ -386,16 +385,8 @@ typedef struct _CB_EVENT_GENERIC_DATA {
     char *data;
 } CB_EVENT_GENERIC_DATA;
 
-// intention of the event
-typedef enum CB_INTENT_TYPE {
-    INTENT_ACCESS_CHECK = 0, // we are requesting permission for this operation
-    INTENT_REPORT = 1,       // we are reporting that an operation happened
-    INTENT_PREACTION = 2,    // we are reporting an operation before it happened
-} CB_INTENT_TYPE;
-
 typedef struct CB_EVENT {
     CB_EVENT_API_VERSION apiVersion;
-    CB_INTENT_TYPE intentType; // INTENT_ACCESS_CHECK or INTENT_REPORT
     CB_EVENT_TYPE eventType;
     CB_EVENT_PROCESS_INFO procInfo;
 
@@ -502,6 +493,7 @@ typedef enum CB_DRIVER_REQUEST {
   CB_DRIVER_REQUEST_ACTION = 14,             // two way
   CB_DRIVER_REQUEST_CONFIG = 15, // one way
   CB_DRIVER_REQUEST_SET_BANNED_INODE_WITHOUT_KILL = 16, // one way but called multiple times
+  CB_DRIVER_REQUEST_WEBPROXY_ENABLED = 17, // one way
 
   CB_DRIVER_REQUEST_MAX
 

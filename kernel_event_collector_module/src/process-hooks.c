@@ -196,14 +196,10 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     uid_t euid = GET_EUID();
     struct timespec start_time = {0, 0};
     ProcessHandle *process_handle = NULL;
-    uint64_t device = 0;
-    uint64_t inode = 0;
-    char *path_buffer = NULL;
-    char *path = NULL;
-    bool path_found = false;
     int stat = 0;
     bool killit = false;
     int ret = 0;
+    PathData *path_data = NULL;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, pid);
 
@@ -227,31 +223,12 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     stat = g_original_ops_ptr->bprm_set_creds(bprm);
 #endif  //}
 
-    ec_get_devinfo_from_file(bprm->file, &device, &inode);
+    path_data = ec_file_get_path_data(bprm->file, &context);
+    TRY(path_data);
 
     if (tid != INITTASK)
     {
-        killit = ec_banning_KillBannedProcessByInode(&context, device, inode);
-    }
-
-    // get a temporary path buffer before going into an unschedulable state
-    // It is safe to schedule in this hook
-    path_buffer = ec_get_path_buffer(&context);
-    if (path_buffer)
-    {
-        // ec_file_get_path() uses dpath which builds the path efficently
-        //  by walking back to the root. It starts with a string terminator
-        //  in the last byte of the target buffer.
-        //
-        // The `path` variable will point to the start of the string, so we will
-        //  use that directly later to copy into the tracking entry and event.
-        path_found = ec_file_get_path(bprm->file, path_buffer, PATH_MAX, &path);
-        path_buffer[PATH_MAX] = 0;
-
-        if (!path_found)
-        {
-            TRACE(DL_INFO, "Failed to retrieve path for pid: %d", pid);
-        }
+        killit = ec_banning_KillBannedProcessByInode(&context, path_data->key.device, path_data->key.inode);
     }
 
     // this function can be called recursively by the kernel, for an interpreter
@@ -264,10 +241,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
                     tid,
                     uid,
                     euid,
-                    device,
-                    inode,
-                    path,
-                    path_found,
+                    path_data,
                     ec_to_windows_timestamp(&start_time),
                     CB_PROCESS_START_BY_EXEC,
                     task,
@@ -281,7 +255,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
         // The interpreter can itself be a script so this hook can be called be called multiple times with
         // bprm->recursion_depth incremented on each call.
 
-        if (path_found)
+        if (path_data->path_found)
         {
             process_handle = ec_process_tracking_get_handle(pid, &context);
 
@@ -290,18 +264,15 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
                 // The previously set path is actually the script_path.
                 // The script will report as an open event when the interpreter opens it.
                 // The path from this call is the path of the interpreter.
-                char *_path = ec_mem_cache_strdup(path, &context);
-
                 ec_process_exec_identity(process_handle)->is_interpreter = true;
-                ec_process_tracking_set_path(process_handle, _path, &context);
-                ec_mem_cache_put_generic(_path);
+                ec_process_tracking_set_path(process_handle, path_data, &context);
 
                 // also need to update the file information
-                ec_process_exec_identity(process_handle)->exec_details.inode = inode;
-                ec_process_exec_identity(process_handle)->exec_details.device = device;
+                ec_process_exec_identity(process_handle)->exec_details.inode = path_data->key.inode;
+                ec_process_exec_identity(process_handle)->exec_details.device = path_data->key.device;
 
-                ec_process_posix_identity(process_handle)->posix_details.inode = inode;
-                ec_process_posix_identity(process_handle)->posix_details.device = device;
+                ec_process_posix_identity(process_handle)->posix_details.inode = path_data->key.inode;
+                ec_process_posix_identity(process_handle)->posix_details.device = path_data->key.device;
             }
         }
     }
@@ -319,7 +290,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
                              TerminateFailureReasonNone,
                              0, // details
                              ec_process_tracking_should_track_user() ? uid : (uid_t)-1,
-                             path_buffer,
+                             path_data->path,
                              &context);
         }
         ret = -EPERM;
@@ -327,7 +298,7 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
 
 CATCH_DEFAULT:
     ec_process_tracking_put_handle(process_handle, &context);
-    ec_put_path_buffer(path_buffer);
+    ec_path_cache_put(path_data, &context);
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return ret;
 }

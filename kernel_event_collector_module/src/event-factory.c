@@ -22,7 +22,6 @@ const char *ec_StartAction_ToString(int start_action)
 
 PCB_EVENT ec_factory_alloc_event(
     ProcessHandle * process_handle,
-    CB_INTENT_TYPE  intentType,
     CB_EVENT_TYPE   eventType,
     int             trace_level,
     const char     *type_msg,
@@ -45,11 +44,11 @@ PCB_EVENT ec_factory_alloc_event(
     }
 
     // This will return a NULL event if we are configured to not send this event type
-    event = ec_alloc_event(intentType, eventType, context);
+    event = ec_alloc_event(eventType, context);
 
     // We still call this even for a NULL event to give the process_tracking a chance
     //  to clean up any private data
-    ec_process_tracking_set_event_info(process_handle, intentType, eventType, event, context);
+    ec_process_tracking_set_event_info(process_handle, eventType, event, context);
 
     return event;
 }
@@ -66,7 +65,6 @@ void ec_event_send_start(
 
     event = ec_factory_alloc_event(
         process_handle,
-        INTENT_REPORT,
         start_action != CB_PROCESS_START_BY_FORK ? CB_EVENT_TYPE_PROCESS_START_EXEC : CB_EVENT_TYPE_PROCESS_START_FORK,
         DL_PROCESS,
         ec_StartAction_ToString(start_action),
@@ -114,7 +112,6 @@ void ec_event_send_exit(
     char      *status_msg           = "";
     PCB_EVENT  event                = ec_factory_alloc_event(
         process_handle,
-        INTENT_REPORT,
         was_last_active_process ? CB_EVENT_TYPE_PROCESS_LAST_EXIT : CB_EVENT_TYPE_PROCESS_EXIT,
         0,              // No message will be printed
         NULL,
@@ -165,7 +162,6 @@ void ec_event_send_block(
     size_t path_size = 0;
     PCB_EVENT event = ec_factory_alloc_event(
         process_handle,
-        INTENT_REPORT,
         CB_EVENT_TYPE_PROCESS_BLOCKED,
         DL_PROCESS,
         "KILL",
@@ -199,7 +195,6 @@ void ec_event_send_block(
 void ec_event_send_file(
     ProcessHandle  * process_handle,
     CB_EVENT_TYPE    event_type,
-    CB_INTENT_TYPE   intent,
     uint64_t         device,
     uint64_t         inode,
     uint64_t         fs_magic,
@@ -226,7 +221,6 @@ void ec_event_send_file(
 
     event = ec_factory_alloc_event(
         process_handle,
-        intent,
         event_type,
         DL_FILE,
         ec_event_type_to_str(event_type),
@@ -290,7 +284,6 @@ void ec_event_send_modload(
 
     event = ec_factory_alloc_event(
         process_handle,
-        INTENT_REPORT,
         event_type,
         DL_MODLOAD,
         "MODLOAD",
@@ -331,7 +324,6 @@ void ec_event_send_net_proxy(
 {
     PCB_EVENT event = ec_factory_alloc_event(
         process_handle,
-        INTENT_REPORT,
         net_event_type,
         0,              // No message will be printed
         NULL,
@@ -358,7 +350,7 @@ void ec_event_send_net_proxy(
         }
     }
 
-    ec_print_address(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
+    PRINT_ADDRESS(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
@@ -394,7 +386,6 @@ void ec_event_send_dns(
 {
     PCB_EVENT event = ec_factory_alloc_event(
         NULL,           // The procInfo is ignored for this event type
-        INTENT_REPORT,
         net_event_type,
         0,              // No message will be printed
         NULL,

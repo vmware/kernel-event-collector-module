@@ -33,6 +33,7 @@
 #include "version.h"
 #include "task-helper.h"
 #include "module_state.h"
+#include "file-helper.h"
 
 extern const char DRIVER_NAME[];
 
@@ -68,9 +69,6 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__NR_clone                      0x0000000000000001
 #define CB__NR_fork                       0x0000000000000002
 #define CB__NR_vfork                      0x0000000000000004
-#define CB__NR_recvfrom                   0x0000000000000008
-#define CB__NR_recvmsg                    0x0000000000000010
-#define CB__NR_recvmmsg                   0x0000000000000020
 #define CB__NR_delete_module              0x0000000000000080
 #define CB__NR_creat                      0x0000000000000200
 #define CB__NR_open                       0x0000000000000400
@@ -85,6 +83,13 @@ extern uint32_t g_max_queue_size_pri2;
 
 #define CB__NF_local_out                  0x0000000100000000
 
+#define CB__KP_udp_recv                   0x0000001000000000
+#define CB__KP_udp_sendmsg                0x0000002000000000
+#define CB__KP_udpv6_sendmsg              0x0000004000000000
+#define CB__KP_tcp_accept                 0x0000010000000000
+#define CB__KP_tcp_connect                0x0000020000000000
+#define CB__KP_tcpv6_connect              0x0000040000000000
+
 #define CB__LSM_bprm_check_security       0x0000100000000000
 #define CB__LSM_bprm_committed_creds      0x0000200000000000
 
@@ -92,11 +97,7 @@ extern uint32_t g_max_queue_size_pri2;
 #define CB__LSM_file_mmap                 0x0000800000000000
 #define CB__LSM_file_permission           0x0001000000000000
 #define CB__LSM_socket_connect            0x0002000000000000
-#define CB__LSM_inet_conn_request         0x0004000000000000
-#define CB__LSM_socket_sock_rcv_skb       0x0008000000000000
 #define CB__LSM_socket_post_create        0x0010000000000000
-#define CB__LSM_socket_sendmsg            0x0020000000000000
-#define CB__LSM_socket_recvmsg            0x0040000000000000
 #define CB__LSM_file_free_security        0x0080000000000000
 
 #define SAFE_STRING(PATH) (PATH) ? (PATH) : "<unknown>"
@@ -133,18 +134,13 @@ extern void ec_sys_clone(ProcessContext *context, struct task_struct *task);
 extern struct security_operations *g_original_ops_ptr;
 
 // ------------------------------------------------
-// Netfilter Module Helpers
-//
-extern bool ec_netfilter_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void ec_netfilter_cleanup(ProcessContext *context, uint64_t enableHooks);
-
-// ------------------------------------------------
 // Stats Proc Helper
 bool ec_stats_proc_initialize(ProcessContext *context);
 void ec_stats_proc_shutdown(ProcessContext *context);
 int ec_proc_track_show_table(struct seq_file *m, void *v);
 int ec_proc_track_show_stats(struct seq_file *m, void *v);
 int ec_file_track_show_table(struct seq_file *m, void *v);
+int ec_path_cache_show(struct seq_file *m, void *v);
 
 int ec_proc_current_memory_avg(struct seq_file *m, void *v);
 int ec_proc_current_memory_det(struct seq_file *m, void *v);
@@ -156,12 +152,12 @@ int ec_show_active_hooks(struct seq_file *m, void *v);
 extern bool ec_logger_initialize(ProcessContext *context);
 extern void ec_logger_shutdown(ProcessContext *context);
 
-extern PCB_EVENT ec_alloc_event(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType, ProcessContext *context);
+extern PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context);
 extern void ec_free_event(PCB_EVENT event, ProcessContext *context);
 extern void ec_free_event_on_error(PCB_EVENT event, ProcessContext *context);
 extern void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context);
 
-extern bool ec_logger_should_log(CB_INTENT_TYPE intentType, CB_EVENT_TYPE eventType);
+extern bool ec_logger_should_log(CB_EVENT_TYPE eventType);
 
 extern int ec_send_event(struct CB_EVENT *msg, ProcessContext *context);
 extern void ec_fops_comm_wake_up_reader(ProcessContext *context);
@@ -196,10 +192,8 @@ time_t ec_get_null_time(void);
 extern int     ec_proc_show_events_avg(struct seq_file *m, void *v);
 extern int     ec_proc_show_events_det(struct seq_file *m, void *v);
 extern ssize_t ec_proc_show_events_rst(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern ssize_t ec_net_track_purge_age(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern ssize_t ec_net_track_purge_all(struct file *file, const char *buf, size_t size, loff_t *ppos);
-extern int     ec_net_track_show_new(struct seq_file *m, void *v);
-extern int     ec_net_track_show_old(struct seq_file *m, void *v);
+extern ssize_t ec_net_track_purge(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern int     ec_net_track_show(struct seq_file *m, void *v);
 
 extern int ec_get_syscall_clone(struct seq_file *m, void *v);
 extern ssize_t ec_set_syscall_clone(struct file *file, const char *buf, size_t size, loff_t *ppos);
@@ -254,26 +248,6 @@ ssize_t ec_set_lsm_file_mmap(struct file *file, const char *buf, size_t size, lo
 #endif
 
 bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason);
-
-// ------------------------------------------------
-// File Helpers
-//
-extern bool ec_file_helper_init(ProcessContext *context);
-extern bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname);
-extern bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen, char **pathname);
-extern bool ec_dentry_get_path(struct dentry const *dentry, char *buffer, unsigned int buflen, char **pathname);
-extern char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen);
-extern char *ec_lsm_dentry_path(struct dentry const *dentry, char *path, int len);
-extern struct inode const *ec_get_inode_from_file(struct file const *file);
-extern void ec_get_devinfo_from_file(struct file const *file, uint64_t *device, uint64_t *inode);
-extern void ec_get_devinfo_fs_magic_from_file(struct file const *file, uint64_t *device, uint64_t *inode, uint64_t *fs_magic);
-extern void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode, uint64_t *fs_magic);
-extern struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry);
-umode_t ec_get_mode_from_file(struct file const *file);
-extern struct super_block const *ec_get_sb_from_file(struct file const *file);
-extern bool ec_is_interesting_file(struct file *file);
-extern int ec_is_special_file(char *pathname, int len);
-extern bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
 
 // schedulers
 extern const struct sched_class idle_sched_class;

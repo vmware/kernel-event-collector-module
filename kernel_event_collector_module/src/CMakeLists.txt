@@ -85,6 +85,7 @@ set(SOURCE_FILES drvmain.c
         rbtree-helper.c
         file-helper.c
         file-hooks.c
+        path-cache.c
         logger.c
         lsm.c
         modules.c
@@ -111,11 +112,13 @@ set(SOURCE_FILES drvmain.c
         event-factory.c
         cb-module-state-export.c
         dns-parser.c
+        plru.c
         tests/run-tests.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c
         tests/module-state-tests.c
-        tests/stall-tests.c)
+        tests/stall-tests.c
+        tests/plru-tests.c)
 
 file(GLOB HEADER_FILES *.h ../include/*.h tests/*.h)
 

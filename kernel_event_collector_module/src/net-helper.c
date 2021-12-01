@@ -6,6 +6,7 @@
 #include "net-helper.h"
 
 #include <linux/inet.h>
+#include <net/ip.h>
 
 #define IPV6_SCOPE_DELIMITER '%'
 #define IPV6_SCOPE_ID_LEN sizeof("%nnnnnnnnnn")
@@ -164,6 +165,7 @@ void ec_print_address(
     char      raddr_str[INET6_ADDRSTRLEN*2] = {0};
     char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
+    CANCEL_VOID(sk);
 
     ec_ntop(remoteAddr, raddr_str, sizeof(raddr_str), &rport);
     ec_ntop(localAddr,  laddr_str, sizeof(laddr_str), &lport);
@@ -175,3 +177,103 @@ void ec_print_address(
        TYPE_STR(sk->sk_type),
        laddr_str, ntohs(lport), raddr_str, ntohs(rport));
 }
+
+void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr)
+{
+    struct inet_sock *inet;
+
+    CANCEL_VOID(sk);
+    CANCEL_VOID(localAddr);
+
+    inet = inet_sk(sk);
+
+    localAddr->sa_addr.sa_family = sk->sk_family;
+
+    if (sk->sk_family == PF_INET)
+    {
+        localAddr->as_in4.sin_port        = IPV4_SOCKNAME(inet, sport);
+        localAddr->as_in4.sin_addr.s_addr = IPV4_SOCKNAME(inet, saddr);
+    } else {
+        void              *sin = NULL;
+
+        localAddr->as_in6.sin6_port = IPV4_SOCKNAME(inet, sport);
+
+        sin = ipv6_addr_any(&IPV6_SOCKNAME(sk, rcv_saddr)) ? &inet6_sk(sk)->saddr : &IPV6_SOCKNAME(sk, rcv_saddr);
+        memcpy(&localAddr->as_in6.sin6_addr, sin, sizeof(struct in6_addr));
+    }
+}
+
+// I would prefer to use kernel_getpeername here, but it does not work if the socket state is closed.
+//  (Which seems to happen under load.)
+//  kernel_getpeername also requires a 'socket', which does not work if the 'sock' does not yet have one.
+void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr)
+{
+    struct inet_sock *inet;
+
+    CANCEL_VOID(sk);
+    CANCEL_VOID(remoteAddr);
+
+    inet = inet_sk(sk);
+
+    remoteAddr->sa_addr.sa_family = sk->sk_family;
+
+    if (sk->sk_family == PF_INET)
+    {
+        remoteAddr->as_in4.sin_port        = IPV4_SOCKNAME(inet, dport);
+        remoteAddr->as_in4.sin_addr.s_addr = IPV4_SOCKNAME(inet, daddr);
+    } else {
+        remoteAddr->as_in6.sin6_port = IPV4_SOCKNAME(inet, dport);
+        memcpy(&remoteAddr->as_in6.sin6_addr, &IPV6_SOCKNAME(sk, daddr), sizeof(struct in6_addr));
+    }
+}
+
+bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *srcAddr, CB_SOCK_ADDR *dstAddr)
+{
+    int            family;
+    struct udphdr *udp_header;
+
+    TRY(skb);
+    TRY(CHECK_SK_PROTO(sk));
+
+    family = sk->sk_family;
+
+    srcAddr->sa_addr.sa_family = family;
+    dstAddr->sa_addr.sa_family = family;
+
+    if (family == AF_INET)
+    {
+        struct iphdr *ip_header = ip_hdr(skb);
+
+        TRY(ip_header);
+
+        srcAddr->as_in4.sin_addr.s_addr = ip_header->saddr;
+        dstAddr->as_in4.sin_addr.s_addr = ip_header->daddr;
+    } else
+    {
+        struct ipv6hdr *ip_header = ipv6_hdr(skb);
+
+        TRY(ip_header);
+
+        srcAddr->as_in6.sin6_addr = ip_header->saddr;
+        dstAddr->as_in6.sin6_addr = ip_header->daddr;
+    }
+
+    //Both UDP and TCP header begin with source|dest port and that's all we need this for
+    udp_header = udp_hdr(skb);
+    TRY(udp_header);
+
+    if (family == AF_INET)
+    {
+        srcAddr->as_in4.sin_port = udp_header->source;
+        dstAddr->as_in4.sin_port = udp_header->dest;
+    } else
+    {
+        srcAddr->as_in6.sin6_port = udp_header->source;
+        dstAddr->as_in6.sin6_port = udp_header->dest;
+    }
+
+    return true;
+CATCH_DEFAULT:
+    return false;
+}
+

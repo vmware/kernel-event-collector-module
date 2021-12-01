@@ -26,7 +26,7 @@
 #include "process-tracking.h"
 #include "mem-cache.h"
 #include "cb-spinlock.h"
-
+#include "netfilter.h"
 #include "InodeState.h"
 
 const char DRIVER_NAME[] = CB_APP_MODULE_NAME;
@@ -405,7 +405,6 @@ CATCH_DEFAULT:
     {
         // If we still have an event at this point free it now
         atomic64_inc(&tx_dropped);
-        TRACE(DL_INFO, "Failed event insertion");
         ec_free_event(msg, context);
     }
 
@@ -1017,7 +1016,7 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
             }
 
             TRACE(DL_INFO, "Got a heartbeat request.");
-            event = ec_alloc_event(INTENT_REPORT, CB_EVENT_TYPE_HEARTBEAT, &context);
+            event = ec_alloc_event(CB_EVENT_TYPE_HEARTBEAT, &context);
             if (event == NULL)
             {
                 TRACE(DL_ERROR, "Unable to alloc CB_EVENT_TYPE_HEARTBEAT.");
@@ -1108,6 +1107,21 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
 
             TRACE(DL_INFO, "pathData=%p path=%s", pathData, pathData->path);
             free_page((unsigned long)page);
+        }
+        break;
+
+    case CB_DRIVER_REQUEST_WEBPROXY_ENABLED:
+        {
+            g_webproxy_enabled = data.value;
+            if (g_webproxy_enabled)
+            {
+                ec_netfilter_enable(&context);
+            } else
+            {
+                ec_netfilter_disable(&context);
+            }
+
+            TRACE(DL_INFO, "Web proxy processing %s", g_webproxy_enabled ? "enabled" : "disabled");
         }
         break;
 
@@ -1209,7 +1223,6 @@ void __ec_apply_driver_config(CB_DRIVER_CONFIG *config)
         g_driver_config.file_mods = (config->file_mods != NO_CHANGE ? config->file_mods : g_driver_config.file_mods);
         g_driver_config.net_conns = (config->net_conns != NO_CHANGE ? config->net_conns : g_driver_config.net_conns);
         g_driver_config.report_process_user = (config->report_process_user != NO_CHANGE ? config->report_process_user : g_driver_config.report_process_user);
-        g_driver_config.report_file_intent = (config->report_file_intent != NO_CHANGE ? config->report_file_intent : g_driver_config.report_file_intent);
 
         __ec_print_driver_config("New Module Config", &g_driver_config);
     }
@@ -1238,14 +1251,13 @@ void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
 {
     if (config)
     {
-        TRACE(DL_INFO, "%s: %s, %s, %s, %s, %s, %s",
+        TRACE(DL_INFO, "%s: %s, %s, %s, %s, %s",
             msg,
             __ec_driver_config_option_to_string(config->processes),
             __ec_driver_config_option_to_string(config->module_loads),
             __ec_driver_config_option_to_string(config->file_mods),
             __ec_driver_config_option_to_string(config->net_conns),
-            __ec_driver_config_option_to_string(config->report_process_user),
-            __ec_driver_config_option_to_string(config->report_file_intent));
+            __ec_driver_config_option_to_string(config->report_process_user));
     }
 }
 

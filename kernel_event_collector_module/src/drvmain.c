@@ -9,6 +9,7 @@
 #include "process-tracking.h"
 #include "net-tracking.h"
 #include "net-hooks.h"
+#include "netfilter.h"
 #include "file-process-tracking.h"
 #include "cb-isolation.h"
 #include "mem-cache.h"
@@ -18,6 +19,7 @@
 #include "hook-tracking.h"
 #include "tests/run-tests.h"
 #include "stall-event.h"
+#include "path-cache.h"
 
 #ifdef HOOK_SELECTOR
 #define HOOK_MASK  0x0000000000000000
@@ -48,7 +50,6 @@ CB_DRIVER_CONFIG g_driver_config = {
     .file_mods =            ENABLE,
     .net_conns =            ENABLE,
     .report_process_user =  ENABLE,
-    .report_file_intent =   DISABLE,
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
@@ -205,8 +206,7 @@ int __init ec_init(void)
     ec_reader_init();
 
     TRY_STEP(DEFAULT,    ec_module_state_info_initialize(&context));
-    TRY_STEP(STATE_INFO, ec_netfilter_initialize(&context, g_enableHooks));
-    TRY_STEP(NET_FIL,    ec_do_lsm_initialize(&context, g_enableHooks));
+    TRY_STEP(STATE_INFO, ec_do_lsm_initialize(&context, g_enableHooks));
     TRY_STEP(LSM,        ec_do_sys_initialize(&context, g_enableHooks));
     TRY_STEP(SYSCALL,    ec_user_devnode_init(&context));
     TRY_STEP(USER_DEV_NODE,  ec_hook_tracking_initialize(&context));
@@ -256,8 +256,6 @@ CATCH_SYSCALL:
     ec_do_sys_shutdown(&context, g_enableHooks);
 CATCH_LSM:
     ec_do_lsm_shutdown(&context);
-CATCH_NET_FIL:
-    ec_netfilter_cleanup(&context, g_enableHooks);
 CATCH_STATE_INFO:
     ec_module_state_info_shutdown(&context);
 CATCH_DEFAULT:
@@ -281,7 +279,6 @@ void ec_shutdown(ProcessContext *context)
     // Remove hooks
     ec_do_sys_shutdown(context, g_enableHooks);
     ec_do_lsm_shutdown(context);
-    ec_netfilter_cleanup(context, g_enableHooks);
 }
 
 void __exit ec_cleanup(void)
@@ -528,12 +525,14 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
     TRY_STEP(DEFAULT,   ec_disable_peer_modules(context));
     TRY_STEP(DEFAULT,   ec_path_buffers_init(context));
-    TRY_STEP(BUFFERS,   ec_proc_initialize(context));
+    TRY_STEP(BUFFERS,   ec_path_cache_init(context));
+    TRY_STEP(FILE_CACHE, ec_proc_initialize(context));
     TRY_STEP(PROC_DIR,  ec_user_comm_initialize(context));
     TRY_STEP(USER_COMM, ec_logger_initialize(context));
     TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
     TRY_STEP(PROC,      ec_net_tracking_initialize(context));
-    TRY_STEP(NET_TR,    ec_network_hooks_initialize(context));
+    TRY_STEP(NET_TR,    ec_netfilter_initialize(context));
+    TRY_STEP(NET_FILT,  ec_network_hooks_initialize(context, g_enableHooks));
     TRY_STEP(NET_HOOK,  ec_banning_initialize(context));
     TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
     TRY_STEP(NET_IS,    ec_file_helper_init(context));
@@ -553,10 +552,12 @@ CATCH_NET_IS:
     ec_DestroyNetworkIsolation(context);
 CATCH_BAN:
     ec_banning_shutdown(context);
+CATCH_NET_HOOK:
+    ec_network_hooks_shutdown(context, g_enableHooks);
+CATCH_NET_FILT:
+    ec_netfilter_cleanup(context);
 CATCH_NET_TR:
     ec_net_tracking_shutdown(context);
-CATCH_NET_HOOK:
-    ec_network_hooks_shutdown(context);
 CATCH_PROC:
     ec_process_tracking_shutdown(context);
 CATCH_LOGGER:
@@ -565,6 +566,8 @@ CATCH_USER_COMM:
     ec_user_comm_shutdown(context);
 CATCH_PROC_DIR:
     ec_proc_shutdown(context);
+CATCH_FILE_CACHE:
+    ec_path_cache_shutdown(context);
 CATCH_BUFFERS:
     ec_path_buffers_shutdown(context);
 CATCH_DEFAULT:
@@ -579,16 +582,19 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
      */
     ec_stall_events_shutdown(context);
     ec_stats_proc_shutdown(context);
+    ec_file_tracking_shutdown(context);
     ec_task_shutdown(context);
     ec_DestroyNetworkIsolation(context);
     ec_banning_shutdown(context);
-    ec_user_comm_shutdown(context);
+    ec_network_hooks_shutdown(context, g_enableHooks);
+    ec_netfilter_cleanup(context);
     ec_net_tracking_shutdown(context);
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
-    ec_file_tracking_shutdown(context);
-    ec_path_buffers_shutdown(context);
+    ec_user_comm_shutdown(context);
     ec_proc_shutdown(context);
+    ec_path_cache_shutdown(context);
+    ec_path_buffers_shutdown(context);
 }
 
 bool ec_disable_peer_modules(ProcessContext *context)
