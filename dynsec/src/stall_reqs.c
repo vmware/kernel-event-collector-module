@@ -20,6 +20,7 @@
 #include "stall_tbl.h"
 #include "factory.h"
 #include "version.h"
+#include "inode_cache.h"
 #include "task_cache.h"
 #include "hooks.h"
 #include "config.h"
@@ -143,7 +144,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
         if (event->report_flags & DYNSEC_REPORT_STALL) {
-            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW);
+            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0);
         }
         free_dynsec_event(event);
         event = NULL;
@@ -183,7 +184,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
             // Place it back into queue OR resume task if we
             // don't have a timeout during the stall.
             if (event->report_flags & DYNSEC_REPORT_STALL) {
-                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW);
+                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0);
             }
             free_dynsec_event(event);
             event = NULL;
@@ -221,6 +222,7 @@ static int dynsec_stall_release(struct inode *inode, struct file *file)
 
     stall_tbl_disable(stall_tbl);
     task_cache_clear();
+    inode_cache_clear();
 
     // Reset back to default settings
     global_config = preserved_config;
@@ -287,7 +289,8 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
     key.req_id = response.req_id;
     key.event_type = response.event_type;
     key.tid = response.tid;
-    ret = stall_tbl_resume(stall_tbl, &key, response.response);
+    ret = stall_tbl_resume(stall_tbl, &key, response.response,
+                           response.inode_cache_flags);
     if (ret == 0) {
         if (response.cache_flags) {
             (void)task_cache_handle_response(&response);
@@ -417,9 +420,11 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         if (bypass_mode_enabled()) {
             stall_tbl_disable(stall_tbl);
             task_cache_disable();
+            inode_cache_disable();
         } else {
             stall_tbl_enable(stall_tbl);
             task_cache_enable();
+            inode_cache_enable();
         }
         unlock_config();
         break;
@@ -440,11 +445,13 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
             if (!arg) {
                 global_config.stall_mode = 0;
                 task_cache_clear();
+                inode_cache_clear();
             }
         } else {
             // Enable stalling
             if (arg) {
                 task_cache_clear();
+                inode_cache_clear();
                 global_config.stall_mode = 1;
             }
         }

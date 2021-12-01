@@ -166,6 +166,9 @@ static struct dynsec_event *alloc_file_event(enum dynsec_event_type event_type,
 
     init_event_data(event_type, file, report_flags, hook_type);
 
+    // On default don't install a file to consumer of event queue
+    file->kmsg.msg.fd = -1;
+
     return &file->event;
 }
 

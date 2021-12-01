@@ -7,14 +7,12 @@
 #include <linux/slab.h>
 #include <linux/fs.h>
 #include <linux/vmalloc.h>
+#include <linux/random.h>
 #include "dynsec.h"
 #include "factory.h"
 #include "task_cache.h"
 
 // Provide Simple Per-Task Level Event Tracking/Caching
-
-// TODO: Clear on Disconnect of Client
-// - Add into stall_tbl
 
 struct task_bkt {
     spinlock_t lock;
@@ -49,17 +47,18 @@ struct task_cache {
     bool enabled;
     bool used_vmalloc;
     struct task_bkt *bkt;
+    u32 seed;
 };
 
-#define TASK_MAX_BKT_SZ 10
+#define TASK_MAX_BKT_SZ 8
 #define TASK_BUCKET_BITS 14
 #define TASK_BUCKETS BIT(TASK_BUCKET_BITS)
 
 static struct task_cache *task_cache = NULL;
 
-static inline u32 task_hash(struct task_key *key)
+static inline u32 task_hash(struct task_key *key, u32 secret)
 {
-    return jhash(key, sizeof(*key), 0);
+    return jhash(key, sizeof(*key), secret);
 }
 static int task_bucket_index(u32 hash)
 {
@@ -118,6 +117,8 @@ int task_cache_register(void)
         task_cache->bkt[i].size = 0;
         INIT_LIST_HEAD(&task_cache->bkt[i].list);
     }
+
+    get_random_bytes(&task_cache->seed, sizeof(task_cache->seed));
 
     task_cache->enabled = 1;
     return 0;
@@ -283,7 +284,7 @@ int task_cache_set_last_event(pid_t tid,
     }
 
     key.tid = tid;
-    hash = task_hash(&key);
+    hash = task_hash(&key, task_cache->seed);
     bkt_index = task_bucket_index(hash);
     bkt = &(task_cache->bkt[bkt_index]);
 
@@ -311,6 +312,7 @@ int task_cache_set_last_event(pid_t tid,
     entry->hash = hash;
     entry->hits = 1;
     memcpy(&entry->key, &key, sizeof(key));
+    INIT_LIST_HEAD(&entry->list);
 
     // Insert New Entry
     spin_lock_irqsave(&bkt->lock, flags);
@@ -375,7 +377,7 @@ int task_cache_handle_response(struct dynsec_response *response)
     }
 
     key.tid = response->tid;
-    hash = task_hash(&key);
+    hash = task_hash(&key, task_cache->seed);
     bkt_index = task_bucket_index(hash);
     bkt = &(task_cache->bkt[bkt_index]);
 
@@ -416,7 +418,7 @@ void task_cache_clear_response_caches(pid_t tid)
         return;
     }
 
-    hash = task_hash(&key);
+    hash = task_hash(&key, task_cache->seed);
     bkt_index = task_bucket_index(hash);
     bkt = &(task_cache->bkt[bkt_index]);
 
@@ -432,7 +434,7 @@ void task_cache_remove_entry(pid_t tid)
 {
     u32 hash;
     unsigned long flags = 0;
-    struct task_entry *entry;
+    struct task_entry *entry = NULL;
     struct task_bkt *bkt;
     int bkt_index;
     struct task_key key = {
@@ -443,7 +445,7 @@ void task_cache_remove_entry(pid_t tid)
         return;
     }
 
-    hash = task_hash(&key);
+    hash = task_hash(&key, task_cache->seed);
     bkt_index = task_bucket_index(hash);
     bkt = &(task_cache->bkt[bkt_index]);
 
@@ -454,4 +456,8 @@ void task_cache_remove_entry(pid_t tid)
         bkt->size -= 1;
     }
     spin_unlock_irqrestore(&bkt->lock, flags);
+
+    if (entry) {
+        kfree(entry);
+    }
 }

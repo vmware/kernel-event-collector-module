@@ -4,23 +4,24 @@
 #pragma once
 #include <linux/ioctl.h>
 
-#define DYNSEC_HOOK_TYPE_EXEC      0x00000001
-#define DYNSEC_HOOK_TYPE_RENAME    0x00000002
-#define DYNSEC_HOOK_TYPE_UNLINK    0x00000004
-#define DYNSEC_HOOK_TYPE_RMDIR     0x00000008
-#define DYNSEC_HOOK_TYPE_MKDIR     0x00000010
-#define DYNSEC_HOOK_TYPE_CREATE    0x00000020
-#define DYNSEC_HOOK_TYPE_SETATTR   0x00000040
-#define DYNSEC_HOOK_TYPE_OPEN      0x00000080
-#define DYNSEC_HOOK_TYPE_LINK      0x00000100
-#define DYNSEC_HOOK_TYPE_SYMLINK   0x00000200
-#define DYNSEC_HOOK_TYPE_SIGNAL    0x00000400
-#define DYNSEC_HOOK_TYPE_PTRACE    0x00000800
-#define DYNSEC_HOOK_TYPE_MMAP      0x00001000
-#define DYNSEC_HOOK_TYPE_CLOSE     0x00002000
-#define DYNSEC_HOOK_TYPE_TASK_FREE 0x00004000
-#define DYNSEC_HOOK_TYPE_EXIT      0x00008000
-#define DYNSEC_HOOK_TYPE_CLONE     0x00010000
+#define DYNSEC_HOOK_TYPE_EXEC       0x00000001
+#define DYNSEC_HOOK_TYPE_RENAME     0x00000002
+#define DYNSEC_HOOK_TYPE_UNLINK     0x00000004
+#define DYNSEC_HOOK_TYPE_RMDIR      0x00000008
+#define DYNSEC_HOOK_TYPE_MKDIR      0x00000010
+#define DYNSEC_HOOK_TYPE_CREATE     0x00000020
+#define DYNSEC_HOOK_TYPE_SETATTR    0x00000040
+#define DYNSEC_HOOK_TYPE_OPEN       0x00000080
+#define DYNSEC_HOOK_TYPE_LINK       0x00000100
+#define DYNSEC_HOOK_TYPE_SYMLINK    0x00000200
+#define DYNSEC_HOOK_TYPE_SIGNAL     0x00000400
+#define DYNSEC_HOOK_TYPE_PTRACE     0x00000800
+#define DYNSEC_HOOK_TYPE_MMAP       0x00001000
+#define DYNSEC_HOOK_TYPE_CLOSE      0x00002000
+#define DYNSEC_HOOK_TYPE_TASK_FREE  0x00004000
+#define DYNSEC_HOOK_TYPE_EXIT       0x00008000
+#define DYNSEC_HOOK_TYPE_CLONE      0x00010000
+#define DYNSEC_HOOK_TYPE_INODE_FREE 0x00020000
 
 // Tracepoints
 #define DYNSEC_TP_HOOK_TYPE_CLONE       DYNSEC_HOOK_TYPE_CLONE
@@ -49,7 +50,8 @@
 // where the two event's data can be combined by client
 #define DYNSEC_REPORT_INTENT_FOUND  0x0200
 #define DYNSEC_REPORT_LAST_TASK     0x0400
-
+// File event was not stalled due to the read only cache.
+#define DYNSEC_REPORT_INODE_CACHED  0x0800
 
 // Response Type For Stalls
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
@@ -67,6 +69,8 @@
 #define DYNSEC_CACHE_CLEAR            0x00000020
 // Clear All Caching For An Event Type
 #define DYNSEC_CACHE_CLEAR_ON_EVENT   0x00000040
+// Unused - Instead of not stalling, don't send the event
+#define DYNSEC_CACHE_IGNORE           0x00010000
 
 // For Setattr Event
 #define DYNSEC_SETATTR_MODE     (1 << 0)
@@ -120,6 +124,7 @@ struct dynsec_response {
     enum dynsec_event_type event_type;
     int32_t response;
     uint32_t cache_flags;
+    uint32_t inode_cache_flags;
 };
 
 // Eventually have dynsec_task_ctx contain this
@@ -173,6 +178,7 @@ struct dynsec_file {
 // Path Type/Path Confidence Level
 #define DYNSEC_FILE_ATTR_PATH_FULL      0x0010
 #define DYNSEC_FILE_ATTR_PATH_DENTRY    0x0020
+// Hints path needs normalization and is raw intent
 #define DYNSEC_FILE_ATTR_PATH_RAW       0x0040
 #define DYNSEC_FILE_ATTR_PATH_RESERVED  0x0080
 // Hints that umode will likely inherit parent DAC perms
@@ -265,6 +271,8 @@ struct dynsec_file_msg {
     uint32_t f_mode;
     uint32_t f_flags;
     struct dynsec_file file;
+    // file descriptor we might send to userspace in the future
+    int32_t fd;
 };
 
 struct dynsec_file_umsg {
@@ -383,6 +391,8 @@ struct dynsec_task_dump_umsg {
 
 // Dump Task Header
 struct dynsec_task_dump_hdr {
+    // size - payload of userspace buffer and itself. And
+    //      assumes offset to userspace buffer is after header.
     uint16_t size;
     pid_t pid;
 
@@ -393,7 +403,15 @@ struct dynsec_task_dump_hdr {
 };
 
 // Base Payload for DYNSEC_IOC_TASK_DUMP
-// But needs more storage for blobs
+// Do not use struct for storage size. Use a backing
+// buffer/blob as storage. This is to allow for extra storage
+// for the dynamic data like strings or binary data to be sent back.
+//    aka hdr.size = sizeof(blob)
+// So a good number for the blob size:
+//    sizeof(hdr) +
+//    sizeof(umsg) +
+//    max path for file (PATH_MAX) +
+//    cmdline space if we ever decide to provide it
 struct dynsec_task_dump {
     struct dynsec_task_dump_hdr hdr;
 

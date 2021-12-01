@@ -19,6 +19,7 @@
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "factory.h"
+#include "inode_cache.h"
 
 
 #define STALL_BUCKET_BITS 12
@@ -361,6 +362,9 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     entry->key.event_type = event->event_type;
     entry->key.tid = event->tid;
 
+    // Copy over inode_addr data
+    entry->inode_addr = event->inode_addr;
+
     // Build bucket lookup data
     entry->hash = stall_hash(tbl->secret, &entry->key);
     index = stall_bkt_index(entry->hash);
@@ -379,13 +383,15 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     return entry;
 }
 
-int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
+int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
+                     int response, unsigned long inode_cache_flags)
 {
     struct stall_entry *entry;
     unsigned long flags;
     int index;
     u32 hash;
     int ret = -ENOENT;
+    unsigned long inode_addr = 0;
 
     if (!stall_tbl_enabled(tbl) || !key) {
         return -EINVAL;
@@ -398,11 +404,27 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
     switch (response)
     {
     case DYNSEC_RESPONSE_ALLOW:
+        break;
     case DYNSEC_RESPONSE_EPERM:
+        // Remove inode from read only cache if we deny
+        inode_cache_flags = DYNSEC_CACHE_DISABLE;
         break;
 
     default:
         return -EINVAL;
+    }
+
+    // Should be called very selectively
+    if (inode_cache_flags & DYNSEC_CACHE_CLEAR) {
+        inode_cache_clear();
+        inode_cache_flags &= ~(DYNSEC_CACHE_CLEAR);
+    }
+
+    // If inode cache flags are bad just don't do anything
+    if (inode_cache_flags) {
+        if (!(inode_cache_flags & (DYNSEC_CACHE_DISABLE|DYNSEC_CACHE_ENABLE))) {
+            inode_cache_flags = DYNSEC_CACHE_DISABLE;
+        }
     }
 
     hash = stall_hash(tbl->secret, key);
@@ -414,6 +436,8 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
     entry = lookup_entry_safe(hash, key, &tbl->bkt[index].list);
     if (entry) {
         ret = 0;
+        inode_addr = entry->inode_addr;
+
         entry->mode = DYNSEC_STALL_MODE_RESUME;
         // spin_lock(&entry->lock);
         entry->response = response;
@@ -423,6 +447,10 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key, int response)
         }
     }
     unlock_stall_bkt(&tbl->bkt[index], flags);
+
+    if (inode_addr) {
+        inode_cache_update(inode_addr, inode_cache_flags);
+    }
 
     return ret;
 }
@@ -457,7 +485,7 @@ int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry)
 
 int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
 {
-    struct stall_entry *entry;
+    struct stall_entry *entry = NULL;
     unsigned long flags;
     u32 hash;
     int index;
@@ -477,6 +505,10 @@ int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
         ret = 0;
     }
     unlock_stall_bkt(&tbl->bkt[index], flags);
+
+    if (entry) {
+        kfree(entry);
+    }
 
     return ret;
 }

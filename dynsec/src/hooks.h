@@ -37,6 +37,8 @@ extern int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
 extern int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
                 const char *old_name);
 
+extern void dynsec_inode_free_security(struct inode *inode);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
 extern int dynsec_file_open(struct file *file);
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
