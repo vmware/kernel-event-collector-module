@@ -7,4 +7,4 @@ imports:
 
 git module build-util:
     url:  git@gitlab.bit9.local:cbsensor/cb-build-util.git
-    rev:  6448f8f62bbab87b1a36563a7eb31074f9395f8e
+    rev:  f29decbc9100398b15f37a3d01064cc7cb85ccb3
