@@ -19,9 +19,6 @@ class DynSec(CbConanFile):
     default_options = "module_name=dynsec"
 
     kernelDeps = [
-        "KERNEL_RHEL_6_6_VERSION", "KERNEL_RHEL_6_7_VERSION",
-        "KERNEL_RHEL_6_8_VERSION", "KERNEL_RHEL_6_9_VERSION",
-        "KERNEL_RHEL_6_10_VERSION",
         "KERNEL_RHEL_7_0_VERSION", "KERNEL_RHEL_7_1_VERSION",
         "KERNEL_RHEL_7_2_VERSION", "KERNEL_RHEL_7_3_VERSION",
         "KERNEL_RHEL_7_4_VERSION", "KERNEL_RHEL_7_5_VERSION",
