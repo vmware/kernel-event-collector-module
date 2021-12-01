@@ -12,6 +12,7 @@
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "lsm_mask.h"
+#include "inode_cache.h"
 #include "task_cache.h"
 #include "task_utils.h"
 #include "symbols.h"
@@ -578,6 +579,85 @@ out:
     return ret;
 }
 
+
+void dynsec_inode_free_security(struct inode *inode)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)
+    if (g_original_ops_ptr) {
+        g_original_ops_ptr->inode_free_security(inode);
+    }
+#endif
+    (void)inode_cache_remove_entry((unsigned long)inode);
+}
+
+static inline const struct inode * __file_inode(const struct file *file)
+{
+    if (likely(file) && file->f_path.dentry) {
+        return file->f_path.dentry->d_inode;
+    }
+    return NULL;
+}
+
+static inline bool may_report_file(const struct file *file)
+{
+    if (likely(file)) {
+        unsigned int f_flags;
+        const struct inode *inode = NULL;
+
+#ifdef FMODE_STREAM
+        // File cannot be safely opened
+        if (file->f_mode & FMODE_STREAM) {
+            return false;
+        }
+#endif
+#ifdef FMODE_NONOTIFY
+        // File opened indirectly like fanotify.
+        // Used to help prevent feedback loops.
+        if (file->f_mode & FMODE_NONOTIFY) {
+            return false;
+        }
+#endif
+        f_flags = file->f_flags;
+#ifdef O_PATH
+        if (f_flags & O_PATH) {
+            return false;
+        }
+#endif
+        if (f_flags & O_DIRECTORY) {
+            return false;
+        }
+
+        inode = __file_inode(file);
+        if (inode) {
+            umode_t umode = inode->i_mode;
+#ifdef special_file
+            if (special_file(umode)) {
+                return false;
+            }
+#endif /* special_file */
+            if (!S_ISREG(umode)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+static inline bool may_report_file_open(const struct file *file)
+{
+    return may_report_file(file);
+}
+static inline bool may_report_file_close(const struct file *file)
+{
+    return may_report_file(file);
+}
+#ifdef FMODE_NONOTIFY
+#define may_client_report_files() (true)
+#else
+#define may_client_report_files() (false)
+#endif /* FMODE_NONOTIFY */
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
 int dynsec_file_open(struct file *file)
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
@@ -588,6 +668,8 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
 {
     struct dynsec_event *event = NULL;
     int ret = 0;
+    u64 hits = 0;
+    unsigned long inode_addr = 0;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
@@ -606,23 +688,9 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
     }
 #endif
 
-#ifdef FMODE_STREAM
-    if (file->f_mode & FMODE_STREAM) {
-        report_flags &= ~(DYNSEC_REPORT_STALL);
-    }
-#endif
-#ifdef FMODE_NONOTIFY
-    if ((file->f_mode & FMODE_NONOTIFY) && !(file->f_mode & FMODE_WRITE)) {
-        report_flags &= ~(DYNSEC_REPORT_STALL);
-    }
-#endif
-
-    // Some file systems and file types may not be
-    // worth stalling or reporting against.
-    // Below is a poorman's implementation.
-    if (file->f_path.dentry && file->f_path.dentry->d_inode &&
-        S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
-        report_flags = DYNSEC_REPORT_STALL;
+    if (may_report_file_open(file)) {
+        report_flags |= DYNSEC_REPORT_STALL;
+        inode_addr = (unsigned long)__file_inode(file);
     } else {
         goto out;
     }
@@ -631,12 +699,51 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
         goto out;
     }
     if (task_in_connected_tgid(current)) {
+        // Don't want to create feedback loop
+        // on files we open/close from the client.
+        if (!may_client_report_files()) {
+            // goto out;
+        }
         report_flags |= DYNSEC_REPORT_SELF;
         report_flags &= ~(DYNSEC_REPORT_STALL);
     }
 
+    // Copy over the struct inode address to possibly track
+    if (inode_addr) {
+        // Attempt to remove an entry if opened for write
+        // or we may want to mark it disabled?
+        if (file->f_mode & FMODE_WRITE) {
+            (void)inode_cache_remove_entry(inode_addr);
+        }
+        // Allow for potential tracking or updating
+        else if ((report_flags & DYNSEC_REPORT_STALL) &&
+                 (file->f_mode & FMODE_READ)) {
+            int rc = inode_cache_lookup(inode_addr, &hits,
+                                        true, GFP_KERNEL);
+
+            // If hit count is zero we don't want to disable stalling
+            if (rc == 0) {
+                if (hits > 0) {
+                    report_flags &= ~(DYNSEC_REPORT_STALL);
+                    report_flags |= DYNSEC_REPORT_INODE_CACHED;
+                    inode_addr = 0;
+                }
+            }
+            // Only copy inode_addr over when we want to
+            // let userspace possibly allow the file to be recached.
+            else if (rc < 0 && rc != -ENOENT) {
+                inode_addr = 0;
+            }
+        } else {
+            inode_addr = 0;
+        }
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_OPEN, DYNSEC_HOOK_TYPE_OPEN,
                                report_flags, GFP_KERNEL);
+    if (event && inode_addr) {
+        event->inode_addr = inode_addr;
+    }
     if (!fill_in_file_open(event, file, GFP_KERNEL)) {
         free_dynsec_event(event);
         goto out;
@@ -671,26 +778,18 @@ void dynsec_file_free_security(struct file *file)
     }
 #endif
 
-#ifdef FMODE_STREAM
-    if (file->f_mode & FMODE_STREAM) {
-        return;
-    }
-#endif
-#ifdef FMODE_NONOTIFY
-    if ((file->f_mode & FMODE_NONOTIFY) && !(file->f_mode & FMODE_WRITE)) {
-        return;
-    }
-#endif
-
-    // Only report close events on
-    if (!file->f_path.dentry || !file->f_path.dentry->d_inode ||
-        !S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
+    if (!may_report_file_close(file)) {
         return;
     }
     if (!stall_tbl_enabled(stall_tbl)) {
         return;
     }
     if (task_in_connected_tgid(current)) {
+        // Don't want to create feedback loop
+        // on files we open/close from the client.
+        if (!may_client_report_files()) {
+            // return;
+        }
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
@@ -941,6 +1040,9 @@ int mmap_stall_misc = 0;
 int mmap_stall_on_exec = 1;
 int mmap_stall_on_ldso = 1;
 
+//
+//
+//
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
 int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
                      unsigned long flags)
@@ -952,6 +1054,7 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
     struct dynsec_event *event = NULL;
     int ret = 0;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT;
+    unsigned long rm_inode_addr = 0;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3,10,0)
     if (g_original_ops_ptr) {
@@ -972,6 +1075,13 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
     if (!file) {
         goto out;
     }
+
+    // // Remove read-only entry if PROT_WRITE requested
+    // TODO: verify other mmap args to remove entry
+    // if (prot & PROT_WRITE) {
+    //     rm_inode_addr = (unsigned long)__file_inode(file);
+    //     inode_cache_remove_entry(rm_inode_addr);
+    // }
 
     if (!(prot & PROT_EXEC)) {
         goto out;
@@ -1028,6 +1138,13 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
     }
 
 out:
+
+    // Remove read-only entry on denial if exists
+    if (!rm_inode_addr &&
+        (ret == -EPERM || ret == -EACCES)) {
+        rm_inode_addr = (unsigned long)__file_inode(file);
+        inode_cache_remove_entry(rm_inode_addr);
+    }
 
     return ret;
 }

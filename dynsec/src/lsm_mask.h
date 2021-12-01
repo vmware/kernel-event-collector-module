@@ -11,4 +11,4 @@ struct dynsec_config;
 extern bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config);
 extern void dynsec_lsm_shutdown(void);
 extern int check_lsm_hooks_changed(void);
-
+extern bool may_enable_inode_cache(void);

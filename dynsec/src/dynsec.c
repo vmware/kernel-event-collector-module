@@ -14,6 +14,7 @@
 #include "path_utils.h"
 #include "task_utils.h"
 #include "tracepoints.h"
+#include "inode_cache.h"
 #include "task_cache.h"
 #include "preaction_hooks.h"
 #include "config.h"
@@ -33,7 +34,8 @@
         DYNSEC_HOOK_TYPE_OPEN      |\
         DYNSEC_HOOK_TYPE_PTRACE    |\
         DYNSEC_HOOK_TYPE_SIGNAL    |\
-        DYNSEC_HOOK_TYPE_MMAP)
+        DYNSEC_HOOK_TYPE_MMAP      |\
+        DYNSEC_HOOK_TYPE_INODE_FREE)
 
 #define DYNSEC_PROCESS_HOOKS (\
         DYNSEC_HOOK_TYPE_CLONE | \
@@ -133,6 +135,9 @@ static int __init dynsec_init(void)
     if (may_enable_task_cache()) {
         task_cache_register();
     }
+    if (may_enable_inode_cache()) {
+        inode_cache_register();
+    }
     register_preaction_hooks(&global_config);
 
     pr_info("Loaded DynSec\n");
@@ -149,6 +154,8 @@ static void __exit dynsec_exit(void)
            CB_APP_MODULE_NAME);
 
     dynsec_chrdev_shutdown();
+
+    inode_cache_shutdown();
 
     task_cache_shutdown();
 

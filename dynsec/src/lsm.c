@@ -33,6 +33,7 @@
 #define DYNSEC_LSM_inode_setattr        DYNSEC_HOOK_TYPE_SETATTR
 #define DYNSEC_LSM_inode_link           DYNSEC_HOOK_TYPE_LINK
 #define DYNSEC_LSM_inode_symlink        DYNSEC_HOOK_TYPE_SYMLINK
+#define DYNSEC_LSM_inode_free_security  DYNSEC_HOOK_TYPE_INODE_FREE
 
 // may need another hook
 #define DYNSEC_LSM_bprm_set_creds       DYNSEC_HOOK_TYPE_EXEC
@@ -98,6 +99,8 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     BUILD_BUG_ON(DYNSEC_LSM_inode_rmdir    != DYNSEC_HOOK_TYPE_RMDIR);
     BUILD_BUG_ON(DYNSEC_LSM_inode_setattr  != DYNSEC_HOOK_TYPE_SETATTR);
     BUILD_BUG_ON(DYNSEC_LSM_inode_mkdir    != DYNSEC_HOOK_TYPE_MKDIR);
+    BUILD_BUG_ON(DYNSEC_LSM_inode_free_security
+                                           != DYNSEC_HOOK_TYPE_INODE_FREE);
     BUILD_BUG_ON(DYNSEC_LSM_dentry_open    != DYNSEC_HOOK_TYPE_OPEN);
     BUILD_BUG_ON(DYNSEC_LSM_file_open      != DYNSEC_HOOK_TYPE_OPEN);
     BUILD_BUG_ON(DYNSEC_LSM_file_free_security 
@@ -179,6 +182,7 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     CB_LSM_SETUP_HOOK(inode_mkdir);   // security_inode_mkdir
     CB_LSM_SETUP_HOOK(inode_link);    //security_inode_link
     CB_LSM_SETUP_HOOK(inode_symlink);    //security_inode_symlink
+    CB_LSM_SETUP_HOOK(inode_free_security); //security_inode_free
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     CB_LSM_SETUP_HOOK(dentry_open); // security_dentry_open
     CB_LSM_SETUP_HOOK(file_mmap);
@@ -322,4 +326,9 @@ void dynsec_lsm_shutdown(void)
     {
         pr_info("dynsec LSM not registered so not unregistering");
     }
+}
+
+bool may_enable_inode_cache(void)
+{
+    return (enabled_lsm_hooks & DYNSEC_HOOK_TYPE_OPEN);
 }

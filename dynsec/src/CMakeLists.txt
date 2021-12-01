@@ -132,6 +132,8 @@ set(SOURCE_FILES
     hooks.h
     tracepoints.c
     tracepoints.h
+    inode_cache.c
+    inode_cache.h
     task_cache.c
     task_cache.h
     lsm.c

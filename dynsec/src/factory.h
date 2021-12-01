@@ -69,6 +69,7 @@ struct dynsec_event {
     struct list_head list;
     uint16_t report_flags;
     uint64_t intent_req_id;
+    unsigned long inode_addr;
 };
 
 // Child event structs

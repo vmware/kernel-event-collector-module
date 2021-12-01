@@ -34,6 +34,7 @@ struct stall_entry {
     struct timespec start; // rough duration of in tbl/stalled
     wait_queue_head_t wq; // Optionally we could have this be per-bucket not per-entry
 
+    unsigned long inode_addr;
     spinlock_t lock;    // likely not needed but shouldn't hurt
     int response;
 };
@@ -67,7 +68,7 @@ static inline bool stall_tbl_enabled(struct stall_tbl *tbl)
 extern struct stall_tbl *stall_tbl_alloc(gfp_t mode);
 
 extern int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
-                            int response);
+                            int response, unsigned long inode_cache_flags);
 
 extern void stall_tbl_shutdown(struct stall_tbl *stbl);
 

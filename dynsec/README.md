@@ -48,9 +48,16 @@ usage of `CONFIG_SECURITY_PATH` oriented hooks would be less invasive
 to the end user and kernel. Having preactions utilize `security_path_*`
 based hooks is not feasible on most RHEL based kernels.
 
+## Inode Read Only Cache
+File open events that stall have the ability to determine whether a file
+should not stall until it is opened for write. This can only be handled
+on the access control response to file open events.
+
 ## Access Control Response
 Like fanotify you `write` your response back to the file but also allows
 you to provide primitive per-task level access control caching options.
+
+Inode read-only cache flags can be passed as well here.
 
 ## Kernel Object Labeling
 Currently we label tasks in a LRU-ish mechanism so they are always
