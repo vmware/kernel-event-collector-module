@@ -19,13 +19,23 @@ class DynSec(CbConanFile):
     default_options = "module_name=dynsec"
 
     kernelDeps = [
-        "KERNEL_RHEL_7_0_VERSION", "KERNEL_RHEL_7_1_VERSION",
-        "KERNEL_RHEL_7_2_VERSION", "KERNEL_RHEL_7_3_VERSION",
-        "KERNEL_RHEL_7_4_VERSION", "KERNEL_RHEL_7_5_VERSION",
-        "KERNEL_RHEL_7_6_VERSION", "KERNEL_RHEL_7_7_VERSION",
-        "KERNEL_RHEL_7_8_VERSION", "KERNEL_RHEL_7_9_VERSION",
-        "KERNEL_RHEL_8_0_VERSION", "KERNEL_RHEL_8_1_VERSION",
-        "KERNEL_RHEL_8_2_VERSION", "KERNEL_RHEL_8_3_VERSION"
+        "KERNEL_RHEL_7_0_VERSION",
+        "KERNEL_RHEL_7_1_VERSION",
+        "KERNEL_RHEL_7_2_VERSION",
+        "KERNEL_RHEL_7_3_VERSION",
+        "KERNEL_RHEL_7_4_VERSION",
+        "KERNEL_RHEL_7_5_VERSION",
+        "KERNEL_RHEL_7_6_VERSION",
+        "KERNEL_RHEL_7_7_VERSION",
+        "KERNEL_RHEL_7_8_VERSION",
+        "KERNEL_RHEL_7_9_VERSION",
+        "KERNEL_RHEL_8_0_VERSION",
+        "KERNEL_RHEL_8_1_VERSION",
+        "KERNEL_RHEL_8_2_VERSION",
+        "KERNEL_RHEL_8_3_VERSION",
+        # Temporarily use static versions until consumers of cb-vendor
+        # are all fully updated.
+        "Kernel_4.18.0-305.19.1.el8_4.x86_64/cb-1119@re/develop",
     ]
     override_list = "KERNEL_OVERRIDE_LIST"
 
