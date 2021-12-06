@@ -464,17 +464,6 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     rc = copy_to_user(&msg_user->event, msg, sizeof(*msg));
     TRY_STEP(COPY_FAIL, !rc);
 
-    // Proc Path
-    if (msg->procInfo.path && msg->procInfo.path_size)
-    {
-        rc = copy_to_user(p, msg->procInfo.path, msg->procInfo.path_size);
-        TRY_STEP(COPY_FAIL, !rc);
-        p += msg->procInfo.path_size;
-    }
-    // Always zero it out kaddrs
-    rc = put_user(0, &msg_user->event.procInfo.path);
-    TRY_STEP(COPY_FAIL, !rc);
-
     // Use switch for now to allow us to extend in the future
     switch (msg->eventType)
     {
@@ -489,12 +478,6 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
         TRY_STEP(COPY_FAIL, !rc);
         break;
 
-    case CB_EVENT_TYPE_MODULE_LOAD:
-    case CB_EVENT_TYPE_FILE_CREATE:
-    case CB_EVENT_TYPE_FILE_DELETE:
-    case CB_EVENT_TYPE_FILE_OPEN:
-    case CB_EVENT_TYPE_FILE_WRITE:
-    case CB_EVENT_TYPE_FILE_CLOSE:
     case CB_EVENT_TYPE_FILE_PATH:
         if (msg->fileGeneric.path && msg->fileGeneric.path_size)
         {
@@ -1332,17 +1315,6 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
 
     payload += sizeof(struct CB_EVENT_UM);
 
-    if (cb_event->procInfo.path && cb_event->procInfo.path_size)
-    {
-        if (cb_event->procInfo.path_size > PATH_MAX)
-        {
-            TRACE(DL_WARNING, "procInfo.path_size: %d, %s", cb_event->procInfo.path_size, cb_event->procInfo.path);
-        }
-
-        cb_event->procInfo.path_offset = payload;
-        payload += cb_event->procInfo.path_size;
-    }
-
     switch (cb_event->eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START:
@@ -1363,12 +1335,6 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         break;
 
-    case CB_EVENT_TYPE_MODULE_LOAD:
-    case CB_EVENT_TYPE_FILE_CREATE:
-    case CB_EVENT_TYPE_FILE_DELETE:
-    case CB_EVENT_TYPE_FILE_OPEN:
-    case CB_EVENT_TYPE_FILE_WRITE:
-    case CB_EVENT_TYPE_FILE_CLOSE:
     case CB_EVENT_TYPE_FILE_PATH:
         if (cb_event->fileGeneric.path && cb_event->fileGeneric.path_size)
         {

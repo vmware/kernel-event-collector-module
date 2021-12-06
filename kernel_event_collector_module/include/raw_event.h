@@ -119,6 +119,8 @@ typedef struct path_data {
     uint64_t          uid;
 } PATH_DATA;
 
+typedef struct process_details {
+    PATH_DATA         path_data;
     pid_t             pid;
     time_t            start_time;
 } ProcessDetails;
@@ -144,9 +146,6 @@ typedef struct _CB_EVENT_PROCESS_INFO {
 
     time_t event_time;         // Windows time this event occured
 
-    char *path;
-    uint16_t path_size;
-    uint16_t path_offset;
     bool path_found;
 } CB_EVENT_PROCESS_INFO, *PCB_EVENT_PROCESS_INFO;
 

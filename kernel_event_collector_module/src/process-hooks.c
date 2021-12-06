@@ -274,11 +274,15 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
                 ec_process_tracking_set_path(process_handle, path_data, &context);
 
                 // also need to update the file information
-                ec_process_exec_identity(process_handle)->exec_details.inode = path_data->key.inode;
-                ec_process_exec_identity(process_handle)->exec_details.device = path_data->key.device;
+                ec_process_exec_identity(process_handle)->exec_details.path_data.ns_id   = path_data->key.ns_id;
+                ec_process_exec_identity(process_handle)->exec_details.path_data.device  = path_data->key.device;
+                ec_process_exec_identity(process_handle)->exec_details.path_data.inode   = path_data->key.inode;
+                ec_process_exec_identity(process_handle)->exec_details.path_data.uid     = path_data->uid;
 
-                ec_process_posix_identity(process_handle)->posix_details.inode = path_data->key.inode;
-                ec_process_posix_identity(process_handle)->posix_details.device = path_data->key.device;
+                ec_process_posix_identity(process_handle)->posix_details.path_data.ns_id   = path_data->key.ns_id;
+                ec_process_posix_identity(process_handle)->posix_details.path_data.device  = path_data->key.device;
+                ec_process_posix_identity(process_handle)->posix_details.path_data.inode   = path_data->key.inode;
+                ec_process_posix_identity(process_handle)->posix_details.path_data.uid     = path_data->uid;
             }
         }
     }

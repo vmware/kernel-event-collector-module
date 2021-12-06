@@ -62,7 +62,7 @@ void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *co
                   (uint64_t)ec_process_posix_identity(process_handle)->posix_details.pid,
                   (uint64_t)ec_process_posix_identity(process_handle)->posix_parent_details.pid,
                   (uint64_t)ec_process_posix_identity(process_handle)->tid,
-                  ec_process_posix_identity(process_handle)->posix_details.inode,
+                  ec_process_posix_identity(process_handle)->posix_details.path_data.inode,
                   shared_count,
                   (ec_is_task_alive(task) ? "yes" : "no"));
 

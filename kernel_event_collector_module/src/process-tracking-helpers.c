@@ -278,8 +278,6 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
     if (path_data)
     {
         event->procInfo.path_found = path_data->path_found;
-        event->procInfo.path       = ec_mem_get(path_data->path, context);// hold reference
-        event->procInfo.path_size  = ec_mem_size(event->procInfo.path);
     } else
     {
         event->procInfo.path_found = false;
@@ -451,8 +449,8 @@ int __ec_hashtbl_search_callback(HashTbl *hashTblp, void *datap, void *priv, Pro
     psRunningInodesToBan = (RUNNING_BANNED_INODE_S *)priv;
 
     //Did we match based on inode?
-    if (posix_identity->posix_details.device == psRunningInodesToBan->device &&
-        posix_identity->posix_details.inode == psRunningInodesToBan->inode)
+    if (posix_identity->posix_details.path_data.device == psRunningInodesToBan->device &&
+        posix_identity->posix_details.path_data.inode == psRunningInodesToBan->inode)
     {
         //Allocate a new list element for banning to hold this process pointer
         temp = (RUNNING_PROCESSES_TO_BAN *)ec_mem_alloc(sizeof(RUNNING_PROCESSES_TO_BAN), context);

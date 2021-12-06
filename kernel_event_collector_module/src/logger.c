@@ -67,9 +67,6 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         //  for a process.
         ec_event_set_process_data(event, NULL, context);
 
-        ec_mem_free(event->procInfo.path);
-        event->procInfo.path = NULL;
-
         switch (event->eventType)
         {
         case CB_EVENT_TYPE_PROCESS_START:
@@ -80,12 +77,6 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             }
             break;
 
-        case CB_EVENT_TYPE_MODULE_LOAD:
-        case CB_EVENT_TYPE_FILE_CREATE:
-        case CB_EVENT_TYPE_FILE_DELETE:
-        case CB_EVENT_TYPE_FILE_OPEN:
-        case CB_EVENT_TYPE_FILE_WRITE:
-        case CB_EVENT_TYPE_FILE_CLOSE:
         case CB_EVENT_TYPE_FILE_PATH:
             if (event->fileGeneric.path)
             {

@@ -277,8 +277,6 @@ void ec_event_send_file(
     event->fileGeneric.path_data.inode    = path_data->key.inode;
     event->fileGeneric.path_data.uid  = path_data->uid;
     event->fileGeneric.path_data.fs_magic = path_data->fs_magic;
-    event->fileGeneric.path = ec_mem_cache_get_generic(path_data->path, context);
-    event->fileGeneric.path_size = ec_mem_cache_get_size_generic(path_data->path);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
@@ -333,8 +331,6 @@ void ec_event_send_modload(
     event->fileGeneric.path_data.uid      = path_data->uid;
     event->fileGeneric.path_data.fs_magic = path_data->fs_magic;
     event->fileGeneric.baseaddress        = base_address;
-    event->fileGeneric.path = ec_mem_cache_get_generic(path_data->path, context);
-    event->fileGeneric.path_size = ec_mem_cache_get_size_generic(path_data->path);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);

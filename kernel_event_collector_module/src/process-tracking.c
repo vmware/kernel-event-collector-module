@@ -127,8 +127,8 @@ ProcessHandle *ec_process_tracking_create_process(
     ExecHandle          exec_handle               = { 0 };
     PosixIdentity      *posix_identity            = NULL;
     char               *msg                       = (is_real_start ? "" : "<FAKE> ");
-    ProcessDetails      posix_parent_details      = { 0 };
-    ProcessDetails      posix_grandparent_details = { 0 };
+    ProcessDetails      posix_parent_details      = { { 0 }, 0 };
+    ProcessDetails      posix_grandparent_details = { { 0 }, 0 };
 
     // If this start is a fork we need to pull the shared struct from the parent
     if (action == CB_PROCESS_START_BY_FORK)
@@ -168,7 +168,6 @@ ProcessHandle *ec_process_tracking_create_process(
 
         exec_identity->exec_details.pid                = parent;
         exec_identity->exec_details.start_time         = start_time;
-        ec_get_devinfo_from_task(taskp, &exec_identity->exec_details.device, &exec_identity->exec_details.inode);
 
         exec_identity->exec_parent_details.pid         = (gparent_task ? ec_getpid(gparent_task) : 1);
         exec_identity->exec_parent_details.start_time  = ec_get_null_time();
@@ -176,14 +175,20 @@ ProcessHandle *ec_process_tracking_create_process(
         exec_identity->path_data = ec_task_get_path_data(taskp, NULL, context);
         if (exec_identity->path_data)
         {
-            exec_identity->exec_details.device = exec_identity->path_data->key.device;
-            exec_identity->exec_details.inode = exec_identity->path_data->key.inode;
+            exec_identity->exec_details.path_data.ns_id    = exec_identity->path_data->key.ns_id;
+            exec_identity->exec_details.path_data.device   = exec_identity->path_data->key.device;
+            exec_identity->exec_details.path_data.inode    = exec_identity->path_data->key.inode;
+            exec_identity->exec_details.path_data.fs_magic = exec_identity->path_data->fs_magic;
+            exec_identity->exec_details.path_data.uid      = exec_identity->path_data->uid;
         }
 
-        exec_identity->exec_grandparent_details.pid         = 0;
-        exec_identity->exec_grandparent_details.device      = 0;
-        exec_identity->exec_grandparent_details.inode       = 0;
-        exec_identity->exec_grandparent_details.start_time  = ec_get_null_time();
+        exec_identity->exec_grandparent_details.pid                = 0;
+        exec_identity->exec_grandparent_details.path_data.ns_id    = 0;
+        exec_identity->exec_grandparent_details.path_data.device   = 0;
+        exec_identity->exec_grandparent_details.path_data.inode    = 0;
+        exec_identity->exec_grandparent_details.path_data.fs_magic = 0;
+        exec_identity->exec_grandparent_details.path_data.uid      = 0;
+        exec_identity->exec_grandparent_details.start_time         = ec_get_null_time();
 
         exec_identity->exec_count   = 1;
 
@@ -228,10 +233,13 @@ ProcessHandle *ec_process_tracking_create_process(
         posix_identity->exec_blocked               = false;
         memset(&posix_identity->temp_exec_handle, 0, sizeof(posix_identity->temp_exec_handle));
 
-        posix_identity->posix_details.pid         = pid;
-        posix_identity->posix_details.device      = ec_exec_identity(&exec_handle)->exec_details.device;
-        posix_identity->posix_details.inode       = ec_exec_identity(&exec_handle)->exec_details.inode;
-        posix_identity->posix_details.start_time  = start_time;
+        posix_identity->posix_details.pid                = pid;
+        posix_identity->posix_details.path_data.ns_id    = ec_exec_identity(&exec_handle)->path_data->key.ns_id;
+        posix_identity->posix_details.path_data.device   = ec_exec_identity(&exec_handle)->path_data->key.device;
+        posix_identity->posix_details.path_data.inode    = ec_exec_identity(&exec_handle)->path_data->key.inode;
+        posix_identity->posix_details.path_data.fs_magic = ec_exec_identity(&exec_handle)->path_data->fs_magic;
+        posix_identity->posix_details.path_data.uid      = ec_exec_identity(&exec_handle)->path_data->uid;
+        posix_identity->posix_details.start_time         = start_time;
 
         posix_identity->posix_parent_details      = posix_parent_details;
         posix_identity->posix_grandparent_details = posix_grandparent_details;
@@ -375,9 +383,12 @@ ProcessHandle *ec_process_tracking_update_process(
     exec_identity->exec_parent_details      = ec_exec_identity(&parent_exec_handle)->exec_details;
 
 
-    exec_identity->exec_details.pid         = pid;
-    exec_identity->exec_details.device      = path_data->key.device;
-    exec_identity->exec_details.inode       = path_data->key.inode;
+    exec_identity->exec_details.pid                = pid;
+    exec_identity->exec_details.path_data.ns_id    = path_data->key.ns_id;
+    exec_identity->exec_details.path_data.device   = path_data->key.device;
+    exec_identity->exec_details.path_data.inode    = path_data->key.inode;
+    exec_identity->exec_details.path_data.fs_magic = path_data->fs_magic;
+    exec_identity->exec_details.path_data.uid      = path_data->uid;
     exec_identity->exec_details.start_time  = start_time;
     exec_identity->exec_count               = (!isExecOther ? 1 : ec_exec_identity(&parent_exec_handle)->exec_count + 1);
     exec_identity->path_data                = ec_path_cache_get(path_data, context);
@@ -414,8 +425,11 @@ ProcessHandle *ec_process_tracking_update_process(
     // Mark us as an active process
     atomic64_inc(&exec_identity->active_process_count);
 
-    ec_process_posix_identity(process_handle)->posix_details.device  = path_data->key.device;
-    ec_process_posix_identity(process_handle)->posix_details.inode   = path_data->key.inode;
+    ec_process_posix_identity(process_handle)->posix_details.path_data.ns_id    = path_data->key.ns_id;
+    ec_process_posix_identity(process_handle)->posix_details.path_data.device   = path_data->key.device;
+    ec_process_posix_identity(process_handle)->posix_details.path_data.inode    = path_data->key.inode;
+    ec_process_posix_identity(process_handle)->posix_details.path_data.fs_magic = path_data->fs_magic;
+    ec_process_posix_identity(process_handle)->posix_details.path_data.uid      = path_data->uid;
 
     ec_process_posix_identity(process_handle)->tid            = tid;
     ec_process_posix_identity(process_handle)->uid            = uid;
