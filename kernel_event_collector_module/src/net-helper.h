@@ -5,6 +5,8 @@
 #pragma once
 
 #include "priv.h"
+#include "process-tracking.h"
+
 
 #define CHECK_SK_FAMILY(sk)        ((sk) && \
                                      ((sk)->sk_family == PF_INET || (sk)->sk_family == PF_INET6) \
@@ -51,9 +53,6 @@
     } while (0)
 #endif
 
-// ------------------------------------------------
-// Network Helpers
-//
 size_t ec_ntop(const struct sockaddr *sap, char *buf, const size_t buflen, uint16_t *port);
 void ec_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port);
 void ec_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right);
@@ -69,4 +68,4 @@ void ec_print_address(
     const struct sockaddr *localAddr,
     const struct sockaddr *remoteAddr);
 
-#define PRINT_ADDRESS(msg, sk, localAddr, remoteAddr) do { if (MAY_TRACE_LEVEL(DL_NET)) ec_print_address(msg, sk, localAddr, remoteAddr); } while (0)
+void ec_enumerate_task_sockets(struct task_struct *task, ProcessHandle *handle, ProcessContext *context);

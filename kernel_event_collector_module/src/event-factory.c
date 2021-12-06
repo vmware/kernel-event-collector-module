@@ -325,12 +325,17 @@ void ec_event_send_net_proxy(
     PCB_EVENT event = ec_factory_alloc_event(
         process_handle,
         net_event_type,
-        0,              // No message will be printed
-        NULL,
+        DL_NET,
+        msg,
         NULL,
         context);
 
     CANCEL_VOID(event);
+
+    if (MAY_TRACE_LEVEL(DL_NET))
+    {
+        ec_print_address(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
+    }
 
     // Populate the event
     ec_copy_sockaddr(&event->netConnect.localAddr,  localAddr);
@@ -349,8 +354,6 @@ void ec_event_send_net_proxy(
             event->netConnect.server_size = (uint16_t)size;
         }
     }
-
-    PRINT_ADDRESS(msg, sk, &localAddr->sa_addr, &remoteAddr->sa_addr);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
