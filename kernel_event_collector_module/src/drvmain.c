@@ -90,6 +90,7 @@ bool ec_proc_initialize(ProcessContext *context);
 void ec_proc_shutdown(ProcessContext *context);
 
 struct proc_dir_entry *g_cb_proc_dir;
+struct proc_dir_entry *g_cb_hashtbl_proc_dir;
 
 bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name, char **failure_reason)
 {
@@ -526,9 +527,9 @@ int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
     TRY_STEP(DEFAULT,   ec_disable_peer_modules(context));
     TRY_STEP(DEFAULT,   ec_path_buffers_init(context));
-    TRY_STEP(BUFFERS,   ec_path_cache_init(context));
-    TRY_STEP(FILE_CACHE, ec_proc_initialize(context));
-    TRY_STEP(PROC_DIR,  ec_user_comm_initialize(context));
+    TRY_STEP(BUFFERS,   ec_proc_initialize(context));
+    TRY_STEP(PROC_DIR,  ec_path_cache_init(context));
+    TRY_STEP(FILE_CACHE, ec_user_comm_initialize(context));
     TRY_STEP(USER_COMM, ec_logger_initialize(context));
     TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
     TRY_STEP(PROC,      ec_net_tracking_initialize(context));
@@ -565,10 +566,10 @@ CATCH_LOGGER:
     ec_logger_shutdown(context);
 CATCH_USER_COMM:
     ec_user_comm_shutdown(context);
-CATCH_PROC_DIR:
-    ec_proc_shutdown(context);
 CATCH_FILE_CACHE:
     ec_path_cache_shutdown(context);
+CATCH_PROC_DIR:
+    ec_proc_shutdown(context);
 CATCH_BUFFERS:
     ec_path_buffers_shutdown(context);
 CATCH_DEFAULT:
@@ -593,9 +594,9 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
     ec_process_tracking_shutdown(context);
     ec_logger_shutdown(context);
     ec_user_comm_shutdown(context);
-    ec_proc_shutdown(context);
     ec_path_cache_shutdown(context);
     ec_path_buffers_shutdown(context);
+    ec_proc_shutdown(context);
 }
 
 bool ec_disable_peer_modules(ProcessContext *context)
@@ -658,6 +659,9 @@ bool ec_proc_initialize(ProcessContext *context)
     g_cb_proc_dir = proc_mkdir(CB_APP_PROC_DIR, NULL);
     TRY(g_cb_proc_dir);
 
+    g_cb_hashtbl_proc_dir = proc_mkdir("hash-table", g_cb_proc_dir);
+    TRY(g_cb_hashtbl_proc_dir);
+
     return true;
 
 CATCH_DEFAULT:
@@ -667,6 +671,7 @@ CATCH_DEFAULT:
 void ec_proc_shutdown(ProcessContext *context)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    proc_remove(g_cb_hashtbl_proc_dir);
     proc_remove(g_cb_proc_dir);
 #else
     remove_proc_entry(CB_APP_PROC_DIR, NULL);
