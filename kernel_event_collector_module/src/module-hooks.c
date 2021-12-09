@@ -22,7 +22,7 @@ long (*ec_orig_sys_delete_module)(const char __user *name_user,
 asmlinkage long ec_sys_delete_module(const char __user *name_user,
                                      unsigned int flags)
 {
-    const size_t slen = strlen(DRIVER_NAME);
+    const size_t slen = strlen(DRIVER_NAME) + 1;
     char name_kernel[slen];
     int rval;
 
