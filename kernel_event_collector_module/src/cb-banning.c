@@ -68,7 +68,7 @@ void ec_banning_shutdown(ProcessContext *context)
 
 void ec_banning_SetProtectionState(ProcessContext *context, uint32_t new_state)
 {
-    uint32_t current_state = atomic_read((atomic_t *)&g_protectionModeEnabled);
+    uint32_t current_state = g_protectionModeEnabled;
 
     if (current_state == new_state)
     {
@@ -76,7 +76,7 @@ void ec_banning_SetProtectionState(ProcessContext *context, uint32_t new_state)
     }
 
     TRACE(DL_INFO, "Setting protection state to %u", new_state);
-    atomic_set((atomic_t *)&g_protectionModeEnabled, new_state);
+    g_protectionModeEnabled = new_state;
 }
 
 bool ec_banning_SetBannedProcessInodeWithoutKillingProcs(ProcessContext *context, uint64_t device, uint64_t ino)
@@ -161,7 +161,7 @@ bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t devic
     BanningEntry *bep;
     BL_TBL_KEY key = { device, ino };
 
-    if (atomic_read((atomic_t *)&g_protectionModeEnabled) == PROTECTION_DISABLED)
+    if (g_protectionModeEnabled == PROTECTION_DISABLED)
     {
         TRACE(DL_VERBOSE, "protection is disabled");
         goto kbpbi_exit;
@@ -206,7 +206,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
     RUNNING_BANNED_INODE_S sRunningInodesToBan;
     RUNNING_PROCESSES_TO_BAN *temp = NULL;
 
-    if (atomic_read((atomic_t *)&g_protectionModeEnabled) == PROTECTION_DISABLED)
+    if (g_protectionModeEnabled == PROTECTION_DISABLED)
     {
         TRACE(DL_VERBOSE, "protection is disabled");
         return;
