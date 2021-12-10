@@ -36,12 +36,14 @@ typedef void *(*hashtbl_handle_cb)(void *datap, ProcessContext *context);
 typedef struct hashbtl_bkt {
     uint64_t lock;
     struct hlist_head head;
+    uint64_t itemCount;
 } HashTableBkt;
 
 typedef struct hashtbl {
     HashTableBkt *tablePtr;
     PLruTree plru;
     struct list_head   genTables;
+    const char *name;
     uint64_t   numberOfBuckets;
     uint64_t   lruSize;
     uint32_t   secret;
@@ -128,5 +130,9 @@ void ec_hashtbl_write_lock(HashTbl *hashTblp, void *key, ProcessContext *context
 void ec_hashtbl_write_unlock(HashTbl *hashTblp, void *key, ProcessContext *context);
 
 // Do not call this directly unless you wrap around ec_hashtbl_write_bkt_lock
-int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
+int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *datap, ProcessContext *context);
 
+// Debug Functions
+typedef void (*hastable_print_func)(void *, const char *, ...);
+
+void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m, ProcessContext *context);

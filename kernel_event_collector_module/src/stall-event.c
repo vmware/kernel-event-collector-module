@@ -327,7 +327,7 @@ bool __ec_get_stall_data_and_release(uint64_t perm_id, pid_t tid, CB_EVENT_TYPE 
         }
 
         // Do not call this unless you know what you are doing
-        ec_hashtbl_del_generic_lockheld(stall_tbl, stall_event, context);
+        ec_hashtbl_del_generic_lockheld(stall_tbl, bkt, stall_event, context);
         ec_hashtbl_write_bkt_unlock(bkt, context);
 
         TRACE(DL_INFO, "%s: FOUND - tid:%d eventType:%d response:%d mode:%x", __func__,

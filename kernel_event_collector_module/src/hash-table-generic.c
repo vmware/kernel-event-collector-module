@@ -6,6 +6,9 @@
 #include "hash-table-generic.h"
 #include "cb-spinlock.h"
 
+bool __ec_hashtbl_proc_initialize(HashTbl * hashTblp, ProcessContext *context);
+void __ec_hashtbl_proc_shutdown(HashTbl *hashTblp, ProcessContext *context);
+
 static inline atomic64_t *__ec_get_refcountp(const HashTbl *hashTblp, void *datap)
 {
     return (atomic64_t *)(datap + hashTblp->refcount_offset);
@@ -25,8 +28,6 @@ static uint64_t s_hashtbl_generic_lock;
 static LIST_HEAD(s_hashtbl_generic);
 
 #define HASHTBL_PRINT(fmt, ...)    do { if (debug) pr_err("hash-tbl: " fmt, ##__VA_ARGS__); } while (0)
-
-int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context);
 
 void ec_hashtable_debug_on(void)
 {
@@ -158,6 +159,7 @@ HashTbl *ec_hashtbl_init_generic(
     hashTblp = (HashTbl *)tbl_storage_p;
     hashTblp->tablePtr = (HashTableBkt *)(tbl_storage_p + sizeof(HashTbl));
     hashTblp->numberOfBuckets = numberOfBuckets;
+    hashTblp->name = hashtble_name;
     hashTblp->key_len     = key_len;
     hashTblp->key_offset  = key_offset;
     hashTblp->node_offset = node_offset;
@@ -196,6 +198,8 @@ HashTbl *ec_hashtbl_init_generic(
     list_add(&(hashTblp->genTables), &s_hashtbl_generic);
     ec_write_unlock(&s_hashtbl_generic_lock, context);
 
+    __ec_hashtbl_proc_initialize(hashTblp, context);
+
     HASHTBL_PRINT("Size=%lu NumberOfBuckets=%llu\n", tableSize, numberOfBuckets);
     HASHTBL_PRINT("ADDR=%p TADDR=%p OFFSET=%lu\n", hashTblp, hashTblp->tablePtr, sizeof(HashTbl));
     return hashTblp;
@@ -214,6 +218,8 @@ void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
 
     CANCEL_VOID(hashTblp != NULL);
     atomic64_set(&(hashTblp->tableShutdown), 1);
+
+    __ec_hashtbl_proc_shutdown(hashTblp, context);
 
     ec_write_lock(&s_hashtbl_generic_lock, context);
     list_del(&(hashTblp->genTables));
@@ -313,6 +319,7 @@ void __ec_hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_c
                     // This should never be called with only a read lock
                     BUG_ON(!haveWriteLock);
                     hlist_del(&nodep->link);
+                    --bucketp->itemCount;
                     atomic64_dec(&(hashTblp->tableInstance));
                     ec_hashtbl_free_generic(hashTblp, nodep, context);
                     break;
@@ -426,7 +433,7 @@ int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, P
             HashTableNode *tableNode = hlist_entry(*bucketp->head.first->pprev, HashTableNode, link);
             void *datap = __ec_get_datap(hashTblp, tableNode);
 
-            ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
+            ec_hashtbl_del_generic_lockheld(hashTblp, bucketp, datap, context);
 
             // If ref counting is disabled, we need to delete this item
             if (hashTblp->refcount_offset == HASHTBL_DISABLE_REF_COUNT)
@@ -464,6 +471,7 @@ int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, P
     }
 
     hlist_add_head(&nodep->link, &bucketp->head);
+    ++bucketp->itemCount;
     if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
     {
         atomic64_inc(__ec_get_refcountp(hashTblp, datap));
@@ -555,7 +563,7 @@ void *ec_hashtbl_get_generic_ref(HashTbl *hashTblp, void *datap, ProcessContext 
     return datap;
 }
 
-int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessContext *context)
+int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *datap, ProcessContext *context)
 {
     HashTableNode *nodep = __ec_get_nodep(hashTblp, datap);
 
@@ -563,6 +571,7 @@ int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, void *datap, ProcessConte
     if ((&nodep->link)->pprev != NULL)
     {
         hlist_del_init(&nodep->link);
+        --bucketp->itemCount;
 
         if (atomic64_read(&(hashTblp->tableInstance)) == 0)
         {
@@ -628,7 +637,7 @@ void *ec_hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext
             atomic64_inc(__ec_get_refcountp(hashTblp, datap));
         }
 
-        ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
+        ec_hashtbl_del_generic_lockheld(hashTblp, bucketp, datap, context);
     }
     ec_hashtbl_bkt_write_unlock(bucketp, context);
 
@@ -651,7 +660,7 @@ void ec_hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *cont
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
 
     ec_hashtbl_bkt_write_lock(bucketp, context);
-    ec_hashtbl_del_generic_lockheld(hashTblp, datap, context);
+    ec_hashtbl_del_generic_lockheld(hashTblp, bucketp, datap, context);
     ec_hashtbl_bkt_write_unlock(bucketp, context);
 }
 
@@ -859,5 +868,109 @@ void ec_hashtbl_write_unlock(HashTbl *hashTblp, void *key, ProcessContext *conte
     {
         ec_hashtbl_bkt_write_unlock(bucketp, context);
     }
+}
+
+struct counter {
+    uint64_t itemCount;
+    uint64_t bucketCount;
+};
+
+typedef void (*print_func)(void *, const char *, ...);
+
+void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m, ProcessContext *context)
+{
+    int bucket_index = 0;
+    int output_size = 0;
+    struct counter *items = ec_mem_cache_alloc_generic(sizeof(struct counter) * hashTblp->numberOfBuckets, context);
+
+    memset(items, 0, ec_mem_cache_get_size_generic(items));
+
+    for (; bucket_index < hashTblp->numberOfBuckets; ++bucket_index)
+    {
+        int write_index = 0;
+        uint64_t itemCount = hashTblp->tablePtr[bucket_index].itemCount;
+
+
+        for (; write_index < output_size; ++write_index)
+        {
+            if (itemCount == items[write_index].itemCount)
+            {
+                break;
+            } else if (itemCount < items[write_index].itemCount)
+            {
+                int i = output_size;
+
+                for (; i > write_index; --i)
+                {
+                    int k = i - 1;
+
+                    items[i] = items[k];
+                    items[k].bucketCount = 0;
+                }
+                break;
+            }
+        }
+        if (items[write_index].bucketCount++ == 0)
+        {
+            items[write_index].itemCount = itemCount;
+            ++output_size;
+        }
+    }
+
+    _print(m, "%20s : %20s\n", "Bucket Depth", "Total Buckets");
+    for (bucket_index = 0; bucket_index < output_size; ++bucket_index)
+    {
+        _print(m, "%20llu : %20llu\n", items[bucket_index].itemCount, items[bucket_index].bucketCount);
+    }
+
+    ec_mem_cache_free_generic(items);
+}
+
+int __ec_hashtable_show(struct seq_file *m, void *v)
+{
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    HashTbl *hashTblp = (HashTbl *)m->private;
+
+    seq_printf(m, "%20s : %20s\n", "Name", hashTblp->name);
+    seq_printf(m, "%20s : %20llu\n", "Bucket Count", hashTblp->numberOfBuckets);
+    seq_printf(m, "%20s : %20llu\n", "LRU Size", hashTblp->lruSize);
+    seq_printf(m, "%20s : %20lld\n", "Item Count", (uint64_t)atomic64_read(&(hashTblp->tableInstance)));
+    seq_puts(m, "\n");
+
+    ec_hastable_bkt_show(hashTblp, (hastable_print_func)seq_printf, m, &context);
+
+    return 0;
+}
+
+int __ec_hashtable_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, __ec_hashtable_show, PDE_DATA(inode));
+}
+
+static const struct file_operations ec_fops = {
+    .owner      = THIS_MODULE,
+    .open       = __ec_hashtable_open,
+    .read       = seq_read,
+    .release    = single_release,
+};
+
+bool __ec_hashtbl_proc_initialize(HashTbl *hashTblp, ProcessContext *context)
+{
+    CANCEL(hashTblp, false);
+
+    if (!proc_create_data(hashTblp->name, 0400, g_cb_hashtbl_proc_dir, &ec_fops, hashTblp))
+    {
+        TRACE(DL_ERROR, "Failed to create proc directory entry %s", hashTblp->name);
+    }
+
+    return true;
+}
+
+void __ec_hashtbl_proc_shutdown(HashTbl *hashTblp, ProcessContext *context)
+{
+    CANCEL_VOID(hashTblp);
+
+    remove_proc_entry(hashTblp->name, g_cb_hashtbl_proc_dir);
 }
 

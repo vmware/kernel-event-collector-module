@@ -18,6 +18,8 @@ typedef struct entry {
     struct table_value value;
 } Entry;
 
+static void __vprintk(void *, const char *, ...);
+
 HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_delete_cb delete_callback)
 {
     return ec_hashtbl_init_generic(context,
@@ -332,6 +334,7 @@ bool __init __test__hashtbl_lru_lookup(
     overage = (count - lru_size) * 100 / lru_size;
     TRACE(DL_INFO, "hashtbl lru test: lru_size=%llu, bucket_size=%llu, insertions=%llu, total_over=%lld (%llu percent)",
         lru_size, bucket_size, insertion_count, count - lru_size, overage);
+    ec_hastable_bkt_show(table, (hastable_print_func)__vprintk, NULL, context);
 
 
     passed = true;
@@ -369,4 +372,13 @@ bool __init test__hashtbl_lru_lookup(ProcessContext *context)
     }
 
     return passed;
+}
+
+static void __vprintk(void *m, const char *f, ...)
+{
+	va_list args;
+
+	va_start(args, f);
+	vprintk(f, args);
+	va_end(args);
 }
