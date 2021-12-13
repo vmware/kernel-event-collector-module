@@ -1,7 +1,7 @@
-# Dynamic Security Linux Kernel Module
+# App Control Event Kernel Module
 
 ## Overview
-The DynSec kmod was originally developed to first perform access control
+The kernel module was originally developed to first perform access control
 requests on a small set of LSM hooks where fanotify could not on older
 kernels. This was extended to other LSM hooks geared towards other
 file operations other than OPEN.
@@ -24,9 +24,9 @@ client.
 
 
 ## Supported Kernel Versions
-DynSec currently support EL7 and EL8 based distros. However this could
-support other kernels with some better kver checks. This does compile
-for some EL6 kernels but if it worked, would be at a limited capacity.
+The kernel module currently support EL7 and EL8 based distros. However
+this could support other kernels with some better kver checks. This does
+compile for some EL6 kernels but is not been tested.
 
 
 ## Events

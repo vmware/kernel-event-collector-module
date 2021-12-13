@@ -66,7 +66,11 @@ else()
 endif()
 
 # Check for values from the ENV
-set(MODULE_NAME dynsec)
+if(DEFINED ENV{OPTION_MODULE_NAME})
+    set(MODULE_NAME $ENV{OPTION_MODULE_NAME})
+else()
+    set(MODULE_NAME cb_appc_events)
+endif()
 string(TOUPPER "${MODULE_NAME}" UPPER_MODULE_NAME)
 
 if(DEFINED ENV{PROJECT_VERSION})

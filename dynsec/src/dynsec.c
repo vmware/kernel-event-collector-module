@@ -140,7 +140,7 @@ static int __init dynsec_init(void)
     }
     register_preaction_hooks(&global_config);
 
-    pr_info("Loaded DynSec\n");
+    pr_info("Loaded: %s\n", CB_APP_MODULE_NAME);
     print_config(&global_config);
     // struct copy the inital copy of the config data
     preserved_config = global_config;
@@ -150,7 +150,7 @@ static int __init dynsec_init(void)
 
 static void __exit dynsec_exit(void)
 {
-    DS_LOG(DS_INFO, "Exiting Dynamic Security Module Brand(%s)",
+    DS_LOG(DS_INFO, "Exiting: %s",
            CB_APP_MODULE_NAME);
 
     dynsec_chrdev_shutdown();

@@ -14,9 +14,9 @@ class DynSec(CbConanFile):
     settings = "os", "arch"
     generators = "cmake"
     options = {
-        'module_name': ['dynsec']
+        'module_name': ['cb_appc_events']
     }
-    default_options = "module_name=dynsec"
+    default_options = "module_name=cb_appc_events"
 
     kernelDeps = [
         "KERNEL_RHEL_7_0_VERSION",
@@ -33,8 +33,7 @@ class DynSec(CbConanFile):
         "KERNEL_RHEL_8_1_VERSION",
         "KERNEL_RHEL_8_2_VERSION",
         "KERNEL_RHEL_8_3_VERSION",
-        # Temporarily use static versions until consumers of cb-vendor
-        # are all fully updated.
+        # Temporarily use this static version
         "Kernel_4.18.0-305.19.1.el8_4.x86_64/cb-1119@re/develop",
     ]
     override_list = "KERNEL_OVERRIDE_LIST"
