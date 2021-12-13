@@ -408,11 +408,16 @@ bool BpfApi::on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size)
     return false;
 }
 
-void BpfApi::on_perf_submit(void *cb_cookie, void *data, int data_size)
+void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
 {
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
     if (bpfApi)
     {
+        bpf_probe::data *data = reinterpret_cast<bpf_probe::data *>(new (std::nothrow) char[data_size]);
+        if (!data) {
+            return;
+        } 
+        memcpy(data, orig_data, data_size);
         bpfApi->OnEvent(static_cast<bpf_probe::data *>(data));
     }
 }
