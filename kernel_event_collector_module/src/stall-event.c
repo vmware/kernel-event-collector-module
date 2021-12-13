@@ -331,7 +331,7 @@ bool __ec_get_stall_data_and_release(uint64_t perm_id, pid_t tid, CB_EVENT_TYPE 
         ec_hashtbl_write_bkt_unlock(bkt, context);
 
         TRACE(DL_INFO, "%s: FOUND - tid:%d eventType:%d response:%d mode:%x", __func__,
-              tid, eventType, stall_data->response, stall_data->mode);
+              tid, eventType, stall_event->response, (unsigned int)stall_event->mode);
 
         // Free the stall event
         ec_free_stall_event(stall_event, context);
