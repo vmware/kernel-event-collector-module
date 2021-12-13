@@ -73,7 +73,7 @@ static LIST_HEAD(msg_queue_pri0);
 static LIST_HEAD(msg_queue_pri1);
 static LIST_HEAD(msg_queue_pri2);
 
-#define  MAX_VALID_INTERVALS     60
+static const uint64_t MAX_VALID_INTERVALS =   60;
 #define  MAX_INTERVALS           62
 #define  NUM_STATS               18
 #define  EVENT_STATS             13
@@ -99,7 +99,7 @@ typedef struct CB_EVENT_STATS {
     //  tx_dns
     //  tx_proxy
     //  tx_block
-    atomic64_t      stats[MAX_INTERVALS][NUM_STATS];
+    uint64_t        stats[MAX_INTERVALS][NUM_STATS];
     struct timespec time[MAX_INTERVALS];
 
     // These are live counters that rise and fall as events are generated.  This variable
@@ -113,11 +113,11 @@ typedef struct CB_EVENT_STATS {
     atomic64_t      tx_ready_prev2;
 
     // The current index into the list
-    atomic_t        curr;
+    uint64_t        curr;
 
     // The number of times the list has carried over. (This helps us calculate the average
     //  later by knowing how many are valid.)
-    atomic_t        validStats;
+    uint64_t        validStats;
 } CB_EVENT_STATS, *PCB_EVENT_STATS;
 
 const struct {
@@ -157,26 +157,26 @@ static CB_EVENT_STATS s_event_stats;
 #define tx_ready_prev0      (s_event_stats.tx_ready_prev0)
 #define tx_ready_prev1      (s_event_stats.tx_ready_prev1)
 #define tx_ready_prev2      (s_event_stats.tx_ready_prev2)
-#define tx_queued_t         (s_event_stats.stats[atomic_read(&current_stat)][0])
-#define tx_queued_pri0      (s_event_stats.stats[atomic_read(&current_stat)][1])
-#define tx_queued_pri1      (s_event_stats.stats[atomic_read(&current_stat)][2])
-#define tx_queued_pri2      (s_event_stats.stats[atomic_read(&current_stat)][3])
-#define tx_dropped          (s_event_stats.stats[atomic_read(&current_stat)][4])
-#define tx_total            (s_event_stats.stats[atomic_read(&current_stat)][5])
-#define tx_process          (s_event_stats.stats[atomic_read(&current_stat)][6])
-#define tx_modload          (s_event_stats.stats[atomic_read(&current_stat)][7])
-#define tx_file             (s_event_stats.stats[atomic_read(&current_stat)][8])
-#define tx_net              (s_event_stats.stats[atomic_read(&current_stat)][9])
-#define tx_dns              (s_event_stats.stats[atomic_read(&current_stat)][10])
-#define tx_proxy            (s_event_stats.stats[atomic_read(&current_stat)][11])
-#define tx_block            (s_event_stats.stats[atomic_read(&current_stat)][12])
-#define tx_other            (s_event_stats.stats[atomic_read(&current_stat)][13])
+#define tx_queued_t         (s_event_stats.stats[current_stat][0])
+#define tx_queued_pri0      (s_event_stats.stats[current_stat][1])
+#define tx_queued_pri1      (s_event_stats.stats[current_stat][2])
+#define tx_queued_pri2      (s_event_stats.stats[current_stat][3])
+#define tx_dropped          (s_event_stats.stats[current_stat][4])
+#define tx_total            (s_event_stats.stats[current_stat][5])
+#define tx_process          (s_event_stats.stats[current_stat][6])
+#define tx_modload          (s_event_stats.stats[current_stat][7])
+#define tx_file             (s_event_stats.stats[current_stat][8])
+#define tx_net              (s_event_stats.stats[current_stat][9])
+#define tx_dns              (s_event_stats.stats[current_stat][10])
+#define tx_proxy            (s_event_stats.stats[current_stat][11])
+#define tx_block            (s_event_stats.stats[current_stat][12])
+#define tx_other            (s_event_stats.stats[current_stat][13])
 
 
-#define mem_user            (s_event_stats.stats[atomic_read(&current_stat)][14])
-#define mem_user_peak       (s_event_stats.stats[atomic_read(&current_stat)][15])
-#define mem_kernel          (s_event_stats.stats[atomic_read(&current_stat)][16])
-#define mem_kernel_peak     (s_event_stats.stats[atomic_read(&current_stat)][17])
+#define mem_user            (s_event_stats.stats[current_stat][14])
+#define mem_user_peak       (s_event_stats.stats[current_stat][15])
+#define mem_kernel          (s_event_stats.stats[current_stat][16])
+#define mem_kernel_peak     (s_event_stats.stats[current_stat][17])
 
 atomic_t reader_pid;
 
@@ -217,28 +217,23 @@ bool __ec_is_process_connected_reader(pid_t pid)
 
 bool ec_user_comm_initialize(ProcessContext *context)
 {
-    int i;
     size_t kernel_mem;
 
     ec_spinlock_init(&dev_spinlock, context);
 
-    atomic_set(&current_stat,          0);
-    atomic_set(&valid_stats,           0);
+    current_stat = 0;
+    valid_stats  = 0;
     atomic64_set(&tx_ready_pri0,         0);
     atomic64_set(&tx_ready_pri1,         0);
     atomic64_set(&tx_ready_pri1_holdoff, 0);
     atomic64_set(&tx_ready_pri2,         0);
 
-    for (i = 0; i < NUM_STATS; ++i)
-    {
-        // We make sure the first and last interval are 0 for the average calculations
-        atomic64_set(&s_event_stats.stats[0][i],                0);
-        atomic64_set(&s_event_stats.stats[MAX_INTERVALS - 1][i], 0);
-    }
+    memset(&s_event_stats.stats, 0, sizeof(s_event_stats.stats));
+
     getnstimeofday(&s_event_stats.time[0]);
     kernel_mem = __ec_get_memory_usage(context);
-    atomic64_set(&mem_kernel,      kernel_mem);
-    atomic64_set(&mem_kernel_peak, kernel_mem);
+    mem_kernel =      kernel_mem;
+    mem_kernel_peak = kernel_mem;
 
     // Initialize a workque struct to police the hashtable
     g_stats_work_delay = msecs_to_jiffies(STAT_INTERVAL * 1000);
@@ -404,7 +399,7 @@ CATCH_DEFAULT:
     if (msg)
     {
         // If we still have an event at this point free it now
-        atomic64_inc(&tx_dropped);
+        ++tx_dropped;
         ec_free_event(msg, context);
     }
 
@@ -705,18 +700,18 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
 
     xcode = payload;
 
-    atomic64_inc(&tx_total);
+    ++tx_total;
 
     switch (msg->eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START:
     case CB_EVENT_TYPE_PROCESS_EXIT:
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-        atomic64_inc(&tx_process);
+        ++tx_process;
         break;
 
     case CB_EVENT_TYPE_MODULE_LOAD:
-        atomic64_inc(&tx_modload);
+        ++tx_modload;
         break;
 
     case CB_EVENT_TYPE_FILE_CREATE:
@@ -724,26 +719,26 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     case CB_EVENT_TYPE_FILE_WRITE:
     case CB_EVENT_TYPE_FILE_CLOSE:
     case CB_EVENT_TYPE_FILE_OPEN:
-        atomic64_inc(&tx_file);
+        ++tx_file;
         break;
 
     case CB_EVENT_TYPE_NET_CONNECT_PRE:
     case CB_EVENT_TYPE_NET_CONNECT_POST:
     case CB_EVENT_TYPE_NET_ACCEPT:
-        atomic64_inc(&tx_net);
+        ++tx_net;
         break;
 
     case CB_EVENT_TYPE_DNS_RESPONSE:
-        atomic64_inc(&tx_dns);
+        ++tx_dns;
         break;
 
     case CB_EVENT_TYPE_WEB_PROXY:
-        atomic64_inc(&tx_proxy);
+        ++tx_proxy;
         break;
 
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
     case CB_EVENT_TYPE_PROCESS_NOT_BLOCKED:
-        atomic64_inc(&tx_block);
+        ++tx_block;
         break;
 
     case CB_EVENT_TYPE_PROC_ANALYZE:
@@ -751,7 +746,7 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     case CB_EVENT_TYPE_MAX:
     case CB_EVENT_TYPE_UNKNOWN:
     default:
-        atomic64_inc(&tx_other);
+        ++tx_other;
         break;
     }
 
@@ -1022,12 +1017,12 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
                 TRACE(DL_ERROR, "Unable to alloc CB_EVENT_TYPE_HEARTBEAT.");
             } else
             {
-                atomic64_set(&mem_user,      heartbeat.user_memory);
-                atomic64_set(&mem_user_peak, heartbeat.user_memory_peak);
+                mem_user                            = heartbeat.user_memory;
+                mem_user_peak                       = heartbeat.user_memory_peak;
                 event->heartbeat.user_memory        = heartbeat.user_memory;
                 event->heartbeat.user_memory_peak   = heartbeat.user_memory_peak;
-                event->heartbeat.kernel_memory      = atomic64_read(&mem_kernel);
-                event->heartbeat.kernel_memory_peak = atomic64_read(&mem_kernel_peak);
+                event->heartbeat.kernel_memory      = mem_kernel;
+                event->heartbeat.kernel_memory_peak = mem_kernel_peak;
                 ec_send_event(event, &context);
             }
         }
@@ -1263,7 +1258,7 @@ void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
 
 void ec_stats_work_task(struct work_struct *work)
 {
-    uint32_t         curr   = atomic_read(&s_event_stats.curr);
+    uint32_t         curr   = s_event_stats.curr;
     uint32_t         next   = (curr + 1) % MAX_INTERVALS;
     uint64_t         ready0 = atomic64_read(&tx_ready_pri0);
     uint64_t         ready1 = atomic64_read(&tx_ready_pri1);
@@ -1285,34 +1280,34 @@ void ec_stats_work_task(struct work_struct *work)
     //  is new in this variable to the current stat.
     if (ready0 > prev0)
     {
-        atomic64_add(ready0 - prev0, &tx_queued_pri0);
+        tx_queued_pri0 = ready0 - prev0;
     }
     if (ready1 > prev1)
     {
-        atomic64_add(ready1 - prev1, &tx_queued_pri1);
+        tx_queued_pri1 = ready1 - prev1;
     }
     if (ready2 > prev2)
     {
-        atomic64_add(ready2 - prev2, &tx_queued_pri2);
+        tx_queued_pri2 = ready2 - prev2;
     }
 
     // Save the current totals for nex time
     atomic64_set(&tx_ready_prev0, ready0);
     atomic64_set(&tx_ready_prev1, ready1);
-    atomic64_add(ready0 + ready1, &tx_queued_t);
+    tx_queued_t = ready0 + ready1;
 
     // Copy over the current total to the next interval
     for (i = 0; i < NUM_STATS; ++i)
     {
-        atomic64_set(&s_event_stats.stats[next][i], atomic64_read(&s_event_stats.stats[curr][i]));
+        s_event_stats.stats[next][i] = s_event_stats.stats[curr][i];
     }
-    atomic_set(&current_stat, next);
-    atomic_inc(&valid_stats);
+    current_stat = next;
+    ++valid_stats;
     getnstimeofday(&s_event_stats.time[next]);
     kernel_mem      = __ec_get_memory_usage(&context);
-    kernel_mem_peak = atomic64_read(&mem_kernel_peak);
-    atomic64_set(&mem_kernel,      kernel_mem);
-    atomic64_set(&mem_kernel_peak, (kernel_mem > kernel_mem_peak ? kernel_mem : kernel_mem_peak));
+    kernel_mem_peak = mem_kernel_peak;
+    mem_kernel      = kernel_mem;
+    mem_kernel_peak = (kernel_mem > kernel_mem_peak ? kernel_mem : kernel_mem_peak);
 
     schedule_delayed_work(&stats_work, g_stats_work_delay);
 }
@@ -1322,8 +1317,8 @@ int ec_proc_show_events_avg(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = atomic_read(&s_event_stats.curr) + MAX_INTERVALS;
-    uint32_t    valid   = atomic_read(&s_event_stats.validStats);
+    uint32_t    curr    = s_event_stats.curr + MAX_INTERVALS;
+    uint32_t    valid   = s_event_stats.validStats;
     int32_t     avg1_c  = (valid >  4 ?  4 : valid);
     int32_t     avg2_c  = (valid > 20 ? 20 : valid);
     int32_t     avg3_c  = (valid > 60 ? 60 : valid);
@@ -1351,12 +1346,12 @@ int ec_proc_show_events_avg(struct seq_file *m, void *v)
         // This is a circular array of elements were each element is an increasing sum from the
         //  previous element. You can always get the sum of any two elements, and divide by the
         //  number of elements between them to yield the average.
-        uint64_t currentStat = atomic64_read(&s_event_stats.stats[curr][i]);
+        uint64_t currentStat = s_event_stats.stats[curr][i];
 
         seq_printf(m, " %15s | %9lld | %9lld | %9lld | %10lld |\n", STAT_STRINGS[i].name, currentStat,
-                   (currentStat - atomic64_read(&s_event_stats.stats[avg1][i])) / avg1_c / STAT_INTERVAL,
-                   (currentStat - atomic64_read(&s_event_stats.stats[avg2][i])) / avg2_c / STAT_INTERVAL,
-                   (currentStat - atomic64_read(&s_event_stats.stats[avg3][i])) / avg3_c / STAT_INTERVAL);
+                   (currentStat - s_event_stats.stats[avg1][i]) / avg1_c / STAT_INTERVAL,
+                   (currentStat - s_event_stats.stats[avg2][i]) / avg2_c / STAT_INTERVAL,
+                   (currentStat - s_event_stats.stats[avg3][i]) / avg3_c / STAT_INTERVAL);
     }
 
     seq_puts(m, "\n");
@@ -1368,8 +1363,8 @@ int ec_proc_show_events_det(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = atomic_read(&s_event_stats.curr);
-    uint32_t    valid   = min(atomic_read(&s_event_stats.validStats), MAX_VALID_INTERVALS);
+    uint32_t    curr    = s_event_stats.curr;
+    uint32_t    valid   = min(s_event_stats.validStats, MAX_VALID_INTERVALS);
     uint32_t    start   = (MAX_INTERVALS + curr - valid) % MAX_INTERVALS + MAX_INTERVALS;
     int         i;
     int         j;
@@ -1396,7 +1391,7 @@ int ec_proc_show_events_det(struct seq_file *m, void *v)
         seq_printf(m, " %19lld |", ec_to_windows_timestamp(&s_event_stats.time[right]));
         for (j = 0; j < EVENT_STATS; ++j)
         {
-            seq_printf(m, STAT_STRINGS[j].num_format, atomic64_read(&s_event_stats.stats[right][j]) - atomic64_read(&s_event_stats.stats[left][j]));
+            seq_printf(m, STAT_STRINGS[j].num_format, s_event_stats.stats[right][j] - s_event_stats.stats[left][j]);
         }
         seq_puts(m, "\n");
     }
@@ -1412,13 +1407,13 @@ ssize_t ec_proc_show_events_rst(struct file *file, const char *buf, size_t size,
     cancel_delayed_work(&stats_work);
 
     // I do not need to zero out everything, just the new active interval
-    atomic_set(&current_stat,  0);
-    atomic_set(&valid_stats,   0);
+    current_stat = 0;
+    valid_stats  = 0;
     for (i = 0; i < NUM_STATS; ++i)
     {
         // We make sure the first and last interval are 0 for the average calculations
-        atomic64_set(&s_event_stats.stats[0][i],                0);
-        atomic64_set(&s_event_stats.stats[MAX_INTERVALS - 1][i], 0);
+        s_event_stats.stats[0][i]                 = 0;
+        s_event_stats.stats[MAX_INTERVALS - 1][i] = 0;
     }
     getnstimeofday(&s_event_stats.time[0]);
 
@@ -1431,7 +1426,7 @@ int ec_proc_current_memory_avg(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = atomic_read(&s_event_stats.curr);
+    uint32_t    curr    = s_event_stats.curr;
 
     int         i;
 
@@ -1440,7 +1435,7 @@ int ec_proc_current_memory_avg(struct seq_file *m, void *v)
         // This is a circular array of elements were each element is an increasing sum from the
         //  previous element. You can always get the sum of any two elements, and divide by the
         //  number of elements between them to yield the average.
-        uint64_t currentStat = atomic64_read(&s_event_stats.stats[curr][i]);
+        uint64_t currentStat = s_event_stats.stats[curr][i];
 
         seq_printf(m, "%9lld ", currentStat);
     }
@@ -1454,8 +1449,8 @@ int ec_proc_current_memory_det(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = atomic_read(&s_event_stats.curr);
-    uint32_t    valid   = min(atomic_read(&s_event_stats.validStats), MAX_VALID_INTERVALS);
+    uint32_t    curr    = s_event_stats.curr;
+    uint32_t    valid   = min(s_event_stats.validStats, MAX_VALID_INTERVALS);
     uint32_t    start   = (MAX_INTERVALS + curr - valid) % MAX_INTERVALS + MAX_INTERVALS;
     int         i;
     int         j;
@@ -1481,7 +1476,7 @@ int ec_proc_current_memory_det(struct seq_file *m, void *v)
         seq_printf(m, " %19lld |", ec_to_windows_timestamp(&s_event_stats.time[right]));
         for (j = MEM_START; j < MEM_STATS; ++j)
         {
-            seq_printf(m, STAT_STRINGS[j].num_format, atomic64_read(&s_event_stats.stats[right][j]));
+            seq_printf(m, STAT_STRINGS[j].num_format, s_event_stats.stats[right][j]);
         }
         //seq_printf(m, " %9lld | %9lld |", left, right );
         seq_puts(m, "\n");
