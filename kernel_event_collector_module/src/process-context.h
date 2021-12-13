@@ -22,10 +22,10 @@ extern struct timespec ec_get_current_timespec(void);
 // being a bottleneck, in the case where multiple CPUs need to access the same counter simultaneously.
 
 // Counter for hooks in use by the module
-DECLARE_PER_CPU(atomic64_t, module_inuse);
+DECLARE_PER_CPU(int64_t, module_inuse);
 
 // Counter for hooks in use by the enabled module
-DECLARE_PER_CPU(atomic64_t, module_active_inuse);
+DECLARE_PER_CPU(int64_t, module_active_inuse);
 
 // Get the per-cpu pointer. Disabling preemption while getting the percpu pointer ensures we stay on the same CPU
 // while getting the pointer. Seems safer but might not be necessary since all we really need is the CPU ID.
@@ -43,8 +43,8 @@ static inline void *_safe_percpu_ptr(void *pointer)
 typedef struct hook_tracking {
     const char      *hook_name;
     atomic64_t       count;
-    atomic64_t       last_enter_time;
-    atomic64_t       last_pid;
+    uint64_t         last_enter_time;
+    uint64_t         last_pid;
     struct list_head list;
 } HookTracking;
 
@@ -56,8 +56,6 @@ typedef struct process_context {
     bool             allow_send_events;
     struct list_head list;
     bool             decr_active_call_count_on_exit;
-    atomic64_t       *percpu_module_inuse;
-    atomic64_t       *percpu_module_active_inuse;
     HookTracking     *percpu_hook_tracking;
 } ProcessContext;
 
@@ -68,8 +66,6 @@ typedef struct process_context {
     .allow_wake_up         = true,                                             \
     .allow_send_events     = true,                                             \
     .decr_active_call_count_on_exit = false,                                   \
-    .percpu_module_inuse = _safe_percpu_ptr(&module_inuse),                    \
-    .percpu_module_active_inuse = _safe_percpu_ptr(&module_active_inuse),      \
     .percpu_hook_tracking = _safe_percpu_ptr(&hook_tracking)                   \
 }
 

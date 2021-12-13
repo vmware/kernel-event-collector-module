@@ -34,16 +34,13 @@ static char enableHooksStr[HOOK_MASK_LEN];
 uint32_t g_traceLevel = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARNING | DL_ERROR);
 uint64_t g_enableHooks = HOOK_MASK;
 uid_t    g_edr_server_uid = (uid_t)-1;
-int64_t  g_cb_ignored_pid_count;
-pid_t    g_cb_ignored_pids[CB_SENSOR_MAX_PIDS];
-int64_t  g_cb_ignored_uid_count;
-uid_t    g_cb_ignored_uids[CB_SENSOR_MAX_UIDS];
 bool     g_exiting;
 uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
 uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
 uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
 uint32_t ec_prsock_buflen;
 bool     g_run_self_tests;
+bool     g_enable_hook_tracking;
 
 CB_DRIVER_CONFIG g_driver_config = {
     .processes =            ALL_FORKS_AND_EXITS,
@@ -59,6 +56,7 @@ module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)
 module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_enable_hook_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 // Store string param to later on convert to unsigned long long
 module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
@@ -66,8 +64,8 @@ module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
 
 INIT_CB_RESOLVED_SYMS();
 
-DEFINE_PER_CPU(atomic64_t, module_inuse);
-DEFINE_PER_CPU(atomic64_t, module_active_inuse);
+DEFINE_PER_CPU(int64_t, module_inuse);
+DEFINE_PER_CPU(int64_t, module_active_inuse);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
@@ -193,9 +191,6 @@ int __init ec_init(void)
     //
     // Initialize Subsystems
     //
-    memset(&g_cb_ignored_pids[0], 0, sizeof(pid_t)*CB_SENSOR_MAX_PIDS);
-    memset(&g_cb_ignored_uids[0], 0xFF, sizeof(uid_t)*CB_SENSOR_MAX_PIDS);
-
 
     // Allow hooks to be enabled via module param
     ec_set_enableHooks();
@@ -297,12 +292,12 @@ void __exit ec_cleanup(void)
     //  prevent unloading.
     while (true)
     {
-        uint64_t l_module_inuse = 0;
+        int64_t l_module_inuse = 0;
         unsigned int cpu;
 
         for_each_possible_cpu(cpu)
         {
-            l_module_inuse += atomic64_read(&per_cpu(module_inuse, cpu));
+            l_module_inuse += per_cpu(module_inuse, cpu);
         }
 
         if (!l_module_inuse)
@@ -390,12 +385,12 @@ int ec_disable_module(ProcessContext *context)
 
     while (true)
     {
-        uint64_t l_active_call_count = 0;
+        int64_t l_active_call_count = 0;
         unsigned int cpu;
 
         for_each_possible_cpu(cpu)
         {
-            l_active_call_count += atomic64_read(&per_cpu(module_active_inuse, cpu));
+            l_active_call_count += per_cpu(module_active_inuse, cpu);
         }
 
         if (l_active_call_count != 0)

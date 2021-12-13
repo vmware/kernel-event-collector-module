@@ -11,6 +11,8 @@
 #define CURRENT_TIME_SEC ((struct timespec) { get_seconds(), 0 })
 #endif  //}
 
+extern bool g_enable_hook_tracking;
+
 static struct ec_hook_tracking_node
 {
     uint64_t          lock;
@@ -31,6 +33,7 @@ void ec_hook_tracking_shutdown(ProcessContext *context)
 
 void ec_hook_tracking_add_entry(ProcessContext *context, const char *hook_name)
 {
+    CANCEL_VOID(g_enable_hook_tracking);
     CANCEL_VOID(context);
     CANCEL_VOID(context->percpu_hook_tracking);
 
@@ -50,18 +53,19 @@ void ec_hook_tracking_add_entry(ProcessContext *context, const char *hook_name)
     }
 
     atomic64_inc(&context->percpu_hook_tracking->count);
-    atomic64_set(&context->percpu_hook_tracking->last_enter_time, CURRENT_TIME_SEC.tv_sec);
-    atomic64_set(&context->percpu_hook_tracking->last_pid, context->pid);
+    context->percpu_hook_tracking->last_enter_time = CURRENT_TIME_SEC.tv_sec;
+    context->percpu_hook_tracking->last_pid = context->pid;
 }
 
 void ec_hook_tracking_del_entry(ProcessContext *context)
 {
+    CANCEL_VOID(g_enable_hook_tracking);
     CANCEL_VOID(context);
     CANCEL_VOID(context->percpu_hook_tracking);
 
     ATOMIC64_DEC__CHECK_NEG(&context->percpu_hook_tracking->count);
-    atomic64_set(&context->percpu_hook_tracking->last_enter_time, 0);
-    atomic64_set(&context->percpu_hook_tracking->last_pid, 0);
+    context->percpu_hook_tracking->last_enter_time = 0;
+    context->percpu_hook_tracking->last_pid = 0;
 }
 
 // This will be called in the module disable logic when we need to wait for hooks
@@ -78,8 +82,8 @@ int ec_hook_tracking_print_active(ProcessContext *context)
             pr_info("Hook %s has %u active users, last pid %d, last entry %lus ago\n",
                     list_entry->hook_name,
                     (unsigned int)atomic64_read(&list_entry->count),
-                    (pid_t)atomic64_read(&list_entry->last_pid),
-                    (unsigned long)(CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time))
+                    (pid_t)list_entry->last_pid,
+                    (unsigned long)(CURRENT_TIME_SEC.tv_sec - list_entry->last_enter_time)
             );
         }
     }
@@ -107,8 +111,8 @@ int ec_show_active_hooks(struct seq_file *seq_file, void *v)
         seq_printf(seq_file, "%25s | %6u | %6u | %6lu |\n",
                       list_entry->hook_name,
                       (unsigned int)atomic64_read(&list_entry->count),
-                      (pid_t)atomic64_read(&list_entry->last_pid),
-                      (unsigned long)(CURRENT_TIME_SEC.tv_sec - atomic64_read(&list_entry->last_enter_time))
+                      (pid_t)list_entry->last_pid,
+                      (unsigned long)(CURRENT_TIME_SEC.tv_sec - list_entry->last_enter_time)
                       );
     }
     seq_printf(seq_file, "Total Active %lu\n", total_active);

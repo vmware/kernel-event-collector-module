@@ -33,9 +33,9 @@ extern ModuleStateInfo g_module_state_info;
 // 'module_used' tracks usage of our hook functions and blocks module unload but not disable.
 // 'g_module_state_info.module_active_call_count' tracks usage of code that requires
 // the module to be in an enabled state and blocks disable but not unload.
-#define MODULE_GET(context)  atomic64_inc((context)->percpu_module_inuse)
+#define MODULE_GET(context)  this_cpu_inc(module_inuse)
 
-#define MODULE_PUT(context)  ATOMIC64_DEC__CHECK_NEG((context)->percpu_module_inuse)
+#define MODULE_PUT(context)  this_cpu_dec(module_inuse)
 
 // Everything between this macro and FINISH_MODULE_DISABLE_CHECK is tracked
 // and can potentially block the module from disabling. We should avoid calling
@@ -54,7 +54,7 @@ do {                                                                            
     else                                                                            \
     {                                                                               \
         (CONTEXT)->decr_active_call_count_on_exit = true;                           \
-        atomic64_inc((CONTEXT)->percpu_module_active_inuse);                        \
+        this_cpu_inc(module_active_inuse);                                          \
     }                                                                               \
                                                                                     \
     ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));              \
@@ -93,7 +93,7 @@ do {                                                                           \
    if ((CONTEXT)->decr_active_call_count_on_exit)                              \
    {                                                                           \
        ec_hook_tracking_del_entry((CONTEXT));                                  \
-       ATOMIC64_DEC__CHECK_NEG((CONTEXT)->percpu_module_active_inuse);         \
+       this_cpu_dec(module_active_inuse);                                      \
    }                                                                           \
 }                                                                              \
 while (false)
