@@ -421,7 +421,6 @@ extern CB_RESOLVED_SYMS g_resolvedSymbols;
 
 extern struct proc_dir_entry *g_cb_proc_dir;
 extern struct proc_dir_entry *g_cb_hashtbl_proc_dir;
-extern ModuleStateInfo g_module_state_info;
 extern uint64_t g_enableHooks;
 
 /* See <linux>/Documentation/core-api/printk-formats.rst

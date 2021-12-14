@@ -351,6 +351,12 @@ void __exit ec_cleanup(void)
  *    "https://gitlab.bit9.local/cbsensor/endpoint-common/merge_requests/784" talks through the
  *    reasons for dropping this.
  *
+ *    To avoid a lock, the hook entry code simply checks g_module_state_info.module_enabled while this code
+ *    waits after setting to ensure there is enough time for module_active_inuse to be incremented if any hook
+ *    entered and saw the enabled state before the change. g_module_state_info.module_state is only used in the module
+ *    enable/disable logic. The hook entry code checks g_module_state_info.module_enabled to avoid any problems with
+ *    reading a partially written state.
+ *
  */
 int ec_disable_module(ProcessContext *context)
 {
@@ -378,6 +384,8 @@ int ec_disable_module(ProcessContext *context)
         case ModuleStateEnabled:
             TRACE(DL_INIT,  "%s Received a request to disable module", __func__);
             g_module_state_info.module_state = ModuleStateDisabling;
+            g_module_state_info.module_enabled = false;
+            udelay(100);
             break;
     }
 
@@ -509,6 +517,7 @@ int ec_enable_module(ProcessContext *context)
             }
 
             ec_set_module_state(context, ModuleStateEnabled);
+            g_module_state_info.module_enabled = true;
             TRACE(DL_INIT, "%s Module enable operation succeeded. ", __func__);
         }
             break;
@@ -636,7 +645,8 @@ bool ec_module_state_info_initialize(ProcessContext *context)
 {
     ec_spinlock_init(&g_module_state_info.module_state_lock, context);
 
-    g_module_state_info.module_state = ModuleStateDisabled;
+    g_module_state_info.module_state   = ModuleStateDisabled;
+    g_module_state_info.module_enabled = false;
 
     proc_create(PROC_STATE_FILENAME, 0400, NULL, &ec_fops);
 
