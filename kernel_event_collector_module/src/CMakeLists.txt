@@ -114,6 +114,7 @@ set(SOURCE_FILES drvmain.c
         dns-parser.c
         plru.c
         tests/run-tests.c
+        tests/mem-cache-tests.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c
         tests/module-state-tests.c

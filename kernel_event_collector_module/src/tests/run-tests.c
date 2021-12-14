@@ -14,6 +14,7 @@ bool __init run_tests(ProcessContext *context)
 
     pr_alert("Running self-tests\n");
 
+    RUN_TEST(test__mem_cache(context));
     RUN_TEST(test__hash_table(context));
     RUN_TEST(test__plru(context));
     RUN_TEST(test__proc_tracking(context));

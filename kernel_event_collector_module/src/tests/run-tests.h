@@ -32,6 +32,7 @@
 
 bool __init run_tests(ProcessContext *context);
 
+bool __init test__mem_cache(ProcessContext *context);
 bool __init test__hash_table(ProcessContext *context);
 bool __init test__plru(ProcessContext *context);
 bool __init test__proc_tracking(ProcessContext *context);
