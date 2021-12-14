@@ -18,6 +18,7 @@ typedef enum {
 typedef struct _ModuleStateInfo {
     uint64_t     module_state_lock;
     ModuleState  module_state;
+    bool         module_enabled;
 } ModuleStateInfo;
 
 //------------------------------------------------
@@ -43,11 +44,11 @@ extern ModuleStateInfo g_module_state_info;
 // checkpatch-ignore: SUSPECT_CODE_INDENT,MACRO_WITH_FLOW_CONTROL
 #define BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)    \
 do {                                                                                \
-    ec_read_lock(&g_module_state_info.module_state_lock, (CONTEXT));                \
+    preempt_disable();                                                              \
                                                                                     \
-    if (g_module_state_info.module_state != ModuleStateEnabled)                     \
+    if (!g_module_state_info.module_enabled)                                        \
     {                                                                               \
-        ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));          \
+        preempt_enable();                                                           \
         (CONTEXT)->decr_active_call_count_on_exit = false;                          \
         goto pass_through_label;                                                    \
     }                                                                               \
@@ -57,21 +58,16 @@ do {                                                                            
         atomic64_inc((CONTEXT)->percpu_module_active_inuse);                        \
     }                                                                               \
                                                                                     \
-    ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));              \
+    preempt_enable();                                                               \
     ec_hook_tracking_add_entry((CONTEXT), __func__);                                \
 } while (false)
 
 #define IF_MODULE_DISABLED_GOTO(CONTEXT, pass_through_label)                        \
 do {                                                                                \
-    ec_read_lock(&g_module_state_info.module_state_lock, (CONTEXT));                \
-                                                                                    \
-    if (g_module_state_info.module_state != ModuleStateEnabled)                     \
+    if (!g_module_state_info.module_enabled)                                        \
     {                                                                               \
-        ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));          \
         goto pass_through_label;                                                    \
     }                                                                               \
-                                                                                    \
-    ec_read_unlock(&g_module_state_info.module_state_lock, (CONTEXT));              \
 } while (false)
 
 #define MODULE_GET_AND_BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(CONTEXT, pass_through_label)  \
