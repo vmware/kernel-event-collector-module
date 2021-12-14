@@ -6,6 +6,7 @@
 
 #include <linux/list.h>
 #include <linux/seq_file.h>
+#include <linux/percpu_counter.h>
 
 #include "process-context.h"
 
@@ -15,7 +16,7 @@ typedef struct CB_MEM_CACHE {
     struct list_head   node;
     struct list_head   allocation_list;
     uint64_t           lock;
-    atomic64_t         allocated_count;
+    struct percpu_counter allocated_count;
     struct kmem_cache *kmem_cache;
     uint32_t           object_size;
     uint8_t            name[CB_MEM_CACHE_NAME_LEN + 1];

@@ -13,7 +13,7 @@ static struct
 {
     uint64_t          lock;
     struct list_head  list;
-    atomic64_t        generic_buffer_count;
+    struct percpu_counter generic_buffer_count;
     atomic64_t        generic_buffer_size;
 } s_mem_cache;
 
@@ -36,7 +36,7 @@ static const size_t CACHE_BUFFER_SZ = sizeof(cache_buffer_t);
 
 void ec_mem_cache_init(ProcessContext *context)
 {
-    atomic64_set(&s_mem_cache.generic_buffer_count, 0);
+    ec_percpu_counter_init(&s_mem_cache.generic_buffer_count, 0, GFP_MODE(context));
     atomic64_set(&s_mem_cache.generic_buffer_size, 0);
     INIT_LIST_HEAD(&s_mem_cache.list);
 
@@ -51,13 +51,15 @@ void ec_mem_cache_shutdown(ProcessContext *context)
     // cp_spinlock_destroy calls ec_mem_cache_free_generic, this must be called before other shutdown
     ec_spinlock_destroy(&s_mem_cache.lock, context);
 
-    generic_buffer_count = atomic64_read(&s_mem_cache.generic_buffer_count);
+    generic_buffer_count = percpu_counter_sum_positive(&s_mem_cache.generic_buffer_count);
 
     if (generic_buffer_count != 0)
     {
         TRACE(DL_ERROR, "Exiting with %" PRFs64 " allocated objects (total size: %" PRFs64 ")",
             (long long)generic_buffer_count, (long long)atomic64_read(&s_mem_cache.generic_buffer_size));
     }
+
+    percpu_counter_destroy(&s_mem_cache.generic_buffer_count);
 
     // TODO: Check cache list
 
@@ -83,8 +85,9 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
             0,
             SLAB_HWCACHE_ALIGN,
             NULL);
-        atomic64_set(&cache->allocated_count, 0);
+        percpu_counter_init(&cache->allocated_count, 0, GFP_MODE(context));
         cache->object_size = size;
+
 
         if (cache->kmem_cache)
         {
@@ -106,7 +109,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
 
     if (cache && cache->kmem_cache)
     {
-        uint64_t allocated_count = atomic64_read(&cache->allocated_count);
+        uint64_t allocated_count = percpu_counter_sum_positive(&cache->allocated_count);
 
         // cache->node only needs to be deleted from the list if cache->kmem_cache was allocated
         // otherwise it was never added to s_mem_cache.list and may have invalid next and prev pointers
@@ -135,6 +138,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
             }
         }
 
+        percpu_counter_destroy(&cache->allocated_count);
         ec_spinlock_destroy(&cache->lock, context);
 
         kmem_cache_destroy(cache->kmem_cache);
@@ -173,7 +177,7 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
             list_add(&cache_buffer->list, &cache->allocation_list);
             ec_write_unlock(&cache->lock, context);
 
-            atomic64_inc(&cache->allocated_count);
+            percpu_counter_inc(&cache->allocated_count);
 
             value = (char *)cache_buffer + CACHE_BUFFER_SZ;
         }
@@ -195,7 +199,7 @@ void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context
             ec_write_unlock(&cache->lock, context);
 
             kmem_cache_free(cache->kmem_cache, (void *)cache_buffer);
-            ATOMIC64_DEC__CHECK_NEG(&cache->allocated_count);
+            percpu_counter_dec(&cache->allocated_count);
         } else
         {
             TRACE(DL_ERROR, "Cache entry magic does not match for %s.  Failed to free memory: %p", cache->name, value);
@@ -210,7 +214,7 @@ int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *co
 {
     CANCEL(cache, 0);
 
-    return atomic64_read(&cache->allocated_count);
+    return percpu_counter_sum_positive(&cache->allocated_count);
 }
 
 size_t ec_mem_cache_get_memory_usage(ProcessContext *context)
@@ -220,7 +224,7 @@ size_t ec_mem_cache_get_memory_usage(ProcessContext *context)
 
     ec_write_lock(&s_mem_cache.lock, context);
     list_for_each_entry(cache, &s_mem_cache.list, node) {
-            size += cache->object_size * atomic64_read(&(cache->allocated_count));
+            size += cache->object_size * percpu_counter_sum_positive(&cache->allocated_count);
     }
     ec_write_unlock(&s_mem_cache.lock, context);
 
@@ -259,7 +263,7 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
     list_for_each_entry(cache, &s_mem_cache.list, node) {
             const char *cache_name = cache->name;
             int         cache_size = cache->object_size;
-            long        count      = atomic64_read(&(cache->allocated_count));
+            long        count      = percpu_counter_sum_positive(&cache->allocated_count);
 
             seq_printf(m, "%40s | %6ld | %40s | %9d |\n",
                        cache->name,
@@ -279,7 +283,7 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
     __ec_simplify_size(&size, &suffix);
 
     seq_printf(m, "Allocated Generic Memory       : %ld %s\n", size, suffix);
-    seq_printf(m, "Allocated Generic Memory Count : %" PRFs64 "\n", (long long)atomic64_read(&s_mem_cache.generic_buffer_count));
+    seq_printf(m, "Allocated Generic Memory Count : %" PRFs64 "\n", percpu_counter_sum_positive(&s_mem_cache.generic_buffer_count));
 
     return 0;
 }
@@ -358,7 +362,7 @@ void *__ec_mem_cache_alloc_generic(const size_t size, ProcessContext *context, b
             generic_buffer->magic     = GENERIC_BUFFER_MAGIC;
             generic_buffer->size      = real_size;
             generic_buffer->isVirtual = doVirtualAlloc;
-            atomic64_inc(&s_mem_cache.generic_buffer_count);
+            percpu_counter_inc(&s_mem_cache.generic_buffer_count);
             atomic64_add(real_size, &s_mem_cache.generic_buffer_size);
 
             // Init reference count
@@ -383,7 +387,7 @@ void __ec_mem_cache_free_generic(void *value, const char *fn, uint32_t line)
         {
             IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&generic_buffer->ref_count,
             {
-                ATOMIC64_DEC__CHECK_NEG(&s_mem_cache.generic_buffer_count);
+                percpu_counter_dec(&s_mem_cache.generic_buffer_count);
                 atomic64_sub(generic_buffer->size, &s_mem_cache.generic_buffer_size);
                 MEM_DEBUG_DEL_ENTRY(generic_buffer, fn, line);
                 if (!generic_buffer->isVirtual)
