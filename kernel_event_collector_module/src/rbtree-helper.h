@@ -5,6 +5,7 @@
 #pragma once
 
 #include <linux/rbtree.h>
+#include <linux/percpu_counter.h>
 #include "process-context.h"
 
 typedef int (*compare_callback)(void *left, void *right);
@@ -15,7 +16,7 @@ typedef struct ec_tree {
     struct rb_root       root;
     bool                 valid;
     uint64_t             lock;
-    atomic64_t           count;
+    struct percpu_counter count;
     int                  key_offset;
     int                  node_offset;
     compare_callback     compare;
