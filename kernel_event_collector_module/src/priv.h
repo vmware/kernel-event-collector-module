@@ -35,6 +35,14 @@
 #include "module_state.h"
 #include "file-helper.h"
 
+#if RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7, 1)
+#define ec_percpu_counter_init(fbc, value, gfp)  percpu_counter_init(fbc, value)
+#define ec_alloc_percpu(type, gfp)               alloc_percpu(type)
+#else
+#define ec_percpu_counter_init(fbc, value, gfp)  percpu_counter_init(fbc, value, gfp)
+#define ec_alloc_percpu(type, gfp)               alloc_percpu_gfp(type, gfp)
+#endif
+
 extern const char DRIVER_NAME[];
 
 #define INITTASK 1    // used by protection software to prevent catastrophic issues

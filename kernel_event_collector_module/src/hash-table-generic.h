@@ -6,6 +6,7 @@
 
 #include <linux/hash.h>
 #include <linux/list.h>
+#include <linux/percpu_counter.h>
 
 #include "version.h"
 #include "mem-cache.h"
@@ -47,8 +48,8 @@ typedef struct hashtbl {
     uint64_t   numberOfBuckets;
     uint64_t   lruSize;
     uint32_t   secret;
-    atomic64_t tableInstance;
-    atomic64_t tableShutdown;  // shutting down = 1 running = 0
+    struct percpu_counter tableInstance;
+    bool tableShutdown;  // shutting down = true running = false
     int key_len;
     int value_len;
     CB_MEM_CACHE hash_cache;
@@ -85,7 +86,7 @@ HashTbl *ec_hashtbl_init_generic(
     hashtbl_delete_cb delete_callback,
     hashtbl_handle_cb handle_callback);
 void *ec_hashtbl_alloc_generic(HashTbl *tblp, ProcessContext *context);
-uint64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context);
+int64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context);
 int ec_hashtbl_add_generic(HashTbl *tblp, void *datap, ProcessContext *context);
 
 // Like ec_hashtbl_add_generic but returns -EEXIST on a duplicate entry.

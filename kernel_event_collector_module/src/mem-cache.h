@@ -34,6 +34,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
 
 void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context);
 void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context);
+int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context);
 
 /* private */
 void *__ec_mem_cache_alloc_generic(const size_t size, ProcessContext *context, bool doVirtualAlloc, const char *fn, uint32_t line);

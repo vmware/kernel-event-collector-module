@@ -204,6 +204,15 @@ void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context
     }
 }
 
+
+
+int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context)
+{
+    CANCEL(cache, 0);
+
+    return atomic64_read(&cache->allocated_count);
+}
+
 size_t ec_mem_cache_get_memory_usage(ProcessContext *context)
 {
     CB_MEM_CACHE *cache;
