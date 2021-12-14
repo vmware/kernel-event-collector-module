@@ -69,13 +69,13 @@ DEFINE_PER_CPU(int64_t, module_active_inuse);
 
 ModuleStateInfo  g_module_state_info = { 0 };
 
-void ec_set_enableHooks(void);
+bool ec_set_enableHooks(ProcessContext *context);
 
 bool ec_module_state_info_initialize(ProcessContext *context);
 
 void ec_module_state_info_shutdown(ProcessContext *context);
 
-int ec_sensor_enable_module_initialize_memory(ProcessContext *context);
+bool ec_sensor_enable_module_initialize_memory(ProcessContext *context);
 
 void ec_sensor_disable_module_shutdown(ProcessContext *context);
 
@@ -86,6 +86,29 @@ bool ec_disable_peer_modules(ProcessContext *context);
 bool ec_proc_initialize(ProcessContext *context);
 
 void ec_proc_shutdown(ProcessContext *context);
+
+bool __init ec_test_module(ProcessContext *context);
+
+
+
+typedef bool (*init_func)(ProcessContext *context);
+typedef void (*destroy_func)(ProcessContext *context);
+
+struct subsystem_init
+{
+    char        *init_name;
+    char        *destroy_name;
+    init_func    init;
+    destroy_func destroy;
+};
+
+#define SUBSYSTEM_INIT(INIT, DESTROY) { #INIT, #DESTROY, INIT, DESTROY }
+#define SUBSYSTEM_INIT_END { NULL, NULL, NULL, NULL }
+
+bool _ec_init_subsystems(struct subsystem_init *subsystems, ProcessContext *context);
+void _ec_destroy_subsystems(struct subsystem_init *subsystems, ProcessContext *context);
+void _ec_destroy_subsystems_from(struct subsystem_init *subsystems, int index, ProcessContext *context);
+int _ec_find_last_subsystem(struct subsystem_init *subsystems, ProcessContext *context);
 
 struct proc_dir_entry *g_cb_proc_dir;
 struct proc_dir_entry *g_cb_hashtbl_proc_dir;
@@ -157,105 +180,55 @@ static const struct file_operations ec_fops = {
 
 const char *PROC_STATE_FILENAME = CB_APP_MODULE_NAME "_state";
 
+/**
+ * Setup the module to come up as enabled when its loaded. Enabling the module, means it will
+ * start tracking processes. This should handle the following cases:
+ *
+ * - On a reboot, the module will be loaded before the agent starts up, but will have a
+ * more accurate state of the processes.
+ *
+ * - On a upgrade/reinstall the shutdown of the event-collector will disable the old module,
+ * and the startup of the new event-collector will insmod the new module.
+ * This new module will automatically come up as enabled.
+ *
+ */
+static struct subsystem_init s_module_init[] = {
+    SUBSYSTEM_INIT(ec_set_enableHooks,              NULL),
+    SUBSYSTEM_INIT(ec_findsyms_init,                NULL),
+    SUBSYSTEM_INIT(ec_mem_cache_init,               ec_mem_cache_shutdown),
+    SUBSYSTEM_INIT(ec_hashtbl_generic_init,         ec_hashtbl_generic_destoy),
+    SUBSYSTEM_INIT(ec_reader_init,                  NULL),
+    SUBSYSTEM_INIT(ec_module_state_info_initialize, ec_module_state_info_shutdown),
+    SUBSYSTEM_INIT(ec_do_lsm_initialize,            ec_do_lsm_shutdown),
+    SUBSYSTEM_INIT(ec_do_sys_initialize,            ec_do_sys_shutdown),
+    SUBSYSTEM_INIT(ec_user_devnode_init,            ec_user_devnode_close),
+    SUBSYSTEM_INIT(ec_hook_tracking_initialize,     ec_hook_tracking_shutdown),
+
+    SUBSYSTEM_INIT_END
+};
+
 int __init ec_init(void)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
-    // Here we look up symbols at runtime to fill in the CB_RESOLVED_SYMS struct.
-#undef CB_RESOLV_VARIABLE
-#undef CB_RESOLV_VARIABLE_LT4
-#undef CB_RESOLV_VARIABLE_GE4
-#undef CB_RESOLV_FUNCTION
-#undef CB_RESOLV_FUNCTION_310
-#if LINUX_VERSION_CODE <  KERNEL_VERSION(4, 0, 0)  //{
-#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME)
-#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
-#else  //}{
-#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
-#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME)
-#endif  //}
-#define CB_RESOLV_VARIABLE(V_TYPE, V_NAME) { #V_NAME, strlen(#V_NAME), (unsigned long *)&g_resolvedSymbols.V_NAME },
-#define CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_VARIABLE(F_TYPE, F_NAME)
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    #define CB_RESOLV_FUNCTION_310(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL)
-#else
-    #define CB_RESOLV_FUNCTION_310(F_TYPE, F_NAME, ARGS_DECL)
-#endif
-
-    struct symbols_s symbols[] = {
-            CB_RESOLV_SYMBOLS
-            { {0}, 0, 0 }
-    };
 
     TRACE(DL_INIT, "%s version %s (%s)",
            CB_APP_MODULE_NAME, CB_APP_VERSION_STRING, CB_APP_BUILD_DATE);
     //
     // Initialize Subsystems
     //
-
-    // Allow hooks to be enabled via module param
-    ec_set_enableHooks();
-
-    // Actually do the lookup
-    ec_findsyms_init(&context, symbols);
-
-    ec_mem_cache_init(&context);
-    ec_hashtbl_generic_init(&context);
-    ec_reader_init();
-
-    TRY_STEP(DEFAULT,    ec_module_state_info_initialize(&context));
-    TRY_STEP(STATE_INFO, ec_do_lsm_initialize(&context, g_enableHooks));
-    TRY_STEP(LSM,        ec_do_sys_initialize(&context, g_enableHooks));
-    TRY_STEP(SYSCALL,    ec_user_devnode_init(&context));
-    TRY_STEP(USER_DEV_NODE,  ec_hook_tracking_initialize(&context));
-
-    if (g_run_self_tests)
-    {
-        bool passed = false;
-
-        DISABLE_SEND_EVENTS(&context);
-        DISABLE_WAKE_UP(&context);
-
-        // We need everything initialized for running the self-tests but we don't
-        // want the hooks enabled so we do a separate init/shutdown just for the
-        // tests. The shutdown here will warn if we fail to free anything.
-        // Everything will be re-inited by ec_enable_module().
-        ec_sensor_enable_module_initialize_memory(&context);
-        passed = run_tests(&context);
-        ec_sensor_disable_module_shutdown(&context);
-
-        ENABLE_SEND_EVENTS(&context);
-        ENABLE_WAKE_UP(&context);
-
-        TRY_STEP(USER_DEV_NODE, passed);
-    }
-
-    /**
-     * Setup the module to come up as enabled when its loaded. Enabling the module, means it will
-     * start tracking processes. This should handle the following cases:
-     *
-     * - On a reboot, the module will be loaded before the agent starts up, but will have a
-     * more accurate state of the processes.
-     *
-     * - On a upgrade/reinstall the shutdown of the event-collector will disable the old module,
-     * and the startup of the new event-collector will insmod the new module.
-     * This new module will automatically come up as enabled.
-     *
-     */
-
-    TRY_STEP(USER_DEV_NODE, !ec_enable_module(&context));
+    TRY(_ec_init_subsystems(s_module_init, &context));
+    TRY_STEP(SUBSYSTEMS, ec_test_module(&context));
+    TRY_STEP(SUBSYSTEMS, ec_enable_module(&context));
 
     TRACE(DL_INIT, "Kernel sensor initialization complete");
     return 0;
 
-CATCH_USER_DEV_NODE:
-    ec_user_devnode_close(&context);
-CATCH_SYSCALL:
-    ec_do_sys_shutdown(&context, g_enableHooks);
-CATCH_LSM:
-    ec_do_lsm_shutdown(&context);
-CATCH_STATE_INFO:
-    ec_module_state_info_shutdown(&context);
+CATCH_SUBSYSTEMS:
+    // We get here after running the tests or the enable fails-
+    _ec_destroy_subsystems(s_module_init, &context);
+
 CATCH_DEFAULT:
+    TRACE(DL_ERROR, "Kernel sensor initialization failed");
     return -1;
 }
 
@@ -263,7 +236,7 @@ CATCH_DEFAULT:
 void ec_shutdown(ProcessContext *context)
 {
     // If the hooks have been modified abort the shutdown.
-    CANCEL_VOID_MSG(!(ec_do_sys_hooks_changed(context, g_enableHooks) || ec_do_lsm_hooks_changed(context, g_enableHooks)),
+    CANCEL_VOID_MSG(!(ec_do_sys_hooks_changed(context) || ec_do_lsm_hooks_changed(context)),
                     DL_WARNING, "Hooks have changed, unable to shutdown");
 
     /**
@@ -273,8 +246,8 @@ void ec_shutdown(ProcessContext *context)
      */
     CANCEL_VOID((ec_disable_module(context) == 0));
 
-    // Remove hooks
-    ec_do_sys_shutdown(context, g_enableHooks);
+    // Remove hooks from the first unload call.  These will be called again in the final unload, but that will be a no-op
+    ec_do_sys_shutdown(context);
     ec_do_lsm_shutdown(context);
 }
 
@@ -309,10 +282,7 @@ void __exit ec_cleanup(void)
         ssleep(5);
     }
 
-    ec_hook_tracking_shutdown(&context);
-    ec_module_state_info_shutdown(&context);
-    ec_hashtbl_generic_destoy(&context);
-    ec_mem_cache_shutdown(&context);
+    _ec_destroy_subsystems(s_module_init, &context);
 
     tracepoint_synchronize_unregister();
 
@@ -472,7 +442,7 @@ void ec_set_module_state(ProcessContext *context, ModuleState newState)
  *  making the calls to initialize memory.
  *
  */
-int ec_enable_module(ProcessContext *context)
+bool ec_enable_module(ProcessContext *context)
 {
     ec_write_lock(&g_module_state_info.module_state_lock, context);
 
@@ -481,17 +451,17 @@ int ec_enable_module(ProcessContext *context)
         case ModuleStateDisabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to enable module while module is in disabling state", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return -EPERM;
+            return false; //-EPERM;
 
         case ModuleStateEnabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to enable module while module is in enabling state", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return -EPERM;
+            return false; //-EPERM;
         case ModuleStateEnabled:
         {
             TRACE(DL_INFO, "%s Received a request to enable a module that's already enabled, so no-op. ", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return 0;
+            return true;
         }
         case ModuleStateDisabled:
         {
@@ -501,16 +471,13 @@ int ec_enable_module(ProcessContext *context)
             {
                 DECLARE_ATOMIC_CONTEXT(atomic_context, ec_getpid(current));
 
-                int result = ec_sensor_enable_module_initialize_memory(context);
-
-                if (result != 0)
+                if (!ec_sensor_enable_module_initialize_memory(context))
                 {
                     TRACE(DL_ERROR,
-                          "Call ec_sensor_enable_module_initialize_memory failed with error %d",
-                          result);
+                          "Call ec_sensor_enable_module_initialize_memory failed");
 
                     ec_set_module_state(context, ModuleStateDisabled);
-                    return result;
+                    return false;
                 }
 
                 ec_enumerate_and_track_all_tasks(&atomic_context);
@@ -523,61 +490,34 @@ int ec_enable_module(ProcessContext *context)
             break;
     }
 
-    return 0;
+    return true;
 }
 
+static struct subsystem_init s_module_enable[] = {
+    SUBSYSTEM_INIT(ec_disable_peer_modules,           NULL),
+    SUBSYSTEM_INIT(ec_path_buffers_init,              ec_path_buffers_shutdown),
+    SUBSYSTEM_INIT(ec_proc_initialize,                ec_proc_shutdown),
+    SUBSYSTEM_INIT(ec_path_cache_init,                ec_path_cache_shutdown),
+    SUBSYSTEM_INIT(ec_user_comm_initialize,           ec_user_comm_shutdown),
+    SUBSYSTEM_INIT(ec_logger_initialize,              ec_logger_shutdown),
+    SUBSYSTEM_INIT(ec_process_tracking_initialize,    ec_process_tracking_shutdown),
+    SUBSYSTEM_INIT(ec_net_tracking_initialize,        ec_net_tracking_shutdown),
+    SUBSYSTEM_INIT(ec_netfilter_initialize,           ec_netfilter_cleanup),
+    SUBSYSTEM_INIT(ec_network_hooks_initialize,       ec_network_hooks_shutdown),
+    SUBSYSTEM_INIT(ec_banning_initialize,             ec_banning_shutdown),
+    SUBSYSTEM_INIT(ec_InitializeNetworkIsolation,     ec_DestroyNetworkIsolation),
+    SUBSYSTEM_INIT(ec_file_helper_init,               NULL),
+    SUBSYSTEM_INIT(ec_task_initialize,                ec_task_shutdown),
+    SUBSYSTEM_INIT(ec_file_tracking_init,             ec_file_tracking_shutdown),
+    SUBSYSTEM_INIT(ec_stats_proc_initialize,          ec_stats_proc_shutdown),
+    SUBSYSTEM_INIT(ec_stall_events_initialize,        ec_stall_events_shutdown),
 
-int ec_sensor_enable_module_initialize_memory(ProcessContext *context)
+    SUBSYSTEM_INIT_END
+};
+
+bool ec_sensor_enable_module_initialize_memory(ProcessContext *context)
 {
-    TRY_STEP(DEFAULT,   ec_disable_peer_modules(context));
-    TRY_STEP(DEFAULT,   ec_path_buffers_init(context));
-    TRY_STEP(BUFFERS,   ec_proc_initialize(context));
-    TRY_STEP(PROC_DIR,  ec_path_cache_init(context));
-    TRY_STEP(FILE_CACHE, ec_user_comm_initialize(context));
-    TRY_STEP(USER_COMM, ec_logger_initialize(context));
-    TRY_STEP(LOGGER,    ec_process_tracking_initialize(context));
-    TRY_STEP(PROC,      ec_net_tracking_initialize(context));
-    TRY_STEP(NET_TR,    ec_netfilter_initialize(context));
-    TRY_STEP(NET_FILT,  ec_network_hooks_initialize(context, g_enableHooks));
-    TRY_STEP(NET_HOOK,  ec_banning_initialize(context));
-    TRY_STEP(BAN,       !ec_InitializeNetworkIsolation(context));
-    TRY_STEP(NET_IS,    ec_file_helper_init(context));
-    TRY_STEP(NET_IS,    ec_task_initialize(context));
-    TRY_STEP(TASK,      ec_file_tracking_init(context));
-    TRY_STEP(FILE_PROC, ec_stats_proc_initialize(context));
-    TRY_STEP(STALL,     ec_stall_events_initialize(context));
-
-    return 0;
-CATCH_STALL:
-    ec_stats_proc_shutdown(context);
-CATCH_FILE_PROC:
-    ec_file_tracking_shutdown(context);
-CATCH_TASK:
-    ec_task_shutdown(context);
-CATCH_NET_IS:
-    ec_DestroyNetworkIsolation(context);
-CATCH_BAN:
-    ec_banning_shutdown(context);
-CATCH_NET_HOOK:
-    ec_network_hooks_shutdown(context, g_enableHooks);
-CATCH_NET_FILT:
-    ec_netfilter_cleanup(context);
-CATCH_NET_TR:
-    ec_net_tracking_shutdown(context);
-CATCH_PROC:
-    ec_process_tracking_shutdown(context);
-CATCH_LOGGER:
-    ec_logger_shutdown(context);
-CATCH_USER_COMM:
-    ec_user_comm_shutdown(context);
-CATCH_FILE_CACHE:
-    ec_path_cache_shutdown(context);
-CATCH_PROC_DIR:
-    ec_proc_shutdown(context);
-CATCH_BUFFERS:
-    ec_path_buffers_shutdown(context);
-CATCH_DEFAULT:
-    return -ENOMEM;
+    return _ec_init_subsystems(s_module_enable, context);
 }
 
 void ec_sensor_disable_module_shutdown(ProcessContext *context)
@@ -586,21 +526,7 @@ void ec_sensor_disable_module_shutdown(ProcessContext *context)
      * Shutdown the different subsystems, note order is important here.
      * Need to shutdown subsystems in the reverse order of dependency.
      */
-    ec_stall_events_shutdown(context);
-    ec_stats_proc_shutdown(context);
-    ec_file_tracking_shutdown(context);
-    ec_task_shutdown(context);
-    ec_DestroyNetworkIsolation(context);
-    ec_banning_shutdown(context);
-    ec_network_hooks_shutdown(context, g_enableHooks);
-    ec_netfilter_cleanup(context);
-    ec_net_tracking_shutdown(context);
-    ec_process_tracking_shutdown(context);
-    ec_logger_shutdown(context);
-    ec_user_comm_shutdown(context);
-    ec_path_cache_shutdown(context);
-    ec_path_buffers_shutdown(context);
-    ec_proc_shutdown(context);
+    _ec_destroy_subsystems(s_module_enable, context);
 }
 
 bool ec_disable_peer_modules(ProcessContext *context)
@@ -683,14 +609,15 @@ void ec_proc_shutdown(ProcessContext *context)
 #endif
 }
 
-void ec_set_enableHooks(void)
+bool ec_set_enableHooks(ProcessContext *context)
 {
     uint64_t local_enableHooks = 0;
     int strto_ret;
 
     if (!enableHooksStr[0])
     {
-        return;
+        // Nothing to do
+        return true;
     }
 
     enableHooksStr[HOOK_MASK_LEN - 1] = 0;
@@ -704,20 +631,107 @@ void ec_set_enableHooks(void)
     case -ERANGE:
         TRACE(DL_ERROR, "param(g_enableHooks:%s) = ERANGE\n",
               enableHooksStr);
-        return;
+        return false;
 
     case -EINVAL:
         TRACE(DL_ERROR, "param(g_enableHooks:%s) = EINVAL\n",
               enableHooksStr);
-        return;
+        return false;
 
     default:
         TRACE(DL_ERROR, "param(g_enableHooks:%s) = %d\n", enableHooksStr,
               strto_ret);
-        return;
+        return false;
     }
 
     TRACE(DL_INIT, "g_enableHooks: %#018llx\n", g_enableHooks);
+
+    return true;
+}
+
+bool __init ec_test_module(ProcessContext *context)
+{
+    bool passed = false;
+
+    // Only do something if tests are enabled
+    CANCEL(g_run_self_tests, true);
+
+    DISABLE_SEND_EVENTS(context);
+    DISABLE_WAKE_UP(context);
+
+    // We need everything initialized for running the self-tests but we don't
+    // want the hooks enabled so we do a separate init/shutdown just for the
+    // tests. The shutdown here will warn if we fail to free anything.
+    // Everything will be re-inited by ec_enable_module().
+    ec_sensor_enable_module_initialize_memory(context);
+    passed = run_tests(context);
+    ec_sensor_disable_module_shutdown(context);
+
+    ENABLE_SEND_EVENTS(context);
+    ENABLE_WAKE_UP(context);
+
+    return passed;
+}
+
+bool _ec_init_subsystems(struct subsystem_init *subsystems, ProcessContext *context)
+{
+    int i = 0;
+
+    CANCEL(subsystems, false);
+
+    // This will call all the init functions and stop if one fails
+    for (; subsystems[i].init_name != NULL; ++i)
+    {
+        if (subsystems[i].init)
+        {
+            if (!subsystems[i].init(context))
+            {
+                break;
+            }
+        }
+    }
+
+    if (subsystems[i].init_name != NULL)
+    {
+        // An init function failed, so walk backwards from the failure to destroy everything
+        _ec_destroy_subsystems_from(subsystems, i, context);
+
+        return false;
+    }
+
+    return true;
+}
+
+void _ec_destroy_subsystems(struct subsystem_init *subsystems, ProcessContext *context)
+{
+    // Call the destroy function for all subsystems
+    int last_index = _ec_find_last_subsystem(subsystems, context);
+
+    _ec_destroy_subsystems_from(subsystems, last_index, context);
+}
+
+void _ec_destroy_subsystems_from(struct subsystem_init *subsystems, int index, ProcessContext *context)
+{
+    CANCEL_VOID(subsystems);
+
+    for (; index >= 0; --index)
+    {
+        if (subsystems[index].destroy)
+        {
+            subsystems[index].destroy(context);
+        }
+    }
+}
+
+int _ec_find_last_subsystem(struct subsystem_init *subsystems, ProcessContext *context)
+{
+    int i = 0;
+
+    CANCEL(subsystems, -1);
+
+    for (; subsystems[i].init_name != NULL; ++i);
+
+    return i - 1;
 }
 
 module_init(ec_init);

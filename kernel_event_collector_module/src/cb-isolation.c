@@ -35,12 +35,12 @@ VOID RELEASE_RESOURCE(ProcessContext *context)
     ec_write_unlock(&_pControlLock, context);
 }
 
-NTSTATUS ec_InitializeNetworkIsolation(ProcessContext *context)
+bool ec_InitializeNetworkIsolation(ProcessContext *context)
 {
     ec_spinlock_init(&_pControlLock, context);
     CBIsolationMode = IsolationModeOff;
     _isInitialized = TRUE;
-    return STATUS_SUCCESS;
+    return true;
 }
 
 VOID ec_DestroyNetworkIsolation(ProcessContext *context)

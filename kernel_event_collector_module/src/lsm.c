@@ -46,7 +46,7 @@ static unsigned int cblsm_hooks_count;
 static struct security_hook_list cblsm_hooks[64];  // [0..39] not needed?
 #endif  //}
 
-bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
+bool ec_do_lsm_initialize(ProcessContext *context)
 {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     TRY_CB_RESOLVED(security_ops);
@@ -62,7 +62,7 @@ bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
     TRACE(DL_INFO, "Other LSM named %s", g_original_ops_ptr->name);
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
-        if (enableHooks & CB__LSM_##NAME) \
+        if (g_enableHooks & CB__LSM_##NAME) \
             g_combined_ops.NAME = ec_lsm_##NAME; \
     } while (0)
 
@@ -72,7 +72,7 @@ bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks)
     memset(cblsm_hooks, 0, sizeof(cblsm_hooks));
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
-        if (enableHooks & CB__LSM_##NAME) { \
+        if (g_enableHooks & CB__LSM_##NAME) { \
             pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &security_hook_heads.NAME, #NAME); \
             cblsm_hooks[cblsm_hooks_count].head = &security_hook_heads.NAME; \
             cblsm_hooks[cblsm_hooks_count].hook.NAME = ec_lsm_##NAME; \
@@ -123,19 +123,19 @@ CATCH_DEFAULT:
 
 // KERNEL_VERSION(4,0,0) and above say this is none of our business
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks)
+bool ec_do_lsm_hooks_changed(ProcessContext *context)
 {
     bool changed = false;
     struct security_operations *secops = *CB_RESOLVED(security_ops);
 
-    if (enableHooks & CB__LSM_bprm_check_security) changed |= secops->bprm_check_security  != ec_lsm_bprm_check_security;
-    if (enableHooks & CB__LSM_bprm_committed_creds) changed |= secops->bprm_committed_creds != ec_lsm_bprm_committed_creds;
+    if (g_enableHooks & CB__LSM_bprm_check_security) changed |= secops->bprm_check_security  != ec_lsm_bprm_check_security;
+    if (g_enableHooks & CB__LSM_bprm_committed_creds) changed |= secops->bprm_committed_creds != ec_lsm_bprm_committed_creds;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-    if (enableHooks & CB__LSM_mmap_file) changed |= secops->mmap_file != ec_lsm_mmap_file;
+    if (g_enableHooks & CB__LSM_mmap_file) changed |= secops->mmap_file != ec_lsm_mmap_file;
 #else
-    if (enableHooks & CB__LSM_file_mmap) changed |= secops->file_mmap != ec_lsm_file_mmap;
+    if (g_enableHooks & CB__LSM_file_mmap) changed |= secops->file_mmap != ec_lsm_file_mmap;
 #endif
-    if (enableHooks & CB__LSM_file_free_security) changed |= secops->file_free_security != ec_lsm_file_free_security;
+    if (g_enableHooks & CB__LSM_file_free_security) changed |= secops->file_free_security != ec_lsm_file_free_security;
 
     return changed;
 }
@@ -155,6 +155,7 @@ void ec_do_lsm_shutdown(ProcessContext *context)
 #else  // }{ >= KERNEL_VERSION(4,0,0)
         security_delete_hooks(cblsm_hooks, cblsm_hooks_count);
 #endif  //}
+        g_lsmRegistered = false;
     } else
     {
         TRACE(DL_WARNING, "ec_LSM not registered so not unregistering");

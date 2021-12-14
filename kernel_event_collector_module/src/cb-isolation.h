@@ -77,7 +77,7 @@ typedef struct _CB_ISOLATION_STATS {
     ULONGLONG   isolationAllowedOutboundIp6Packets;
 } CB_ISOLATION_STATS, *PCB_ISOLATION_STATS;
 
-NTSTATUS ec_InitializeNetworkIsolation(ProcessContext *context);
+bool ec_InitializeNetworkIsolation(ProcessContext *context);
 
 VOID ec_DestroyNetworkIsolation(ProcessContext *context);
 

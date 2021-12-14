@@ -57,9 +57,11 @@ inline void *__ec_get_key_ptr(HashTbl *hashTblp, void *datap)
     return (void *) datap + hashTblp->key_offset;
 }
 
-void ec_hashtbl_generic_init(ProcessContext *context)
+bool ec_hashtbl_generic_init(ProcessContext *context)
 {
     ec_spinlock_init(&s_hashtbl_generic_lock, context);
+
+    return true;
 }
 
 void ec_hashtbl_generic_destoy(ProcessContext *context)

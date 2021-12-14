@@ -248,29 +248,29 @@ void __ec_unregister_kprobe(struct kretprobe *probe, uint64_t enableHooks, uint6
     probe->kp.addr = NULL;
 }
 
-bool ec_network_hooks_initialize(ProcessContext *context, uint64_t enableHooks)
+bool ec_network_hooks_initialize(ProcessContext *context)
 {
-    TRY(__ec_register_kprobe(&recvdatagram_probe, enableHooks, CB__KP_udp_recv));
-    TRY(__ec_register_kprobe(&udp_sendmsg_probe, enableHooks, CB__KP_udp_sendmsg));
-    TRY(__ec_register_kprobe(&udpv6_sendmsg_probe, enableHooks, CB__KP_udpv6_sendmsg));
-    TRY(__ec_register_kprobe(&accept_probe, enableHooks, CB__KP_tcp_accept));
-    TRY(__ec_register_kprobe(&tcp_v4_connect_probe, enableHooks, CB__KP_tcp_connect));
-    TRY(__ec_register_kprobe(&tcp_v6_connect_probe, enableHooks, CB__KP_tcpv6_connect));
+    TRY(__ec_register_kprobe(&recvdatagram_probe, g_enableHooks, CB__KP_udp_recv));
+    TRY(__ec_register_kprobe(&udp_sendmsg_probe, g_enableHooks, CB__KP_udp_sendmsg));
+    TRY(__ec_register_kprobe(&udpv6_sendmsg_probe, g_enableHooks, CB__KP_udpv6_sendmsg));
+    TRY(__ec_register_kprobe(&accept_probe, g_enableHooks, CB__KP_tcp_accept));
+    TRY(__ec_register_kprobe(&tcp_v4_connect_probe, g_enableHooks, CB__KP_tcp_connect));
+    TRY(__ec_register_kprobe(&tcp_v6_connect_probe, g_enableHooks, CB__KP_tcpv6_connect));
 
     return true;
 CATCH_DEFAULT:
-    ec_network_hooks_shutdown(context, enableHooks);
+    ec_network_hooks_shutdown(context);
     return false;
 }
 
-void ec_network_hooks_shutdown(ProcessContext *context, uint64_t enableHooks)
+void ec_network_hooks_shutdown(ProcessContext *context)
 {
-    __ec_unregister_kprobe(&recvdatagram_probe, enableHooks, CB__KP_udp_recv);
-    __ec_unregister_kprobe(&udp_sendmsg_probe, enableHooks, CB__KP_udp_sendmsg);
-    __ec_unregister_kprobe(&udpv6_sendmsg_probe, enableHooks, CB__KP_udpv6_sendmsg);
-    __ec_unregister_kprobe(&accept_probe, enableHooks, CB__KP_tcp_accept);
-    __ec_unregister_kprobe(&tcp_v4_connect_probe, enableHooks, CB__KP_tcp_connect);
-    __ec_unregister_kprobe(&tcp_v6_connect_probe, enableHooks, CB__KP_tcpv6_connect);
+    __ec_unregister_kprobe(&recvdatagram_probe, g_enableHooks, CB__KP_udp_recv);
+    __ec_unregister_kprobe(&udp_sendmsg_probe, g_enableHooks, CB__KP_udp_sendmsg);
+    __ec_unregister_kprobe(&udpv6_sendmsg_probe, g_enableHooks, CB__KP_udpv6_sendmsg);
+    __ec_unregister_kprobe(&accept_probe, g_enableHooks, CB__KP_tcp_accept);
+    __ec_unregister_kprobe(&tcp_v4_connect_probe, g_enableHooks, CB__KP_tcp_connect);
+    __ec_unregister_kprobe(&tcp_v6_connect_probe, g_enableHooks, CB__KP_tcpv6_connect);
 }
 
 void __ec_handle_net_event(char *msg,

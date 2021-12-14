@@ -190,9 +190,10 @@ static struct delayed_work stats_work;
 void ec_stats_work_task(struct work_struct *work);
 static uint32_t g_stats_work_delay;
 
-void ec_reader_init(void)
+bool ec_reader_init(ProcessContext *context)
 {
     atomic_set(&reader_pid, 0);
+    return true;
 }
 
 bool ec_is_reader_connected(void)
@@ -1180,7 +1181,7 @@ int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
         break;
 
     case CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR:
-        result = ec_enable_module(context);
+        result = ec_enable_module(context) ? 0 : 1;
         break;
 
     case CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR:
