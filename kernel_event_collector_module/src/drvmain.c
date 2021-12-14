@@ -41,6 +41,7 @@ uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
 uint32_t ec_prsock_buflen;
 bool     g_run_self_tests;
 bool     g_enable_hook_tracking;
+bool     g_enable_mem_cache_tracking __read_mostly;
 
 CB_DRIVER_CONFIG g_driver_config = {
     .processes =            ALL_FORKS_AND_EXITS,
@@ -57,6 +58,7 @@ module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP)
 module_param(ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_enable_hook_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_enable_mem_cache_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 // Store string param to later on convert to unsigned long long
 module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);

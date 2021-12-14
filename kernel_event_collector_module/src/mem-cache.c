@@ -9,6 +9,8 @@
 
 #include "cb-spinlock.h"
 
+extern bool g_enable_mem_cache_tracking __read_mostly;
+
 static struct
 {
     uint64_t          lock;
@@ -102,7 +104,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
             TRACE(DL_ERROR, "Destroying Memory Cache (%s) with %" PRFu64 " allocated items.",
                    cache->name, (unsigned long long)allocated_count);
 
-            if (printval_callback)
+            if (g_enable_mem_cache_tracking && printval_callback)
             {
                 ec_write_lock(&cache->lock, context);
                 list_for_each_entry(cb, &cache->allocation_list, list)
@@ -153,9 +155,12 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
 
             cache_buffer->magic = CACHE_BUFFER_MAGIC;
 
-            ec_write_lock(&cache->lock, context);
-            list_add(&cache_buffer->list, &cache->allocation_list);
-            ec_write_unlock(&cache->lock, context);
+            if (g_enable_mem_cache_tracking)
+            {
+                ec_write_lock(&cache->lock, context);
+                list_add(&cache_buffer->list, &cache->allocation_list);
+                ec_write_unlock(&cache->lock, context);
+            }
 
             percpu_counter_inc(&cache->allocated_count);
 
@@ -174,9 +179,12 @@ void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context
 
         if (cache_buffer->magic == CACHE_BUFFER_MAGIC)
         {
-            ec_write_lock(&cache->lock, context);
-            list_del(&cache_buffer->list);
-            ec_write_unlock(&cache->lock, context);
+            if (g_enable_mem_cache_tracking)
+            {
+                ec_write_lock(&cache->lock, context);
+                list_del(&cache_buffer->list);
+                ec_write_unlock(&cache->lock, context);
+            }
 
             kmem_cache_free(cache->kmem_cache, (void *)cache_buffer);
             percpu_counter_dec(&cache->allocated_count);
