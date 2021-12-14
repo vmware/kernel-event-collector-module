@@ -19,7 +19,6 @@
 #include "cb-banning.h"
 #include "hook-tracking.h"
 #include "tests/run-tests.h"
-#include "stall-event.h"
 #include "path-cache.h"
 
 #ifdef HOOK_SELECTOR
@@ -510,7 +509,6 @@ static struct subsystem_init s_module_enable[] = {
     SUBSYSTEM_INIT(ec_task_initialize,                ec_task_shutdown),
     SUBSYSTEM_INIT(ec_file_tracking_init,             ec_file_tracking_shutdown),
     SUBSYSTEM_INIT(ec_stats_proc_initialize,          ec_stats_proc_shutdown),
-    SUBSYSTEM_INIT(ec_stall_events_initialize,        ec_stall_events_shutdown),
 
     SUBSYSTEM_INIT_END
 };
