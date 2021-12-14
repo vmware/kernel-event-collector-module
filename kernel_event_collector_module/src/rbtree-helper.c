@@ -39,7 +39,7 @@ bool ec_rbtree_init(CB_RBTREE *tree,
         tree->get_ref     = get_ref;
         tree->put_ref     = put_ref;
         ec_spinlock_init(&tree->lock, context);
-        atomic64_set(&tree->count, 0);
+        ec_percpu_counter_init(&tree->count, 0, GFP_MODE(context));
         return true;
     }
 
@@ -57,7 +57,7 @@ void ec_rbtree_destroy(CB_RBTREE *tree, ProcessContext *context)
         tree->get_ref = NULL;
         tree->put_ref = NULL;
         ec_spinlock_destroy(&tree->lock, context);
-        atomic64_set(&tree->count, 0);
+        percpu_counter_destroy(&tree->count);
     }
 }
 
@@ -157,7 +157,7 @@ bool ec_rbtree_insert(CB_RBTREE *tree, void *new_data, ProcessContext *context)
             // Link the node to its parent and then rebalance the tree
             rb_link_node(new_node, parent, insert_point);
             rb_insert_color(new_node, &(tree->root));
-            atomic64_inc(&tree->count);
+            percpu_counter_inc(&tree->count);
             tree->get_ref(new_data, context);
 
             didInsert = true;
@@ -224,7 +224,7 @@ bool __ec_rbtree_delete_locked(CB_RBTREE *tree, void *data, ProcessContext *cont
         if (!RB_EMPTY_NODE(node))
         {
             rb_erase(node, &tree->root);
-            ATOMIC64_DEC__CHECK_NEG(&tree->count);
+            percpu_counter_dec(&tree->count);
 
             didDelete = true;
         }
@@ -272,7 +272,7 @@ void __ec_rotate_child(struct rb_node *node)
 void ec_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
 {
     struct rb_node *node;
-    uint64_t count = 0;
+    int64_t count = 0;
 
     if (__ec_is_valid_tree(tree))
     {
@@ -304,12 +304,12 @@ void ec_rbtree_clear(CB_RBTREE *tree, ProcessContext *context)
                 }
 
                 // Decrement the counter and delete the node
-                ATOMIC64_DEC__CHECK_NEG(&tree->count);
+                percpu_counter_dec(&tree->count);
                 tree->put_ref(data, context);
             }
         }
 
-        count = atomic64_read(&tree->count);
+        count = percpu_counter_sum_positive(&tree->count);
         if (count != 0)
         {
             TRACE(DL_ERROR, "CB_RBTREE still has %lld elements after being cleared!", count);

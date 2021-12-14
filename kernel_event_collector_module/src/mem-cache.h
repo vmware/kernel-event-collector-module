@@ -6,6 +6,7 @@
 
 #include <linux/list.h>
 #include <linux/seq_file.h>
+#include <linux/percpu_counter.h>
 
 #include "process-context.h"
 
@@ -15,7 +16,7 @@ typedef struct CB_MEM_CACHE {
     struct list_head   node;
     struct list_head   allocation_list;
     uint64_t           lock;
-    atomic64_t         allocated_count;
+    struct percpu_counter allocated_count;
     struct kmem_cache *kmem_cache;
     uint32_t           object_size;
     uint8_t            name[CB_MEM_CACHE_NAME_LEN + 1];
@@ -34,6 +35,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
 
 void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context);
 void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context);
+int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context);
 
 /* private */
 void *__ec_mem_cache_alloc_generic(const size_t size, ProcessContext *context, bool doVirtualAlloc, const char *fn, uint32_t line);
@@ -62,3 +64,4 @@ void *ec_mem_cache_get_generic(void *value, ProcessContext *context);
 size_t ec_mem_cache_get_size_generic(const void *value);
 char *ec_mem_cache_strdup(const char *src, ProcessContext *context);
 char *ec_mem_cache_strdup_x(const char *src, size_t *len, ProcessContext *context);
+int64_t ec_mem_cache_generic_allocated_size(ProcessContext *context);

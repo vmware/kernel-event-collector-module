@@ -168,6 +168,8 @@ HashTbl *ec_hashtbl_init_generic(
     hashTblp->delete_callback = delete_callback;
     hashTblp->handle_callback = handle_callback;
     hashTblp->lruSize = lruSize;
+    hashTblp->tableShutdown = false;
+    ec_percpu_counter_init(&hashTblp->tableInstance, 0, GFP_MODE(context));
 
     if (lruSize > 0)
     {
@@ -217,7 +219,7 @@ void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
     unsigned int i;
 
     CANCEL_VOID(hashTblp != NULL);
-    atomic64_set(&(hashTblp->tableShutdown), 1);
+    hashTblp->tableShutdown = true;
 
     __ec_hashtbl_proc_shutdown(hashTblp, context);
 
@@ -228,14 +230,16 @@ void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
     __ec_hashtbl_for_each_generic(hashTblp, __ec_hashtbl_delete_callback, NULL, true, context);
 
     HASHTBL_PRINT("hash shutdown inst=%" PRFs64 " alloc=%" PRFs64 "\n",
-        (long long)atomic64_read(&(hashTblp->tableInstance)),
-        (long long)atomic64_read(&(hashTblp->hash_cache.allocated_count)));
+        percpu_counter_sum_positive(&hashTblp->tableInstance),
+        ec_mem_cache_get_allocated_count(&hashTblp->hash_cache, context));
 
     for (i = 0; i < hashTblp->numberOfBuckets; i++)
     {
         ec_spinlock_destroy(&hashTblp->tablePtr[i].lock, context);
     }
 
+
+    percpu_counter_destroy(&hashTblp->tableInstance);
     ec_plru_destroy(&hashTblp->plru, context);
     ec_mem_cache_destroy(&hashTblp->hash_cache, context, NULL);
     ec_mem_cache_free_generic(hashTblp);
@@ -254,10 +258,7 @@ void ec_hashtbl_write_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_gener
     {
         return;
     }
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return;
-    }
+    CANCEL_VOID(!hashTblp->tableShutdown);
 
     __ec_hashtbl_for_each_generic(hashTblp, callback, priv, true, context);
 }
@@ -268,10 +269,7 @@ void ec_hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generi
     {
         return;
     }
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return;
-    }
+    CANCEL_VOID(!hashTblp->tableShutdown);
 
     __ec_hashtbl_for_each_generic(hashTblp, callback, priv, false, context);
 }
@@ -320,7 +318,7 @@ void __ec_hashtbl_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_c
                     BUG_ON(!haveWriteLock);
                     hlist_del(&nodep->link);
                     --bucketp->itemCount;
-                    atomic64_dec(&(hashTblp->tableInstance));
+                    percpu_counter_dec(&hashTblp->tableInstance);
                     ec_hashtbl_free_generic(hashTblp, nodep, context);
                     break;
                 case ACTION_STOP:
@@ -414,12 +412,9 @@ int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, P
         return -EINVAL;
     }
 
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return -1;
-    }
+    CANCEL(!hashTblp->tableShutdown, -1);
 
-    if (hashTblp->lruSize > 0 && atomic64_read(&(hashTblp->tableInstance)) >= hashTblp->lruSize)
+    if (hashTblp->lruSize > 0 && percpu_counter_read_positive(&hashTblp->tableInstance) >= hashTblp->lruSize)
     {
         // Evict from the LRU
         //  Note this happens before we enforce uniqueness, which may result in evicting an item without adding a new item.
@@ -472,11 +467,11 @@ int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, P
 
     hlist_add_head(&nodep->link, &bucketp->head);
     ++bucketp->itemCount;
+    percpu_counter_inc(&hashTblp->tableInstance);
     if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
     {
         atomic64_inc(__ec_get_refcountp(hashTblp, datap));
     }
-    atomic64_inc(&(hashTblp->tableInstance));
 
 CATCH_DEFAULT:
     ec_hashtbl_bkt_write_unlock(bucketp, context);
@@ -508,10 +503,7 @@ void *ec_hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *conte
         return NULL;
     }
 
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return NULL;
-    }
+    CANCEL(!hashTblp->tableShutdown, NULL);
 
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
@@ -572,14 +564,7 @@ int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, vo
     {
         hlist_del_init(&nodep->link);
         --bucketp->itemCount;
-
-        if (atomic64_read(&(hashTblp->tableInstance)) == 0)
-        {
-            HASHTBL_PRINT("ec_hashtbl_del: underflow!!\n");
-        } else
-        {
-            atomic64_dec(&(hashTblp->tableInstance));
-        }
+        percpu_counter_dec(&hashTblp->tableInstance);
 
         // The only reason this should happen is if ec_hashtbl_del_generic and
         // ec_hashtbl_put_generic are called out of order,
@@ -613,10 +598,7 @@ void *ec_hashtbl_del_by_key_generic(HashTbl *hashTblp, void *key, ProcessContext
         return NULL;
     }
 
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return NULL;
-    }
+    CANCEL(!hashTblp->tableShutdown, NULL);
 
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
@@ -653,7 +635,7 @@ void ec_hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *cont
 
     CANCEL_VOID(hashTblp != NULL);
     CANCEL_VOID(datap != NULL);
-    CANCEL_VOID(atomic64_read(&(hashTblp->tableShutdown)) != 1);
+    CANCEL_VOID(!hashTblp->tableShutdown);
 
     nodep = __ec_get_nodep(hashTblp, datap);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, nodep->hash);
@@ -664,11 +646,11 @@ void ec_hashtbl_del_generic(HashTbl *hashTblp, void *datap, ProcessContext *cont
     ec_hashtbl_bkt_write_unlock(bucketp, context);
 }
 
-uint64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context)
+int64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context)
 {
     CANCEL(hashTblp, 0);
 
-    return atomic64_read(&(hashTblp->tableInstance));
+    return percpu_counter_sum_positive(&hashTblp->tableInstance);
 }
 
 void *ec_hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
@@ -677,7 +659,7 @@ void *ec_hashtbl_alloc_generic(HashTbl *hashTblp, ProcessContext *context)
     HashTableNode *nodep;
 
     CANCEL(hashTblp != NULL, NULL);
-    CANCEL(atomic64_read(&(hashTblp->tableShutdown)) != 1, NULL);
+    CANCEL(!hashTblp->tableShutdown, NULL);
 
     datap = ec_mem_cache_alloc(&hashTblp->hash_cache, context);
     CANCEL(datap, NULL);
@@ -748,10 +730,7 @@ bool __ec_hashtbl_bkt_lock(bool haveWriteLock, HashTbl *hashTblp, void *key, voi
         return false;
     }
 
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return false;
-    }
+    CANCEL(!hashTblp->tableShutdown, NULL);
 
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
@@ -819,10 +798,7 @@ HashTableBkt *__ec_hashtbl_find_bucket(HashTbl *hashTblp, void *key)
         return NULL;
     }
 
-    if (atomic64_read(&(hashTblp->tableShutdown)) == 1)
-    {
-        return NULL;
-    }
+    CANCEL(!hashTblp->tableShutdown, NULL);
 
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
@@ -881,7 +857,7 @@ void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m
 {
     int bucket_index = 0;
     int output_size = 0;
-    struct counter *items = ec_mem_cache_alloc_generic(sizeof(struct counter) * hashTblp->numberOfBuckets, context);
+    struct counter *items = ec_mem_cache_valloc_generic(sizeof(struct counter) * hashTblp->numberOfBuckets, context);
 
     memset(items, 0, ec_mem_cache_get_size_generic(items));
 
@@ -935,7 +911,7 @@ int __ec_hashtable_show(struct seq_file *m, void *v)
     seq_printf(m, "%20s : %20s\n", "Name", hashTblp->name);
     seq_printf(m, "%20s : %20llu\n", "Bucket Count", hashTblp->numberOfBuckets);
     seq_printf(m, "%20s : %20llu\n", "LRU Size", hashTblp->lruSize);
-    seq_printf(m, "%20s : %20lld\n", "Item Count", (uint64_t)atomic64_read(&(hashTblp->tableInstance)));
+    seq_printf(m, "%20s : %20lld\n", "Item Count", percpu_counter_sum_positive(&hashTblp->tableInstance));
     seq_puts(m, "\n");
 
     ec_hastable_bkt_show(hashTblp, (hastable_print_func)seq_printf, m, &context);

@@ -37,7 +37,7 @@ CATCH_DISABLED:
 
     for_each_possible_cpu(cpu)
     {
-        ASSERT_TRY(atomic64_read(&per_cpu(module_active_inuse, cpu)) == 0);
+        ASSERT_TRY(per_cpu(module_active_inuse, cpu) == 0);
     }
     passed = true;
 
@@ -60,7 +60,7 @@ bool __init test__hook_tracking_add_del(ProcessContext *context)
     ec_hook_tracking_add_entry(&test_context, __func__);
 
     ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 1);
-    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->last_pid) == current_pid);
+    ASSERT_TRY(test_context.percpu_hook_tracking->last_pid == current_pid);
 
     // This is here to exercise this code since there's no easy way to force it to run.
     ec_hook_tracking_print_active(&test_context);

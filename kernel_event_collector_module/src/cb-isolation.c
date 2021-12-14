@@ -38,15 +38,15 @@ VOID RELEASE_RESOURCE(ProcessContext *context)
 NTSTATUS ec_InitializeNetworkIsolation(ProcessContext *context)
 {
     ec_spinlock_init(&_pControlLock, context);
-    atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
-    atomic_set((atomic_t *)&_isInitialized, TRUE);
+    CBIsolationMode = IsolationModeOff;
+    _isInitialized = TRUE;
     return STATUS_SUCCESS;
 }
 
 VOID ec_DestroyNetworkIsolation(ProcessContext *context)
 {
-    atomic_set((atomic_t *)&_isInitialized, FALSE);
-    atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
+    _isInitialized = FALSE;
+    CBIsolationMode = IsolationModeOff;
 
     if (ACQUIRE_RESOURCE(context))
     {
@@ -64,7 +64,7 @@ VOID ec_DestroyNetworkIsolation(ProcessContext *context)
 
 VOID ec_SetNetworkIsolationMode(ProcessContext *context, CB_ISOLATION_MODE isolationMode)
 {
-    atomic_set((atomic_t *)&CBIsolationMode, isolationMode);
+    CBIsolationMode = isolationMode;
     g_cbIsolationStats.isolationEnabled = isolationMode == IsolationModeOn;
 
     if (g_cbIsolationStats.isolationEnabled)
@@ -80,7 +80,7 @@ VOID ec_SetNetworkIsolationMode(ProcessContext *context, CB_ISOLATION_MODE isola
 
 VOID ec_DisableNetworkIsolation(ProcessContext *context)
 {
-    atomic_set((atomic_t *)&CBIsolationMode, IsolationModeOff);
+    CBIsolationMode = IsolationModeOff;
     g_cbIsolationStats.isolationEnabled = FALSE;
     ec_netfilter_disable(context);
 
@@ -150,7 +150,7 @@ CATCH_DEFAULT:
 
 CB_ISOLATION_MODE ec_GetCurrentIsolationMode(ProcessContext *context)
 {
-    return atomic_read((atomic_t *)&CBIsolationMode);
+    return CBIsolationMode;
 }
 
 VOID ec_IsolationIntercept(ProcessContext *context,
@@ -159,7 +159,7 @@ VOID ec_IsolationIntercept(ProcessContext *context,
 {
 
     // immediate allow if isolation mode is not on
-    if (atomic_read((atomic_t *)&CBIsolationMode) == IsolationModeOff)
+    if (CBIsolationMode == IsolationModeOff)
     {
         isolationResult->isolationAction = IsolationActionDisabled;
         return;
@@ -200,7 +200,7 @@ VOID ec_IsolationInterceptByAddrProtoPort(
     UINT16 port;
 
     // immediate allow if isolation mode is not on
-    if (atomic_read((atomic_t *)&CBIsolationMode) == IsolationModeOff)
+    if (CBIsolationMode == IsolationModeOff)
     {
         isolationResult->isolationAction = IsolationActionDisabled;
         return;
