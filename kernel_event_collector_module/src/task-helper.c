@@ -9,6 +9,7 @@
 #include "path-buffers.h"
 
 #include <linux/binfmts.h>
+#include <linux/printk.h>
 
 struct file *__ec_get_file_from_mm(struct mm_struct *mm);
 
@@ -29,6 +30,18 @@ pid_t ec_getcurrentpid(void)
 
 pid_t ec_getppid(struct task_struct const *task)
 {
+    if (!task)
+    {
+        static uint8_t counter;
+
+        pr_err("task is NULL");
+        if (counter < 3)
+        {
+            dump_stack();
+            counter++;
+        }
+        return -1;
+    }
     if (task->real_parent) // @@review: use parent?
     {
         return ec_getpid(task->real_parent);
