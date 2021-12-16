@@ -10,7 +10,7 @@
 #include <asm/uaccess.h>
 #include "priv.h"
 #include "findsyms.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 
 #define CB_APP_NAME CB_APP_PROC_DIR
 
@@ -155,7 +155,7 @@ bool ec_lookup_peer_module_symbols(ProcessContext *context, struct list_head *pe
     }
 
     PUSH_GFP_MODE(context, GFP_MODE(context) | __GFP_ZERO);
-    symbols = ec_mem_cache_alloc_generic(sizeof(struct symbols_s) * (peer_module_count + 1), context);
+    symbols = ec_mem_alloc(sizeof(struct symbols_s) * (peer_module_count + 1), context);
     POP_GFP_MODE(context);
 
     i = 0;
@@ -177,7 +177,7 @@ bool ec_lookup_peer_module_symbols(ProcessContext *context, struct list_head *pe
 Exit:
     if (symbols != NULL)
     {
-        ec_mem_cache_free_generic(symbols);
+        ec_mem_free(symbols);
     }
 
     return result;
@@ -204,7 +204,7 @@ bool __ec_lookup_peer_modules(ProcessContext *context, struct list_head *output_
     }
 
     PUSH_GFP_MODE(context, GFP_MODE(context) | __GFP_ZERO);
-    buffer = (char *)ec_mem_cache_alloc_generic(CB_KALLSYMS_BUFFER*sizeof(unsigned char), context);
+    buffer = (char *)ec_mem_alloc(CB_KALLSYMS_BUFFER*sizeof(unsigned char), context);
     POP_GFP_MODE(context);
     if (buffer == NULL)
     {
@@ -257,7 +257,7 @@ bool __ec_lookup_peer_modules(ProcessContext *context, struct list_head *output_
                      *  The strcmp in the if condition will make sure
                      *  that this module does not add an entry for itself.
                      */
-                    PEER_MODULE *temp = (PEER_MODULE *) ec_mem_cache_alloc_generic(sizeof(PEER_MODULE), context);
+                    PEER_MODULE *temp = (PEER_MODULE *) ec_mem_alloc(sizeof(PEER_MODULE), context);
 
                     temp->module_name[0] = 0;
                     strncat(temp->module_name, module_name, sizeof(temp->module_name) - 1);
@@ -271,7 +271,7 @@ bool __ec_lookup_peer_modules(ProcessContext *context, struct list_head *output_
 Exit:
     if (buffer != NULL)
     {
-        ec_mem_cache_free_generic(buffer);
+        ec_mem_free(buffer);
         buffer = NULL;
     }
     if (pFile != NULL)
@@ -296,7 +296,7 @@ void ec_free_peer_module_symbols(struct list_head *peer_modules)
     list_for_each_entry_safe(elem, next, peer_modules, list)
     {
         list_del_init(&elem->list);
-        ec_mem_cache_free_generic(elem);
+        ec_mem_free(elem);
         elem = NULL;
     }
 }

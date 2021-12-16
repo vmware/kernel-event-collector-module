@@ -81,6 +81,7 @@ set(SOURCE_FILES drvmain.c
         page-helpers.c
         path-buffers.c
         mem-cache.c
+        mem-alloc.c
         rbtree-helper.c
         file-helper.c
         file-hooks.c

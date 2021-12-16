@@ -1,6 +1,7 @@
 // Copyright 2021 VMware Inc.  All rights reserved.
 
 #include "run-tests.h"
+#include "mem-cache.h"
 
 bool __init test__mem_cache_create_destroy(ProcessContext *context);
 bool __init test__mem_cache_alloc(ProcessContext *context);

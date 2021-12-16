@@ -5,6 +5,7 @@
 #include "process-tracking-private.h"
 #include "priv.h"
 #include "cb-spinlock.h"
+#include "mem-alloc.h"
 
 // Helper logic to sort the tracking table
 typedef struct SORTED_PROCESS_TREE {
@@ -65,7 +66,7 @@ int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, vo
     if (posix_identity)
     {
         // Insert each process entry into a rb_tree sorted by the start time
-        SORTED_PROCESS *value = ec_mem_cache_alloc_generic(sizeof(SORTED_PROCESS), context);
+        SORTED_PROCESS *value = ec_mem_alloc(sizeof(SORTED_PROCESS), context);
 
         if (value)
         {
@@ -74,7 +75,7 @@ int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, vo
             value->pid        = posix_identity->pt_key.pid;
             if (!ec_rbtree_insert(&data->tree, value, context))
             {
-                ec_mem_cache_free_generic(value);
+                ec_mem_free(value);
             }
         }
     } else
@@ -117,5 +118,5 @@ void __ec_rbtree_get_ref(void *data, ProcessContext *context)
 
 void __ec_rbtree_put_ref(void *data, ProcessContext *context)
 {
-    ec_mem_cache_free_generic(data);
+    ec_mem_free(data);
 }

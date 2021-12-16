@@ -5,6 +5,7 @@
 #include "priv.h"
 #include "hash-table-generic.h"
 #include "cb-spinlock.h"
+#include "mem-alloc.h"
 
 bool __ec_hashtbl_proc_initialize(HashTbl * hashTblp, ProcessContext *context);
 void __ec_hashtbl_proc_shutdown(HashTbl *hashTblp, ProcessContext *context);
@@ -42,7 +43,7 @@ void ec_hashtable_debug_off(void)
 char *__ec_key_in_hex(ProcessContext *context, unsigned char *key, int key_len)
 {
     int i;
-    char *str = (char *) ec_mem_cache_alloc_generic(key_len * 3, context);
+    char *str = (char *) ec_mem_alloc(key_len * 3, context);
 
     for (i = 0; i < key_len; i++)
     {
@@ -134,7 +135,7 @@ HashTbl *ec_hashtbl_init_generic(
     //kmalloc however, it should be noted that this is a little less efficient. The reason for this is
     //fragmentation that can occur on systems. We noticed this happening in the field, and if highly
     //fragmented, our driver will fail to load with a normal kmalloc
-    tbl_storage_p  = ec_mem_cache_valloc_generic(tableSize, context);
+    tbl_storage_p  = ec_mem_valloc(tableSize, context);
 
 
     if (tbl_storage_p  == NULL)
@@ -184,7 +185,7 @@ HashTbl *ec_hashtbl_init_generic(
     {
         if (!ec_mem_cache_create(&hashTblp->hash_cache, hashtble_name, cache_elem_size, context))
         {
-            ec_mem_cache_free_generic(hashTblp);
+            ec_mem_free(hashTblp);
             return 0;
         }
     }
@@ -244,7 +245,7 @@ void ec_hashtbl_shutdown_generic(HashTbl *hashTblp, ProcessContext *context)
     percpu_counter_destroy(&hashTblp->tableInstance);
     ec_plru_destroy(&hashTblp->plru, context);
     ec_mem_cache_destroy(&hashTblp->hash_cache, context, NULL);
-    ec_mem_cache_free_generic(hashTblp);
+    ec_mem_free(hashTblp);
 }
 
 void ec_hashtbl_clear_generic(HashTbl *hashTblp, ProcessContext *context)
@@ -456,7 +457,7 @@ int __ec_hashtbl_add_generic(HashTbl *hashTblp, void *datap, bool forceUnique, P
     {
         key_str = __ec_key_in_hex(context, key, hashTblp->key_len);
         HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        ec_mem_cache_free_generic(key_str);
+        ec_mem_free(key_str);
     }
 
     ec_hashtbl_bkt_write_lock(bucketp, context);
@@ -515,7 +516,7 @@ void *ec_hashtbl_get_generic(HashTbl *hashTblp, void *key, ProcessContext *conte
     {
         key_str = __ec_key_in_hex(context, key, hashTblp->key_len);
         HASHTBL_PRINT("%s: bucket=%llu key=%s\n", __func__, bucket_indx, key_str);
-        ec_mem_cache_free_generic(key_str);
+        ec_mem_free(key_str);
     }
 
     ec_hashtbl_bkt_read_lock(bucketp, context);
@@ -859,9 +860,9 @@ void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m
 {
     int bucket_index = 0;
     int output_size = 0;
-    struct counter *items = ec_mem_cache_valloc_generic(sizeof(struct counter) * hashTblp->numberOfBuckets, context);
+    struct counter *items = ec_mem_valloc(sizeof(struct counter) * hashTblp->numberOfBuckets, context);
 
-    memset(items, 0, ec_mem_cache_get_size_generic(items));
+    memset(items, 0, ec_mem_size(items));
 
     for (; bucket_index < hashTblp->numberOfBuckets; ++bucket_index)
     {
@@ -901,7 +902,7 @@ void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m
         _print(m, "%20llu : %20llu\n", items[bucket_index].itemCount, items[bucket_index].bucketCount);
     }
 
-    ec_mem_cache_free_generic(items);
+    ec_mem_free(items);
 }
 
 int __ec_hashtable_show(struct seq_file *m, void *v)

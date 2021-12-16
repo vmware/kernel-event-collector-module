@@ -7,6 +7,7 @@
 #include "task-helper.h"
 #include "cb-test.h"
 #include "priv.h"
+#include "mem-alloc.h"
 
 static HashTbl * s_file_cache;
 
@@ -74,10 +75,10 @@ PathData *ec_path_cache_add(
         value->key.ns_id = ns_id;
         value->key.device = device;
         value->key.inode = inode;
-        value->path = ec_mem_cache_get_generic(path, context);
+        value->path = ec_mem_get(path, context);
         value->path_found = !!path; // It is possible that the path will be NULL now but set later
         value->file_id = ec_get_current_time(); // Use this as a unique ID
-        value->is_special_file = ec_is_special_file(value->path, ec_mem_cache_get_size_generic(value->path));
+        value->is_special_file = ec_is_special_file(value->path, ec_mem_size(value->path));
         value->fs_magic = fs_magic;
         atomic64_set(&value->reference_count, 1);
 
@@ -125,7 +126,7 @@ void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
     {
         PathData *value = (PathData *)data;
 
-        ec_mem_cache_put_generic(value->path);
+        ec_mem_put(value->path);
         value->path = NULL;
     }
 }

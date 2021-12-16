@@ -3,7 +3,7 @@
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "cb-spinlock.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 #include "task-helper.h"
 
 #include <linux/version.h>
@@ -97,7 +97,7 @@ typedef struct {
 
 void ec_spinlock_init(uint64_t *sp, ProcessContext *context)
 {
-    linuxSpinlock_t *new_spinlock = ec_mem_cache_alloc_generic(sizeof(linuxSpinlock_t), context);
+    linuxSpinlock_t *new_spinlock = ec_mem_alloc(sizeof(linuxSpinlock_t), context);
 
     if (new_spinlock)
     {
@@ -202,5 +202,5 @@ void ec_spinlock_destroy(uint64_t *sp, ProcessContext *context)
         }
     });
     //  pr_err("%s sp=%p\n", __FUNCTION__, spinlockp);
-    ec_mem_cache_free_generic((linuxSpinlock_t *)spinlockp);
+    ec_mem_free((linuxSpinlock_t *)spinlockp);
 }

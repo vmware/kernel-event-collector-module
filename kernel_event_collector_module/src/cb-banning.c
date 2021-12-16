@@ -12,6 +12,7 @@
 #include "hash-table-generic.h"
 #include "process-tracking.h"
 #include "event-factory.h"
+#include "mem-alloc.h"
 
 typedef struct bl_table_key {
     uint64_t    device;
@@ -267,7 +268,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
         temp = list_entry(pos, RUNNING_PROCESSES_TO_BAN, list);
         ec_process_tracking_put_handle(temp->process_handle, context);
         list_del(pos);
-        ec_mem_cache_free_generic(temp);
+        ec_mem_free(temp);
     }
 
     memset(&sRunningInodesToBan, 0, sizeof(RUNNING_BANNED_INODE_S));

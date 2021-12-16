@@ -36,32 +36,3 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
 void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context);
 void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context);
 int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context);
-
-/* private */
-void *__ec_mem_cache_alloc_generic(const size_t size, ProcessContext *context, bool doVirtualAlloc, const char *fn, uint32_t line);
-void __ec_mem_cache_free_generic(void *value, const char *fn, uint32_t line);
-/* end private */
-
-
-// Define this to enable memory leak debugging
-//  This will track all memory allocations in a list with record of the source function
-//  NOTE: This list is not protectd by a lock, so it is absolutely for debug only.
-//        a. Our locks allocate memory
-//        b. The free function does not currently accept a `context`, and always using GFP_ATOMIC causes issues
-#ifdef MEM_DEBUG
-#  define ec_mem_cache_alloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, false, __func__, __LINE__)
-#  define ec_mem_cache_valloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, true, __func__, __LINE__)
-#  define ec_mem_cache_free_generic(VALUE) __ec_mem_cache_free_generic(VALUE, __func__, __LINE__)
-#  define ec_mem_cache_put_generic(VALUE) __ec_mem_cache_free_generic(VALUE, __func__, __LINE__)
-#else
-#  define ec_mem_cache_alloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, false, NULL, __LINE__)
-#  define ec_mem_cache_valloc_generic(SIZE, CONTEXT) __ec_mem_cache_alloc_generic(SIZE, CONTEXT, true, NULL, __LINE__)
-#  define ec_mem_cache_free_generic(VALUE) __ec_mem_cache_free_generic(VALUE, NULL, __LINE__)
-#  define ec_mem_cache_put_generic(VALUE) __ec_mem_cache_free_generic(VALUE, NULL, __LINE__)
-#endif
-
-void *ec_mem_cache_get_generic(void *value, ProcessContext *context);
-size_t ec_mem_cache_get_size_generic(const void *value);
-char *ec_mem_cache_strdup(const char *src, ProcessContext *context);
-char *ec_mem_cache_strdup_x(const char *src, size_t *len, ProcessContext *context);
-int64_t ec_mem_cache_generic_allocated_size(ProcessContext *context);

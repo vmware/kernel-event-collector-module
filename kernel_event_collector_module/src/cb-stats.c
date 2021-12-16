@@ -10,6 +10,7 @@
 
 #include "priv.h"
 #include "mem-cache.h"
+#include "mem-alloc.h"
 
 typedef int     (*fp_readCallback)  (struct seq_file *m, void *v);
 typedef ssize_t (*fp_writeCallback) (struct file *, const char __user *, size_t, loff_t *);

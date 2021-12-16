@@ -7,6 +7,7 @@
 #include "priv.h"
 #include "process-tracking.h"
 #include "path-buffers.h"
+#include "mem-alloc.h"
 
 #include <linux/binfmts.h>
 #include <linux/printk.h>
@@ -109,7 +110,7 @@ PathData *ec_task_get_path_data(struct task_struct const *task, char *path_buffe
     if (path_data && !path_data->path_found)
     {
         // If we did not find a path, set in now.
-        path_data->path = ec_mem_cache_strdup(task->comm, context);
+        path_data->path = ec_mem_strdup(task->comm, context);
     }
 
     return path_data;
@@ -334,7 +335,7 @@ void ec_enumerate_and_track_all_tasks(ProcessContext *context)
 
     // Allocate stack space for walking the process tree
     //  We allocate one more than we need, so that the logic never accesses invalid memory
-    stack       = ec_mem_cache_alloc_generic((MAX_TASK_STACK + 1) * sizeof(struct task_stack), context);
+    stack       = ec_mem_alloc((MAX_TASK_STACK + 1) * sizeof(struct task_stack), context);
     path_buffer = ec_get_path_buffer(context);
     start_time  = ec_get_current_time() - TO_WIN_SEC(2);
 
@@ -400,7 +401,7 @@ void ec_enumerate_and_track_all_tasks(ProcessContext *context)
 CATCH_DEFAULT:
     rcu_read_unlock();
     ec_put_path_buffer(path_buffer);
-    ec_mem_cache_free_generic(stack);
+    ec_mem_free(stack);
 }
 
 bool __ec_add_tracking_for_child_and_update_stack(

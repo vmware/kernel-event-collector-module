@@ -13,6 +13,7 @@
 #include "file-process-tracking.h"
 #include "cb-isolation.h"
 #include "mem-cache.h"
+#include "mem-alloc.h"
 #include "net-helper.h"
 #include "path-buffers.h"
 #include "cb-spinlock.h"
@@ -194,6 +195,7 @@ const char *PROC_STATE_FILENAME = CB_APP_MODULE_NAME "_state";
 static struct subsystem_init s_module_init[] = {
     SUBSYSTEM_INIT(ec_set_enableHooks,              NULL),
     SUBSYSTEM_INIT(ec_findsyms_init,                NULL),
+    SUBSYSTEM_INIT(ec_mem_init,                     ec_mem_shutdown),
     SUBSYSTEM_INIT(ec_mem_cache_init,               ec_mem_cache_shutdown),
     SUBSYSTEM_INIT(ec_hashtbl_generic_init,         ec_hashtbl_generic_destoy),
     SUBSYSTEM_INIT(ec_reader_init,                  NULL),

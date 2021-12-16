@@ -4,6 +4,7 @@
 
 #include "path-buffers.h"
 #include "mem-cache.h"
+#include "mem-alloc.h"
 #include "process-context.h"
 #include "task-helper.h"
 

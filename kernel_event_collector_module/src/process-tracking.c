@@ -12,6 +12,7 @@
 #include "event-factory.h"
 #include "path-buffers.h"
 #include "cb-spinlock.h"
+#include "mem-alloc.h"
 
 void ec_hashtbl_delete_callback(void *posix_identity, ProcessContext *context);
 void *ec_hashtbl_handle_callback(void *posix_identity, ProcessContext *context);
@@ -622,7 +623,7 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
 
         // Free the path and commandline
         ec_path_cache_put(exec_identity->path_data, context);
-        ec_mem_cache_put_generic(exec_identity->cmdline);
+        ec_mem_put(exec_identity->cmdline);
 
         exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
 

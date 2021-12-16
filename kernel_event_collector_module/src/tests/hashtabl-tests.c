@@ -2,6 +2,7 @@
 
 #include "hash-table-generic.h"
 #include "run-tests.h"
+#include "mem-alloc.h"
 
 typedef struct table_key {
     uint64_t id;
@@ -63,8 +64,8 @@ bool __init test__hash_table_add_get_del(ProcessContext *context)
 
     int size = 102400;
     int i, result;
-    struct table_key *keys = (struct table_key *)ec_mem_cache_alloc_generic(sizeof(struct table_key) * size, context);
-    struct table_value *values = (struct table_value *)ec_mem_cache_alloc_generic(sizeof(struct table_value) * size, context);
+    struct table_key *keys = (struct table_key *)ec_mem_alloc(sizeof(struct table_key) * size, context);
+    struct table_value *values = (struct table_value *)ec_mem_alloc(sizeof(struct table_value) * size, context);
     struct entry *entry_ptr;
 
     //Test ec_hashtbl_alloc and ec_hashtbl_add
@@ -131,8 +132,8 @@ bool __init test__hash_table_add_get_del(ProcessContext *context)
     pr_alert("Hash table tests all passed.\n");
     passed = true;
 test_exit:
-    ec_mem_cache_free_generic(keys);
-    ec_mem_cache_free_generic(values);
+    ec_mem_free(keys);
+    ec_mem_free(values);
     ec_hashtbl_shutdown_generic(table, context);
 
     return passed;
@@ -329,7 +330,7 @@ bool __init __test__hashtbl_lru_lookup(
 
     ASSERT_TRY(table);
 
-    data = ec_mem_cache_alloc_generic(data_size * sizeof(uint64_t), context);
+    data = ec_mem_alloc(data_size * sizeof(uint64_t), context);
 
     for (i = 0; i < insertion_count; ++i)
     {
@@ -338,7 +339,7 @@ bool __init __test__hashtbl_lru_lookup(
 
         if (i % data_size == 0)
         {
-            get_random_bytes(data, ec_mem_cache_get_size_generic(data));
+            get_random_bytes(data, ec_mem_size(data));
         }
         tdata->key.id = data[i % data_size];
 
@@ -348,7 +349,7 @@ bool __init __test__hashtbl_lru_lookup(
             ec_hashtbl_free_generic(table, tdata, context);
         }
     }
-    ec_mem_cache_free_generic(data);
+    ec_mem_free(data);
 
     count = ec_hashtbl_get_count(table, context);
     overage = (count - lru_size) * 100 / lru_size;
