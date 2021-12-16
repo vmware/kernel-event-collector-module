@@ -18,9 +18,29 @@ typedef struct entry {
     struct table_value value;
 } Entry;
 
+bool __init test__hash_table_add_get_del(ProcessContext *context);
+bool __init test__hashtbl_double_del(ProcessContext *context);
+bool __init test__hashtbl_refcount_double_del(ProcessContext *context);
+bool __init test__hashtbl_refcount(ProcessContext *context);
+bool __init test__hashtbl_add_duplicate(ProcessContext *context);
+bool __init test__hashtbl_lru_lookup(ProcessContext *context);
 static void __vprintk(void *, const char *, ...);
 
-HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_delete_cb delete_callback)
+bool __init test__hash_table(ProcessContext *context)
+{
+    DECLARE_TEST();
+
+    RUN_TEST(test__hash_table_add_get_del(context));
+    RUN_TEST(test__hashtbl_double_del(context));
+    RUN_TEST(test__hashtbl_refcount_double_del(context));
+    RUN_TEST(test__hashtbl_refcount(context));
+    RUN_TEST(test__hashtbl_add_duplicate(context));
+    RUN_TEST(test__hashtbl_lru_lookup(context));
+
+    RETURN_RESULT();
+}
+
+HashTbl * __init init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_delete_cb delete_callback)
 {
     return ec_hashtbl_init_generic(context,
                               1024,
@@ -36,7 +56,7 @@ HashTbl * init_hashtbl(ProcessContext *context, int refcount_offset, hashtbl_del
                               NULL);
 }
 
-bool __init test__hash_table(ProcessContext *context)
+bool __init test__hash_table_add_get_del(ProcessContext *context)
 {
     bool passed = false;
     HashTbl *table = init_hashtbl(context, HASHTBL_DISABLE_REF_COUNT, NULL);

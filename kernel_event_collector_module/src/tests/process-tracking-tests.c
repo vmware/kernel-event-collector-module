@@ -3,6 +3,17 @@
 #include "process-tracking.h"
 #include "run-tests.h"
 
+bool __init test__proc_track_report_double_exit(ProcessContext *context);
+
+bool __init test__proc_tracking(ProcessContext *context)
+{
+    DECLARE_TEST();
+
+    RUN_TEST(test__proc_track_report_double_exit(context));
+
+    RETURN_RESULT();
+}
+
 // NOTE: On kernel 3.10 and up this test produces a WARN because we don't
 // expect this scenario to happen, but it's worth exercising the code path to
 // check that the code handles the failure path in case somehow we do hit it.
