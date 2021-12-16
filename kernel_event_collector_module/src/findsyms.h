@@ -9,7 +9,7 @@ struct symbols_s {
     unsigned char len;  // strlen(name)
     unsigned long *addr;
 };
-int  ec_findsyms_init(ProcessContext *context, struct symbols_s *p_symbols);
+bool  ec_findsyms_init(ProcessContext *context);
 void ec_lookup_symbols(ProcessContext *context, struct symbols_s *p_symbols);
 int  ec_verify_symbols(ProcessContext *context, struct symbols_s *p_symbols);
 

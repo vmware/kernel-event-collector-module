@@ -3,6 +3,19 @@
 #include "cb-spinlock.h"
 #include "run-tests.h"
 
+bool __init test__begin_finish_macros(ProcessContext *context);
+bool __init test__hook_tracking_add_del(ProcessContext *context);
+
+bool __init test__module_state(ProcessContext *context)
+{
+    DECLARE_TEST();
+
+    RUN_TEST(test__begin_finish_macros(context));
+    RUN_TEST(test__hook_tracking_add_del(context));
+
+    RETURN_RESULT();
+}
+
 // This verifies multiple BEGIN/FINISH disable check macros in the same
 // hook function. See ec_sys_rename for an example.
 bool __init test__begin_finish_macros(ProcessContext *context)

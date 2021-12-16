@@ -25,7 +25,7 @@ typedef struct CB_MEM_CACHE {
 typedef void (*memcache_printval_cb)(void *value, ProcessContext *context);
 
 
-void ec_mem_cache_init(ProcessContext *context);
+bool ec_mem_cache_init(ProcessContext *context);
 void ec_mem_cache_shutdown(ProcessContext *context);
 size_t ec_mem_cache_get_memory_usage(ProcessContext *context);
 int ec_mem_cache_show(struct seq_file *m, void *v);

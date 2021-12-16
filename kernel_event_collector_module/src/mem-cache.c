@@ -34,19 +34,22 @@ static const size_t CACHE_BUFFER_SZ = sizeof(cache_buffer_t);
 // Get the size of this string, and subtract the `\0`
 #define MEM_CACHE_PREFIX_LEN   (sizeof(MEM_CACHE_PREFIX) - 1)
 
-void ec_mem_cache_init(ProcessContext *context)
+bool ec_mem_cache_init(ProcessContext *context)
 {
     ec_percpu_counter_init(&s_mem_cache.generic_buffer_count, 0, GFP_MODE(context));
     s_mem_cache.generic_buffer_size = ec_alloc_percpu(int64_t, GFP_MODE(context));
     INIT_LIST_HEAD(&s_mem_cache.list);
 
-    if (!s_mem_cache.generic_buffer_size)
-    {
-        TRACE(DL_ERROR, "%s: Error allocating memory", __func__);
-    }
+    TRY_MSG(s_mem_cache.generic_buffer_size, DL_ERROR, "%s: Error allocating memory", __func__);
 
     // ec_spinlock_init calls ec_mem_cache_alloc_generic, all initialization needs to happen before this call
     ec_spinlock_init(&s_mem_cache.lock, context);
+
+    return true;
+
+CATCH_DEFAULT:
+    percpu_counter_destroy(&s_mem_cache.generic_buffer_count);
+    return false;
 }
 
 void ec_mem_cache_shutdown(ProcessContext *context)

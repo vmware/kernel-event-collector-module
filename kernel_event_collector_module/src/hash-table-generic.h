@@ -67,7 +67,7 @@ typedef struct hash_table_node {
     u32 activity;
 } HashTableNode;
 
-void ec_hashtbl_generic_init(ProcessContext *context);
+bool ec_hashtbl_generic_init(ProcessContext *context);
 void ec_hashtbl_generic_destoy(ProcessContext *context);
 
 typedef int (*hashtbl_for_each_generic_cb)(HashTbl *tblp, HashTableNode *datap, void *priv, ProcessContext *context);

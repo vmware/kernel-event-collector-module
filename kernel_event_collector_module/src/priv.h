@@ -114,19 +114,19 @@ extern uint32_t g_max_queue_size_pri2;
 // Module Helpers
 //
 void ec_shutdown(ProcessContext *context);
-int ec_enable_module(ProcessContext *context);
+bool ec_enable_module(ProcessContext *context);
 int ec_disable_module(ProcessContext *context);
 ModuleState ec_get_module_state(ProcessContext *context);
 bool ec_is_reader_connected(void);
 bool ec_disconnect_reader(pid_t pid);
-void ec_reader_init(void);
+bool ec_reader_init(ProcessContext *context);
 
 // ------------------------------------------------
 // Linux Security Module Helpers
 //
-extern bool ec_do_lsm_initialize(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_do_lsm_initialize(ProcessContext *context);
 extern void ec_do_lsm_shutdown(ProcessContext *context);
-extern bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_do_lsm_hooks_changed(ProcessContext *context);
 
 // ------------------------------------------------
 // Linux Syscall Hook Helpers
@@ -134,9 +134,9 @@ extern bool ec_do_lsm_hooks_changed(ProcessContext *context, uint64_t enableHook
 #define GPF_DISABLE write_cr0(read_cr0() & (~0x10000))
 #define GPF_ENABLE  write_cr0(read_cr0() | 0x10000)
 
-extern bool ec_do_sys_initialize(ProcessContext *context, uint64_t enableHooks);
-extern void ec_do_sys_shutdown(ProcessContext *context, uint64_t enableHooks);
-extern bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks);
+extern bool ec_do_sys_initialize(ProcessContext *context);
+extern void ec_do_sys_shutdown(ProcessContext *context);
+extern bool ec_do_sys_hooks_changed(ProcessContext *context);
 extern void ec_sys_clone(ProcessContext *context, struct task_struct *task);
 
 extern struct security_operations *g_original_ops_ptr;

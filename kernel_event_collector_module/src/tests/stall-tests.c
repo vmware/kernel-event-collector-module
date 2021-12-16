@@ -7,6 +7,33 @@
 
 #include <linux/kthread.h>
 
+bool __init test__stall_enable(ProcessContext *context);
+bool __init test__perm_id(ProcessContext *context);
+bool __init test__perm_id_disabled(ProcessContext *context);
+bool __init test__stall_timedout(ProcessContext *context);
+bool __init test__stall_event_EPERM(ProcessContext *context);
+bool __init test__stall_one_during_disable(ProcessContext *context);
+bool __init test__kthread_may_stall(void);
+bool __init test__insmod_may_stall(void);
+bool __init test__stall_event_abort(ProcessContext *context);
+
+bool __init test__stall(ProcessContext *context)
+{
+    DECLARE_TEST();
+
+    RUN_TEST(test__stall_enable(context));
+    RUN_TEST(test__perm_id(context));
+    RUN_TEST(test__perm_id_disabled(context));
+    RUN_TEST(test__stall_timedout(context));
+    RUN_TEST(test__stall_event_EPERM(context));
+    RUN_TEST(test__stall_one_during_disable(context));
+    RUN_TEST(test__kthread_may_stall());
+    RUN_TEST(test__insmod_may_stall());
+    RUN_TEST(test__stall_event_abort(context));
+
+    RETURN_RESULT();
+}
+
 bool __init test__stall_enable(ProcessContext *context)
 {
     bool passed = false;

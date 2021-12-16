@@ -159,20 +159,22 @@ void restore_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 }
 #endif
 
-bool ec_do_sys_initialize(ProcessContext *context, uint64_t enableHooks)
+static bool s_hooks_replaced;
+
+bool ec_do_sys_initialize(ProcessContext *context)
 {
     bool rval = false;
     p_sys_call_table syscall_table;
 
     // If the hooks are not enabled, then no point in continuing.
-    if (!(enableHooks & SYSCALL_HOOK_MASK)) return true;
+    if (!(g_enableHooks & SYSCALL_HOOK_MASK)) return true;
 
     // Find the syscall table addresses.
     TRY_CB_RESOLVED(sys_call_table);
     syscall_table = CB_RESOLVED(sys_call_table);
 
     __ec_save_old_hooks(syscall_table);
-    rval = __ec_set_new_hooks(syscall_table, enableHooks);
+    rval = __ec_set_new_hooks(syscall_table, g_enableHooks);
 
     // Handle special cases for 32-bit system calls.
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -182,16 +184,17 @@ bool ec_do_sys_initialize(ProcessContext *context, uint64_t enableHooks)
         TRY_CB_RESOLVED(ia32_sys_call_table);
         syscall_table_i32 = CB_RESOLVED(ia32_sys_call_table);
 
-        rval &= set_new_32bit_hooks(syscall_table_i32, enableHooks);
+        rval &= set_new_32bit_hooks(syscall_table_i32, g_enableHooks);
     }
 #endif
 
 CATCH_DEFAULT:
+    s_hooks_replaced = rval;
     return rval;
 }
 
 
-bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks)
+bool ec_do_sys_hooks_changed(ProcessContext *context)
 {
     bool changed = false;
     p_sys_call_table syscall_table;
@@ -199,20 +202,22 @@ bool ec_do_sys_hooks_changed(ProcessContext *context, uint64_t enableHooks)
     TRY_CB_RESOLVED(sys_call_table);
     syscall_table = CB_RESOLVED(sys_call_table);
 
-    if (enableHooks & CB__NR_delete_module) changed |= syscall_table[__NR_delete_module] != ec_sys_delete_module;
+    if (g_enableHooks & CB__NR_delete_module) changed |= syscall_table[__NR_delete_module] != ec_sys_delete_module;
 CATCH_DEFAULT:
     return changed;
 }
 
 
-void ec_do_sys_shutdown(ProcessContext *context, uint64_t enableHooks)
+void ec_do_sys_shutdown(ProcessContext *context)
 {
     p_sys_call_table syscall_table;
+
+    TRY(s_hooks_replaced);
 
     TRY_CB_RESOLVED(sys_call_table);
     syscall_table = CB_RESOLVED(sys_call_table);
 
-    __ec_restore_hooks(syscall_table, enableHooks);
+    __ec_restore_hooks(syscall_table, g_enableHooks);
 
     // Handle special cases for 32-bit system calls.
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -222,9 +227,10 @@ void ec_do_sys_shutdown(ProcessContext *context, uint64_t enableHooks)
         TRY_CB_RESOLVED(ia32_sys_call_table);
         syscall_table_i32 = CB_RESOLVED(ia32_sys_call_table);
 
-        restore_32bit_hooks(syscall_table_i32, enableHooks);
+        restore_32bit_hooks(syscall_table_i32, g_enableHooks);
     }
 #endif
+    s_hooks_replaced = false;
 
 CATCH_DEFAULT:
     return;

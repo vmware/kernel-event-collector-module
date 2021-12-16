@@ -4,6 +4,21 @@
 #include "plru.h"
 #include "run-tests.h"
 
+bool __init test__plru_init(ProcessContext *context);
+bool __init test__plru_find_inactive(ProcessContext *context);
+bool __init test__plru_mark_active(ProcessContext *context);
+
+bool __init test__plru(ProcessContext *context)
+{
+    DECLARE_TEST();
+
+    RUN_TEST(test__plru_init(context));
+    RUN_TEST(test__plru_find_inactive(context));
+    RUN_TEST(test__plru_mark_active(context));
+
+    RETURN_RESULT();
+}
+
 bool __init test__plru_init(ProcessContext *context)
 {
     bool passed = false;

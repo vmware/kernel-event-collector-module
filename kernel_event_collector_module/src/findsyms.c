@@ -414,12 +414,39 @@ CATCH_DEFAULT:
     set_fs(oldfs);
 }
 
-int ec_findsyms_init(ProcessContext *context, struct symbols_s *p_symbols)
+    // Here we look up symbols at runtime to fill in the CB_RESOLVED_SYMS struct.
+#undef CB_RESOLV_VARIABLE
+#undef CB_RESOLV_VARIABLE_LT4
+#undef CB_RESOLV_VARIABLE_GE4
+#undef CB_RESOLV_FUNCTION
+#undef CB_RESOLV_FUNCTION_310
+#if LINUX_VERSION_CODE <  KERNEL_VERSION(4, 0, 0)  //{
+#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME)
+#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+#else  //}{
+#define CB_RESOLV_VARIABLE_GE4(V_TYPE, V_NAME) CB_RESOLV_VARIABLE(V_TYPE, V_NAME)
+#define CB_RESOLV_VARIABLE_LT4(V_TYPE, V_NAME)
+#endif  //}
+#define CB_RESOLV_VARIABLE(V_TYPE, V_NAME) { #V_NAME, strlen(#V_NAME), (unsigned long *)&g_resolvedSymbols.V_NAME },
+#define CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_VARIABLE(F_TYPE, F_NAME)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+    #define CB_RESOLV_FUNCTION_310(F_TYPE, F_NAME, ARGS_DECL) CB_RESOLV_FUNCTION(F_TYPE, F_NAME, ARGS_DECL)
+#else
+    #define CB_RESOLV_FUNCTION_310(F_TYPE, F_NAME, ARGS_DECL)
+#endif
+
+bool ec_findsyms_init(ProcessContext *context)
 {
-        ec_lookup_symbols(context, p_symbols);
-        if (ec_verify_symbols(context, p_symbols) < 0) {
-                TRACE(DL_INIT, "%s failed", __func__);
-                return -ENOTSUPP;
-        }
-        return 0;
+    struct symbols_s symbols[] = {
+            CB_RESOLV_SYMBOLS
+            { {0}, 0, 0 }
+    };
+
+    ec_lookup_symbols(context, symbols);
+    if (ec_verify_symbols(context, symbols) < 0) {
+            TRACE(DL_INIT, "%s failed", __func__);
+            //return -ENOTSUPP;
+            return false;
+    }
+    return true;
 }
