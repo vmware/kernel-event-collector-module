@@ -9,11 +9,12 @@
 #include "hash-table.h"
 #include "priv.h"
 
+uint32_t g_file_tracking_buckets = 65536;
+
 void __ec_file_tracking_delete_callback(void *posix_identity, ProcessContext *context);
 int __ec_file_tracking_show(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 
 static HashTbl __read_mostly s_file_hash_table = {
-    .numberOfBuckets = 8192,
     .name = "file_tracking_table",
     .datasize = sizeof(FILE_PROCESS_VALUE),
     .key_len     = sizeof(FILE_PROCESS_KEY),
@@ -24,6 +25,7 @@ static HashTbl __read_mostly s_file_hash_table = {
 
 bool ec_file_tracking_init(ProcessContext *context)
 {
+    s_file_hash_table.numberOfBuckets = g_file_tracking_buckets;
     return ec_hashtbl_init(&s_file_hash_table, context);
 }
 

@@ -911,6 +911,7 @@ int __ec_hashtbl_show(struct seq_file *m, void *v)
 
     seq_printf(m, "%20s : %20s\n", "Name", hashTblp->name);
     seq_printf(m, "%20s : %20llu\n", "Bucket Count", hashTblp->numberOfBuckets);
+    seq_printf(m, "%20s : %20zu\n", "Table Size", hashTblp->base_size);
     seq_printf(m, "%20s : %20llu\n", "LRU Size", hashTblp->lruSize);
     seq_printf(m, "%20s : %20lld\n", "Item Count", percpu_counter_sum_positive(&hashTblp->tableInstance));
     seq_puts(m, "\n");

@@ -66,6 +66,10 @@ module_param_named(path_cache_ref_debug, g_path_cache_ref_debug, bool, S_IRUSR |
 // Store string param to later on convert to unsigned long long
 module_param_string(enableHooks, enableHooksStr, HOOK_MASK_LEN,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
+module_param(g_file_path_buckets, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_file_tracking_buckets, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 
 INIT_CB_RESOLVED_SYMS();

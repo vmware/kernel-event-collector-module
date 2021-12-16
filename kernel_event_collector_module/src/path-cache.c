@@ -10,6 +10,8 @@
 #include "priv.h"
 #include "mem-alloc.h"
 
+uint32_t g_file_path_buckets = 65536*2;
+
 void __ec_path_cache_delete_callback(void *data, ProcessContext *context);
 int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 void __ec_path_cache_print_callback(void *datap, ProcessContext *context);
@@ -17,7 +19,6 @@ bool __ec_path_cache_verify_callback(void *datap, void *key, ProcessContext *con
 void __ec_path_cache_print_ref(int log_level, const char *calling_func, PathData *path_data, ProcessContext *context);
 
 static HashTbl __read_mostly s_path_cache = {
-    .numberOfBuckets = 1024,
     .name = "file_path_cache",
     .datasize = sizeof(PathData),
     .key_len     = sizeof(PathKey),
@@ -28,9 +29,9 @@ static HashTbl __read_mostly s_path_cache = {
     .find_verify_callback = __ec_path_cache_verify_callback,
 };
 
-
 bool ec_path_cache_init(ProcessContext *context)
 {
+    s_path_cache.numberOfBuckets = g_file_path_buckets;
     return ec_hashtbl_init(&s_path_cache, context);
 }
 

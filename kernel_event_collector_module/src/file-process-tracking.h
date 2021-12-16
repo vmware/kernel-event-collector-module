@@ -19,6 +19,8 @@ typedef struct FILE_PROCESS_VALUE {
     atomic64_t          reference_count;
 } FILE_PROCESS_VALUE;
 
+extern uint32_t g_file_tracking_buckets;
+
 void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);
 
 bool ec_file_tracking_init(ProcessContext *context);
