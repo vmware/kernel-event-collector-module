@@ -6,7 +6,6 @@
 
 #include <linux/types.h>
 #include "priv.h"
-#include "hash-table-generic.h"
 #include "path-cache.h"
 
 typedef struct FILE_PROCESS_KEY {
@@ -14,7 +13,6 @@ typedef struct FILE_PROCESS_KEY {
 } FILE_PROCESS_KEY;
 
 typedef struct FILE_PROCESS_VALUE {
-    HashTableNode       node;
     FILE_PROCESS_KEY    key;
     uint32_t            pid;
     PathData           *path_data;

@@ -22,7 +22,7 @@
 #include "priv.h"
 #include "cb-banning.h"
 #include "cb-isolation.h"
-#include "hash-table-generic.h"
+#include "hash-table.h"
 #include "process-tracking.h"
 #include "mem-alloc.h"
 #include "cb-spinlock.h"

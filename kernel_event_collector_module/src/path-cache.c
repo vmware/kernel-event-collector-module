@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright 2021 VMware Inc.  All rights reserved.
 
+#include "hash-table.h"
 #include "path-cache.h"
 #include "file-helper.h"
 #include "module_state.h"
@@ -9,33 +10,28 @@
 #include "priv.h"
 #include "mem-alloc.h"
 
-static HashTbl * s_file_cache;
-
 void __ec_path_cache_delete_callback(void *data, ProcessContext *context);
+int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
+
+static HashTbl __read_mostly s_path_cache = {
+    .numberOfBuckets = 1024,
+    .name = "file_path_cache",
+    .datasize = sizeof(PathData),
+    .key_len     = sizeof(PathKey),
+    .key_offset  = offsetof(PathData, key),
+    .refcount_offset = offsetof(PathData, reference_count),
+    .delete_callback = __ec_path_cache_delete_callback,
+};
 
 
 bool ec_path_cache_init(ProcessContext *context)
 {
-    s_file_cache = ec_hashtbl_init_generic(
-        context,
-        1024,
-        sizeof(PathData),
-        0,
-        "file_path_cache",
-        sizeof(PathKey),
-        offsetof(PathData, key),
-        offsetof(PathData, node),
-        offsetof(PathData, reference_count),
-        HASHTBL_DISABLE_LRU,
-        __ec_path_cache_delete_callback,
-        NULL);
-
-    return s_file_cache != NULL;
+    return ec_hashtbl_init(&s_path_cache, context);
 }
 
 void ec_path_cache_shutdown(ProcessContext *context)
 {
-    ec_hashtbl_shutdown_generic(s_file_cache, context);
+    ec_hashtbl_destroy(&s_path_cache, context);
 }
 
 PathData *ec_path_cache_find(
@@ -46,7 +42,7 @@ PathData *ec_path_cache_find(
 {
     PathKey key = { ns_id, device, inode };
 
-    return ec_hashtbl_get_generic(s_file_cache, &key, context);
+    return ec_hashtbl_find(&s_path_cache, &key, context);
 }
 
 
@@ -54,7 +50,7 @@ PathData *ec_path_cache_get(
     PathData           *path_data,
     ProcessContext     *context)
 {
-    return ec_hashtbl_get_generic_ref(s_file_cache, path_data, context);
+    return ec_hashtbl_get(&s_path_cache, path_data, context);
 }
 
 PathData *ec_path_cache_add(
@@ -69,7 +65,7 @@ PathData *ec_path_cache_add(
 
     if (path)
     {
-        value = ec_hashtbl_alloc_generic(s_file_cache, context);
+        value = ec_hashtbl_alloc(&s_path_cache, context);
         CANCEL(value, NULL);
 
         value->key.ns_id = ns_id;
@@ -87,10 +83,10 @@ PathData *ec_path_cache_add(
             value->key.inode,
             value->path);
 
-        if (ec_hashtbl_add_generic_safe(s_file_cache, value, context) < 0)
+        if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
         {
             // If the insert failed we free the local reference and get the existing value for the return
-            ec_hashtbl_free_generic(s_file_cache, value, context);
+            ec_hashtbl_free(&s_path_cache, value, context);
             value = ec_path_cache_find(ns_id, device, inode, context);
         }
     }
@@ -105,7 +101,7 @@ void ec_path_cache_delete(
 {
     CANCEL_VOID(value);
 
-    ec_hashtbl_del_generic(s_file_cache, value, context);
+    ec_hashtbl_del(&s_path_cache, value, context);
 
     TRACE(DL_FILE, "[%llu:%llu] %s was removed from path cache.",
             value->key.device,
@@ -117,7 +113,7 @@ void ec_path_cache_put(
     PathData           *path_data,
     ProcessContext     *context)
 {
-    ec_hashtbl_put_generic(s_file_cache, path_data, context);
+    ec_hashtbl_put(&s_path_cache, path_data, context);
 }
 
 void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
@@ -131,32 +127,30 @@ void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
     }
 }
 
-int __ec_path_cache_print(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
-
 int ec_path_cache_show(struct seq_file *m, void *v)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
 
-    ec_hashtbl_read_for_each_generic(s_file_cache, __ec_path_cache_print, m, &context);
+    ec_hashtbl_read_for_each(&s_path_cache, __ec_path_cache_print, m, &context);
 
 CATCH_DISABLED:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return 0;
 }
 
-int __ec_path_cache_print(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context)
 {
-    PathData *datap = (PathData *)nodep;
+    PathData *path_data = (PathData *)datap;
     struct seq_file *m = priv;
 
     if (datap)
     {
         seq_printf(m, "FILE-CACHE [%llu:%llu] %s\n",
-                   datap->key.device,
-                   datap->key.inode,
-                   datap->path);
+                   path_data->key.device,
+                   path_data->key.inode,
+                   path_data->path);
     }
 
     return ACTION_CONTINUE;

@@ -5,7 +5,7 @@
 #pragma once
 
 #include <linux/sched.h>
-#include "hash-table-generic.h"
+#include "hash-table.h"
 #include "rbtree-helper.h"
 #include "raw_event.h"
 #include "path-cache.h"
@@ -70,7 +70,6 @@ typedef struct ExecIdentity_handle {
 } ExecHandle;
 
 typedef struct posix_identity {
-    HashTableNode     pt_link;
     PT_TBL_KEY        pt_key;
 
     // This tracks the owners of this struct (can be more than the number of active processes)

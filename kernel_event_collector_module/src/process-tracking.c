@@ -22,7 +22,18 @@ ExecIdentity *ec_process_tracking_alloc_exec_identity(ProcessContext *context);
 void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
 ProcessHandle *ec_process_tracking_add_process(PosixIdentity *posix_identity, ProcessContext *context);
 
-process_tracking_data g_process_tracking_data = { 0, };
+process_tracking_data __read_mostly g_process_tracking_data = {
+    .table = {
+        .numberOfBuckets = 8192,
+        .name = "pt_cache",
+        .datasize = sizeof(PosixIdentity),
+        .key_len     = sizeof(PT_TBL_KEY),
+        .key_offset  = offsetof(PosixIdentity, pt_key),
+        .refcount_offset = offsetof(PosixIdentity, reference_count),
+        .delete_callback = ec_hashtbl_delete_callback,
+        .handle_callback = ec_hashtbl_handle_callback,
+    },
+};
 
 // TODO set this list dynamically via ioctl
 // For now, the interpreter list is set from this static array.
@@ -34,8 +45,6 @@ int    g_interpreter_names_count = sizeof(static_interpreter_names)/sizeof(char 
 
 bool g_print_proc_on_delete;
 
-#define CB_PT_CACHE_OBJ_SZ  256
-
 bool ec_process_tracking_should_track_user(void)
 {
     return g_driver_config.report_process_user == ENABLE;
@@ -44,20 +53,7 @@ bool ec_process_tracking_should_track_user(void)
 bool ec_process_tracking_initialize(ProcessContext *context)
 {
     g_print_proc_on_delete = false;
-    g_process_tracking_data.table = ec_hashtbl_init_generic(
-                                                    context,
-                                                    8192,
-                                                    sizeof(PosixIdentity),
-                                                    CB_PT_CACHE_OBJ_SZ,
-                                                    "pt_cache",
-                                                    sizeof(PT_TBL_KEY),
-                                                    offsetof(PosixIdentity, pt_key),
-                                                    offsetof(PosixIdentity, pt_link),
-                                                    offsetof(PosixIdentity, reference_count),
-                                                    HASHTBL_DISABLE_LRU,
-                                                    ec_hashtbl_delete_callback,
-                                                    ec_hashtbl_handle_callback);
-    TRY(g_process_tracking_data.table);
+    ec_hashtbl_init(&g_process_tracking_data.table, context);
 
     TRY(ec_mem_cache_create(&g_process_tracking_data.exec_identity_cache, "pt_exec_identity_cache", sizeof(ExecIdentity), context));
 
@@ -72,11 +68,7 @@ void ec_process_tracking_shutdown(ProcessContext *context)
 {
     g_print_proc_on_delete = true;
 
-    if (g_process_tracking_data.table)
-    {
-        ec_hashtbl_shutdown_generic(g_process_tracking_data.table, context);
-        g_process_tracking_data.table = NULL;
-    }
+    ec_hashtbl_destroy(&g_process_tracking_data.table, context);
 
     ec_mem_cache_destroy(&g_process_tracking_data.exec_identity_cache, context, __ec_process_exec_identity_print_callback);
 
@@ -87,7 +79,7 @@ ProcessHandle *ec_process_tracking_get_handle(pid_t pid, ProcessContext *context
 {
     PT_TBL_KEY key = { pid };
 
-    ProcessHandle *process_handle = ((ProcessHandle *)ec_hashtbl_get_generic(g_process_tracking_data.table, &key, context));
+    ProcessHandle *process_handle = ((ProcessHandle *)ec_hashtbl_find(&g_process_tracking_data.table, &key, context));
 
     return process_handle;
 }
@@ -207,7 +199,7 @@ ProcessHandle *ec_process_tracking_create_process(
         ec_process_tracking_put_exec_identity(exec_identity, context);
     }
 
-    posix_identity = (PosixIdentity *)ec_hashtbl_alloc_generic(g_process_tracking_data.table, context);
+    posix_identity = (PosixIdentity *)ec_hashtbl_alloc(&g_process_tracking_data.table, context);
     if (posix_identity)
     {
         posix_identity->pt_key.pid                 = pid;
@@ -470,7 +462,7 @@ void ec_process_tracking_remove_process(ProcessHandle *process_handle, ProcessCo
 
         // In the exec-other and some pid wrap cases this entry may not exist in
         //  hash table.  In this case, it will be a no-op.
-        ec_hashtbl_del_generic(g_process_tracking_data.table, ec_process_posix_identity(process_handle), context);
+        ec_hashtbl_del(&g_process_tracking_data.table, ec_process_posix_identity(process_handle), context);
     }
 }
 
@@ -482,10 +474,10 @@ ProcessHandle *ec_process_tracking_add_process(PosixIdentity *posix_identity, Pr
 
     if (process_handle)
     {
-        if (ec_hashtbl_add_generic(g_process_tracking_data.table, posix_identity, context) < 0)
+        if (ec_hashtbl_add(&g_process_tracking_data.table, posix_identity, context) < 0)
         {
             ec_process_tracking_put_handle(process_handle, context);
-            ec_hashtbl_free_generic(g_process_tracking_data.table, posix_identity, context);
+            ec_hashtbl_free(&g_process_tracking_data.table, posix_identity, context);
             process_handle = NULL;
         }
     }

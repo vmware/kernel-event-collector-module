@@ -149,9 +149,9 @@ void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecId
     if (process_handle && exec_identity)
     {
         // We need to lock the hash table to change the data here
-        ec_hashtbl_write_lock(g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+        ec_hashtbl_write_lock(&g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
         ec_process_posix_identity_set_exec_identity(ec_process_posix_identity(process_handle), exec_identity, context);
-        ec_hashtbl_write_unlock(g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+        ec_hashtbl_write_unlock(&g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
 
         // Updating the handle does not need to be done while locked
         ec_process_exec_handle_set_exec_identity(&process_handle->exec_handle, exec_identity, context);
@@ -186,7 +186,7 @@ void ec_process_tracking_put_handle(ProcessHandle *process_handle, ProcessContex
     if (process_handle)
     {
         ec_process_tracking_put_exec_handle(&process_handle->exec_handle, context);
-        ec_hashtbl_put_generic(g_process_tracking_data.table, process_handle->posix_identity, context);
+        ec_hashtbl_put(&g_process_tracking_data.table, process_handle->posix_identity, context);
         ec_mem_free(process_handle);
     }
 }
@@ -364,11 +364,11 @@ void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVE
     ec_process_tracking_put_exec_identity(exec_identity, context);
 }
 
-int __ec_hashtbl_search_callback(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
+int __ec_hashtbl_search_callback(HashTbl * hashTblp, void *datap, void *priv, ProcessContext *context);
 
 void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context)
 {
-    ec_hashtbl_read_for_each_generic(g_process_tracking_data.table, __ec_hashtbl_search_callback, psRunningInodesToBan, context);
+    ec_hashtbl_read_for_each(&g_process_tracking_data.table, __ec_hashtbl_search_callback, psRunningInodesToBan, context);
 
     return;
 }
@@ -387,27 +387,26 @@ CATCH_DEFAULT:
     return result;
 }
 
-// Note: This function is used as a callback by ec_hashtbl_read_for_each_generic called from
+// Note: This function is used as a callback by ec_hashtbl_read_for_each called from
 //       ec_is_process_tracked_get_state_by_inode also note that it is called from inside a spinlock.
 //       Therefore, in the future if modifications are required be aware that any function call that may
 //       sleep should be avoided.
 //       We also allocate an array of pointers and it is the responsibility of the caller to free them when done.
-int __ec_hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_hashtbl_search_callback(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context)
 {
-    PosixIdentity *posix_identity = NULL;
+    PosixIdentity *posix_identity = (PosixIdentity *)datap;
     RUNNING_BANNED_INODE_S *psRunningInodesToBan = NULL;
     RUNNING_PROCESSES_TO_BAN *temp = NULL;
 
-    TRY(nodep);
+    TRY(posix_identity);
 
     // Saftey first
     // TRY_DO(priv,
     // {
-    //     TRACE( DL_ERROR, "%s:%d NULL ptr provided as function argument [%p=nodep %p=priv]. Bailing...",
-    //                      __func__, __LINE__, nodep, priv);
+    //     TRACE( DL_ERROR, "%s:%d NULL ptr provided as function argument [%p=posix_data %p=priv]. Bailing...",
+    //                      __func__, __LINE__, posix_data, priv);
     // });
 
-    posix_identity = (PosixIdentity *)nodep;
     psRunningInodesToBan = (RUNNING_BANNED_INODE_S *)priv;
 
     //Did we match based on inode?
@@ -422,7 +421,7 @@ int __ec_hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *
         });
 
         //Update our structure
-        temp->process_handle = ec_hashtbl_get_generic_ref(hashTblp, nodep, context);
+        temp->process_handle = ec_hashtbl_get(hashTblp, posix_identity, context);
         list_add(&(temp->list), &(psRunningInodesToBan->BanList.list));
         psRunningInodesToBan->count++;
     }
