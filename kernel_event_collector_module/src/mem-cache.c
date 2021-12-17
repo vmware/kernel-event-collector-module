@@ -180,6 +180,12 @@ void ec_mem_cache_free(void *value, ProcessContext *context)
     {
         cache_buffer_t *cache_buffer = (cache_buffer_t *)((char *)value - CACHE_BUFFER_SZ);
 
+        CANCEL_VOID_DO(likely(cache_buffer->cache->kmem_cache), {
+                TRACE(DL_ERROR, "Cache %s already destroyed.  Failed to free memory: %p",
+                        cache_buffer->cache->name, value);
+                dump_stack();
+        });
+
         if (likely(cache_buffer->magic == CACHE_BUFFER_MAGIC))
         {
             if (g_enable_mem_cache_tracking)
