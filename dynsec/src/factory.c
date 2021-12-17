@@ -17,6 +17,11 @@
 #include <linux/sched/task.h>
 #include <linux/sched/mm.h>
 #endif
+#if LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0)
+// For <linux/backing-dev.h>
+#include <linux/device.h>
+#endif
+#include <linux/backing-dev.h>
 
 #include "dynsec.h"
 #include "factory.h"
@@ -1626,8 +1631,9 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
     }
 }
 
-static bool has_backing_device_info(const struct super_block *sb)
+static inline bool has_backing_device_info(const struct super_block *sb)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     const struct backing_dev_info *bdi;
 
     if (!sb) {
@@ -1638,27 +1644,33 @@ static bool has_backing_device_info(const struct super_block *sb)
         return false;
     }
 
-    if (bdi == noop_backing_dev_info) {
+    if (bdi == &noop_backing_dev_info) {
         return false;
     }
 // TODO: Determine absolute kver this really goes away
-#ifdef LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
-    if (bdi == default_backing_dev_info) {
+#ifdef BDI_CAP_SWAP_BACKED
+    if (bdi == &default_backing_dev_info) {
         return false;
     }
-#endif /* less than 4.18.0 */
-
-
+    if (bdi->capabilities & BDI_CAP_SWAP_BACKED) {
+        return false;
+    }
+    return (bdi->dev && bdi->dev->devt == sb->s_dev);
+#else
     if (!bdi->owner) {
         return false;
     }
 
     // Having an owner might be enough?
-    return true;
+    // return true;
 
     // Typically the owner's devt will match the sb's s_dev,
     // when it has a backing device.
-    // return (bdi->owner->devt == sb->s_dev);
+    return (bdi->owner->devt == sb->s_dev);
+#endif /* less than 4.18.0 */
+#else
+    return false;
+#endif
 }
 
 static void fill_in_sb_data(struct dynsec_file *dynsec_file,
@@ -1671,7 +1683,7 @@ static void fill_in_sb_data(struct dynsec_file *dynsec_file,
             dynsec_file->sb_magic = sb->s_magic;
         }
 
-        if (!(dynsec_file & (DYNSEC_FILE_ATTR_HAS_BACKING)) &&
+        if (!(dynsec_file->attr_mask & (DYNSEC_FILE_ATTR_HAS_BACKING)) &&
             has_backing_device_info(sb)) {
             dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_HAS_BACKING;
         }
@@ -1688,7 +1700,7 @@ static void fill_in_parent_sb_data(struct dynsec_file *dynsec_file,
             // Currently does not send parent sb_magic value
         }
 
-        if (!(dynsec_file & (DYNSEC_FILE_ATTR_PARENT_HAS_BACKING)) &&
+        if (!(dynsec_file->attr_mask & (DYNSEC_FILE_ATTR_PARENT_HAS_BACKING)) &&
             has_backing_device_info(sb)) {
             dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_HAS_BACKING;
         }
