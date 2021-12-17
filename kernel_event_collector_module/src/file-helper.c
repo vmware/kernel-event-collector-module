@@ -4,6 +4,7 @@
 
 #include "priv.h"
 #include "cb-banning.h"
+#include "mem-alloc.h"
 #include "path-cache.h"
 #include "path-buffers.h"
 
@@ -138,11 +139,11 @@ PathData *__ec_file_get_path_data(
 
         if (path_str)
         {
-            path_str = ec_mem_cache_strdup(path_str, context);
+            path_str = ec_mem_strdup(path_str, context);
         }
         path_data = ec_path_cache_add(ns_id, device, inode, path_str, fs_magic, context);
 
-        ec_mem_cache_put_generic(path_str);
+        ec_mem_put(path_str);
         ec_put_path_buffer(owned_path_buffer);
     }
 

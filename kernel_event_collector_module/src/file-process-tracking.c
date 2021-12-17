@@ -2,39 +2,34 @@
 // Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
+#include "hash-table.h"
 #include "file-process-tracking.h"
 #include "process-tracking.h"
 #include "process-tracking-private.h"
-#include "hash-table-generic.h"
+#include "hash-table.h"
 #include "priv.h"
 
 void __ec_file_tracking_delete_callback(void *posix_identity, ProcessContext *context);
-int __ec_file_tracking_show(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
+int __ec_file_tracking_show(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 
-static HashTbl      *s_file_hash_table;
+static HashTbl __read_mostly s_file_hash_table = {
+    .numberOfBuckets = 8192,
+    .name = "file_tracking_table",
+    .datasize = sizeof(FILE_PROCESS_VALUE),
+    .key_len     = sizeof(FILE_PROCESS_KEY),
+    .key_offset  = offsetof(FILE_PROCESS_VALUE, key),
+    .refcount_offset = offsetof(FILE_PROCESS_VALUE, reference_count),
+    .delete_callback = __ec_file_tracking_delete_callback,
+};
 
 bool ec_file_tracking_init(ProcessContext *context)
 {
-    s_file_hash_table = ec_hashtbl_init_generic(
-        context,
-        8192,
-        sizeof(FILE_PROCESS_VALUE),
-        0,
-        "file_tracking_table",
-        sizeof(FILE_PROCESS_KEY),
-        offsetof(FILE_PROCESS_VALUE, key),
-        offsetof(FILE_PROCESS_VALUE, node),
-        offsetof(FILE_PROCESS_VALUE, reference_count),
-        HASHTBL_DISABLE_LRU,
-        __ec_file_tracking_delete_callback,
-        NULL);
-
-    return s_file_hash_table != NULL;
+    return ec_hashtbl_init(&s_file_hash_table, context);
 }
 
 void ec_file_tracking_shutdown(ProcessContext *context)
 {
-    ec_hashtbl_shutdown_generic(s_file_hash_table, context);
+    ec_hashtbl_destroy(&s_file_hash_table, context);
 }
 
 void __ec_file_tracking_delete_callback(void *data, ProcessContext *context)
@@ -59,7 +54,7 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
 
     if (!value)
     {
-        value = ec_hashtbl_alloc_generic(s_file_hash_table, context);
+        value = ec_hashtbl_alloc(&s_file_hash_table, context);
         TRY(value);
 
         // Initialize the reference count
@@ -69,7 +64,7 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
         value->pid           = pid;
         value->path_data     = ec_path_cache_get(path_data, context);
 
-        if (ec_hashtbl_add_generic(s_file_hash_table, value, context) < 0)
+        if (ec_hashtbl_add(&s_file_hash_table, value, context) < 0)
         {
             if (MAY_TRACE_LEVEL(DL_FILE))
             {
@@ -84,7 +79,7 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
 
             // If the insert failed we free the local reference and clear
             //  value
-            ec_hashtbl_free_generic(s_file_hash_table, value, context);
+            ec_hashtbl_free(&s_file_hash_table, value, context);
             value = NULL;
         }
     }
@@ -100,7 +95,7 @@ FILE_PROCESS_VALUE *ec_file_process_get(
 {
     FILE_PROCESS_KEY key = { (uint64_t)file };
 
-    return ec_hashtbl_get_generic(s_file_hash_table, &key, context);
+    return ec_hashtbl_find(&s_file_hash_table, &key, context);
 }
 
 void ec_file_process_status_close(
@@ -110,15 +105,15 @@ void ec_file_process_status_close(
     FILE_PROCESS_KEY key = {(uint64_t)file};
     FILE_PROCESS_VALUE *value = NULL;
 
-    value = ec_hashtbl_del_by_key_generic(s_file_hash_table, &key, context);
+    value = ec_hashtbl_del_by_key(&s_file_hash_table, &key, context);
 
     // We still need to release it
-    ec_hashtbl_put_generic(s_file_hash_table, value, context);
+    ec_hashtbl_put(&s_file_hash_table, value, context);
 }
 
 void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context)
 {
-    ec_hashtbl_put_generic(s_file_hash_table, value, context);
+    ec_hashtbl_put(&s_file_hash_table, value, context);
 }
 
 int ec_file_track_show_table(struct seq_file *m, void *v)
@@ -129,8 +124,8 @@ int ec_file_track_show_table(struct seq_file *m, void *v)
     seq_printf(m, "%50s | %10s | %10s | %6s | %10s | %10s |\n",
                    "Path", "Device", "Inode", "PID", "Is Special", "File Pointer");
 
-    ec_hashtbl_read_for_each_generic(
-        s_file_hash_table,
+    ec_hashtbl_read_for_each(
+        &s_file_hash_table,
         __ec_file_tracking_show,
         m,
         &context);
@@ -138,11 +133,11 @@ int ec_file_track_show_table(struct seq_file *m, void *v)
     return 0;
 }
 
-int __ec_file_tracking_show(HashTbl *hashTblp, HashTableNode *data, void *m, ProcessContext *context)
+int __ec_file_tracking_show(HashTbl *hashTblp, void *datap, void *m, ProcessContext *context)
 {
-    if (data && m)
+    if (datap && m)
     {
-        FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)data;
+        FILE_PROCESS_VALUE *value = (FILE_PROCESS_VALUE *)datap;
 
         seq_printf(m, "%50s | %10llu | %10llu | %6d | %10s | %10llx |\n",
                       SANE_PATH(value->path_data->path),

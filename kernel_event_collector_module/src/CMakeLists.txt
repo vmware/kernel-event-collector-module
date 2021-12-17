@@ -81,6 +81,7 @@ set(SOURCE_FILES drvmain.c
         page-helpers.c
         path-buffers.c
         mem-cache.c
+        mem-alloc.c
         rbtree-helper.c
         file-helper.c
         file-hooks.c
@@ -103,7 +104,7 @@ set(SOURCE_FILES drvmain.c
         cb-isolation.c
         cb-banning.c
         netfilter.c
-        hash-table-generic.c
+        hash-table.c
         file-process-tracking.c
         syscall_init.c
         cb-stats.c

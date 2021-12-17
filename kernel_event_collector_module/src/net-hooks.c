@@ -13,6 +13,7 @@
 #include "cb-banning.h"
 #include "dns-parser.h"
 #include "path-buffers.h"
+#include "mem-alloc.h"
 
 #include <linux/kprobes.h>
 #include <linux/inet.h>
@@ -388,5 +389,5 @@ void __ec_process_dns_packet(
 
 CATCH_DEFAULT:
     ec_put_path_buffer(dns_data);
-    ec_mem_cache_free_generic(response.records);
+    ec_mem_free(response.records);
 }

@@ -9,9 +9,10 @@
 #endif
 #include <linux/signal.h>
 
-#include "hash-table-generic.h"
+#include "hash-table.h"
 #include "process-tracking.h"
 #include "event-factory.h"
+#include "mem-alloc.h"
 
 typedef struct bl_table_key {
     uint64_t    device;
@@ -19,7 +20,6 @@ typedef struct bl_table_key {
 } BL_TBL_KEY;
 
 typedef struct banning_entry_s {
-    HashTableNode link;
     BL_TBL_KEY    key;
     uint64_t hash;
     uint64_t    device;
@@ -28,62 +28,44 @@ typedef struct banning_entry_s {
 
 #define CB_BANNING_CACHE_OBJ_SZ 64
 
-static struct
+struct _banning_data
 {
-    HashTbl    *banning_table;
+    HashTbl     banning_table;
     uint32_t    protectionModeEnabled;
     uint64_t    ignored_pid_count;
     pid_t       ignored_pids[CB_SENSOR_MAX_PIDS];
     int64_t     ignored_uid_count;
     uid_t       ignored_uids[CB_SENSOR_MAX_UIDS];
-} s_banning;
+};
 
 void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino);
 
+static struct _banning_data __read_mostly s_banning = {
+    .protectionModeEnabled = PROTECTION_ENABLED,
+    .banning_table = {
+        .numberOfBuckets = 8192,
+        .name = "banning_cache",
+        .datasize = sizeof(BanningEntry),
+        .key_len     = sizeof(BL_TBL_KEY),
+        .key_offset  = offsetof(BanningEntry, key),
+    }
+};
+
 bool ec_banning_initialize(ProcessContext *context)
 {
-    s_banning.protectionModeEnabled = PROTECTION_ENABLED;
     memset(&s_banning.ignored_pids[0], 0, sizeof(pid_t)*CB_SENSOR_MAX_PIDS);
     memset(&s_banning.ignored_uids[0], 0xFF, sizeof(uid_t)*CB_SENSOR_MAX_PIDS);
 
-    s_banning.banning_table = ec_hashtbl_init_generic(context,
-                                           8192,
-                                           sizeof(BanningEntry),
-                                           CB_BANNING_CACHE_OBJ_SZ,
-                                           "banning_cache",
-                                           sizeof(BL_TBL_KEY),
-                                           offsetof(BanningEntry, key),
-                                           offsetof(BanningEntry, link),
-                                           HASHTBL_DISABLE_REF_COUNT,
-                                           HASHTBL_DISABLE_LRU,
-                                           NULL,
-                                           NULL);
-
-    if (!s_banning.banning_table)
-    {
-        return false;
-    }
-
-    return true;
+    return ec_hashtbl_init(&s_banning.banning_table, context);
 }
 
 void ec_banning_shutdown(ProcessContext *context)
 {
-    if (s_banning.banning_table)
-    {
-        ec_hashtbl_shutdown_generic(s_banning.banning_table, context);
-    }
+    ec_hashtbl_destroy(&s_banning.banning_table, context);
 }
 
 void ec_banning_SetProtectionState(ProcessContext *context, uint32_t new_state)
 {
-    uint32_t current_state = s_banning.protectionModeEnabled;
-
-    if (current_state == new_state)
-    {
-        return;
-    }
-
     TRACE(DL_INFO, "Setting protection state to %u", new_state);
     s_banning.protectionModeEnabled = new_state;
 }
@@ -94,7 +76,7 @@ bool ec_banning_SetBannedProcessInodeWithoutKillingProcs(ProcessContext *context
 
     TRACE(DL_INFO, "Recevied [%llu:%llu] inode", device, ino);
 
-    bep = (BanningEntry *)ec_hashtbl_alloc_generic(s_banning.banning_table, context);
+    bep = (BanningEntry *)ec_hashtbl_alloc(&s_banning.banning_table, context);
     if (bep == NULL)
     {
         return false;
@@ -106,9 +88,9 @@ bool ec_banning_SetBannedProcessInodeWithoutKillingProcs(ProcessContext *context
     bep->device = device;
     bep->inode = ino;
 
-    if (ec_hashtbl_add_generic_safe(s_banning.banning_table, bep, context) < 0)
+    if (ec_hashtbl_add_safe(&s_banning.banning_table, bep, context) < 0)
     {
-        ec_hashtbl_free_generic(s_banning.banning_table, bep, context);
+        ec_hashtbl_free(&s_banning.banning_table, bep, context);
         return false;
     }
 
@@ -135,21 +117,21 @@ inline bool ec_banning_ClearBannedProcessInode(ProcessContext *context, uint64_t
         return false;
     }
 
-    bep = (BanningEntry *) ec_hashtbl_del_by_key_generic(s_banning.banning_table, &key, context);
+    bep = (BanningEntry *) ec_hashtbl_del_by_key(&s_banning.banning_table, &key, context);
     if (!bep)
     {
         return false;
     }
     TRACE(DL_INFO, "Clearing banned file [%llu:%llu]", device, ino);
 
-    ec_hashtbl_free_generic(s_banning.banning_table, bep, context);
+    ec_hashtbl_free(&s_banning.banning_table, bep, context);
     return true;
 }
 
 void ec_banning_ClearAllBans(ProcessContext *context)
 {
     TRACE(DL_INFO, "Clearing all bans");
-    ec_hashtbl_clear_generic(s_banning.banning_table, context);
+    ec_hashtbl_clear(&s_banning.banning_table, context);
 }
 
 bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
@@ -169,7 +151,7 @@ bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t devic
         goto kbpbi_exit;
     }
 
-    bep = (BanningEntry *) ec_hashtbl_get_generic(s_banning.banning_table, &key, context);
+    bep = (BanningEntry *) ec_hashtbl_find(&s_banning.banning_table, &key, context);
     if (!bep)
     {
         TRACE(DL_INFO, "kill banned process failed to find [%llu:%llu]", device, ino);
@@ -267,7 +249,7 @@ void ec_banning_KillRunningBannedProcessByInode(ProcessContext *context, uint64_
         temp = list_entry(pos, RUNNING_PROCESSES_TO_BAN, list);
         ec_process_tracking_put_handle(temp->process_handle, context);
         list_del(pos);
-        ec_mem_cache_free_generic(temp);
+        ec_mem_free(temp);
     }
 
     memset(&sRunningInodesToBan, 0, sizeof(RUNNING_BANNED_INODE_S));

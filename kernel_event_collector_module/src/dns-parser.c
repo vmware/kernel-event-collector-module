@@ -7,7 +7,7 @@
 #include "priv.h"
 #include "cb-test.h"
 #include "net-helper.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 
 #include <linux/inet.h>
 
@@ -90,7 +90,7 @@ int ec_dns_parse_data(char                *dns_data,
 
     response->qtype = ntohs(question->qtype);
 
-    response->records = ec_mem_cache_alloc_generic(response->record_count * sizeof(CB_DNS_RECORD), context);
+    response->records = ec_mem_alloc(response->record_count * sizeof(CB_DNS_RECORD), context);
     TRY(response->records);
 
     for (i = 0; i < response->record_count; i++)

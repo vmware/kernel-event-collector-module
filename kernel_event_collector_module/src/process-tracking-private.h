@@ -13,7 +13,7 @@ typedef struct posix_identity_data {
     uint64_t      create_by_fork;
     uint64_t      create_by_exec;
 
-    HashTbl      *table;
+    HashTbl        table;
     CB_MEM_CACHE  exec_identity_cache;
 } process_tracking_data;
 
