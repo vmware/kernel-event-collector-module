@@ -1626,7 +1626,7 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
     }
 }
 
-static void has_backing_device_info(const struct super_block *sb)
+static bool has_backing_device_info(const struct super_block *sb)
 {
     const struct backing_dev_info *bdi;
 
@@ -1648,11 +1648,17 @@ static void has_backing_device_info(const struct super_block *sb)
     }
 #endif /* less than 4.18.0 */
 
-    // Typically the owner will match the sb's reported device.
-    if (!bdi->owner || bdi->owner->devt != sb->s_dev) {
+
+    if (!bdi->owner) {
         return false;
     }
+
+    // Having an owner might be enough?
     return true;
+
+    // Typically the owner's devt will match the sb's s_dev,
+    // when it has a backing device.
+    // return (bdi->owner->devt == sb->s_dev);
 }
 
 static void fill_in_sb_data(struct dynsec_file *dynsec_file,
