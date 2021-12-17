@@ -126,7 +126,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             break;
         }
 
-        ec_mem_cache_free(&s_event_cache, node, context);
+        ec_mem_cache_free(node, context);
     }
 }
 
@@ -298,6 +298,6 @@ bool ec_logger_initialize(ProcessContext *context)
 
 void ec_logger_shutdown(ProcessContext *context)
 {
-    ec_mem_cache_destroy(&s_event_cache, context, NULL);
+    ec_mem_cache_destroy(&s_event_cache, context);
 }
 

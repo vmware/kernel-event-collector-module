@@ -98,24 +98,6 @@ static void ec_hashtbl_bkt_write_unlock(HashTableBkt *bkt, ProcessContext *conte
     ec_write_unlock(&bkt->lock, context);
 }
 
-
-HashTbl *ec_hashtbl_create_generic(
-    ProcessContext *context,
-    uint64_t numberOfBuckets,
-    uint64_t datasize,
-    uint64_t sizehint,
-    const char *hashtble_name,
-    int key_len,
-    int key_offset,
-    int node_offset,
-    int refcount_offset,
-    uint64_t lruSize,
-    hashtbl_delete_cb delete_callback,
-    hashtbl_handle_cb handle_callback)
-{
-    return NULL;
-}
-
 bool ec_hashtbl_init(
     HashTbl        *hashTblp,
     ProcessContext *context)
@@ -237,7 +219,7 @@ void ec_hashtbl_destroy(HashTbl *hashTblp, ProcessContext *context)
 
     percpu_counter_destroy(&hashTblp->tableInstance);
     ec_plru_destroy(&hashTblp->plru, context);
-    ec_mem_cache_destroy(&hashTblp->hash_cache, context, NULL);
+    ec_mem_cache_destroy(&hashTblp->hash_cache, context);
     ec_mem_free(hashTblp->tablePtr);
 }
 
@@ -673,7 +655,7 @@ void __ec_hashtbl_free(HashTbl *hashTblp, HashTableNode *nodep, ProcessContext *
         {
             hashTblp->delete_callback(__ec_get_datap(hashTblp, nodep), context);
         }
-        ec_mem_cache_free(&hashTblp->hash_cache, nodep, context);
+        ec_mem_cache_free(nodep, context);
     }
 }
 

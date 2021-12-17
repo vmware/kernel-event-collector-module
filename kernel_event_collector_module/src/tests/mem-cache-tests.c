@@ -18,36 +18,39 @@ bool __init test__mem_cache(ProcessContext *context)
 
 bool __init test__mem_cache_create_destroy(ProcessContext *context)
 {
-    CB_MEM_CACHE mem_cache;
+    CB_MEM_CACHE mem_cache = CB_MEM_CACHE_INIT();
 
-    CANCEL(ec_mem_cache_create(&mem_cache, "test cache", 50, context), false);
-    ec_mem_cache_destroy(&mem_cache, context, NULL);
+    ASSERT_TRY(ec_mem_cache_create(&mem_cache, "test cache", 50, context));
+    ASSERT_TRY(ec_mem_cache_destroy(&mem_cache, context) == 0);
 
     return true;
+
+CATCH_DEFAULT:
+    return false;
 }
 
 bool __init test__mem_cache_alloc(ProcessContext *context)
 {
-    CB_MEM_CACHE mem_cache;
+    bool passed = true;
+    CB_MEM_CACHE mem_cache = CB_MEM_CACHE_INIT();
     void *value = NULL;
-    bool valid_value = false;
-    bool valid_size1 = false;
-    bool valid_size2 = false;
 
-    CANCEL(ec_mem_cache_create(&mem_cache, "test cache", 50, context), false);
+    ASSERT_TRY(ec_mem_cache_create(&mem_cache, "test cache", 50, context));
 
     value = ec_mem_cache_alloc(&mem_cache, context);
-
-    valid_value = !!value;
+    ASSERT_TEST(value != NULL);
 
     if (value)
     {
-        valid_size1 = ec_mem_cache_get_allocated_count(&mem_cache, context) == 1;
-        ec_mem_cache_free(&mem_cache, value, context);
-        valid_size2 = ec_mem_cache_get_allocated_count(&mem_cache, context) == 0;
+        ASSERT_TEST(ec_mem_cache_get_allocated_count(&mem_cache, context) == 1);
+        ec_mem_cache_free(value, context);
     }
 
-    ec_mem_cache_destroy(&mem_cache, context, NULL);
+    ASSERT_TEST(ec_mem_cache_destroy(&mem_cache, context) == 0);
 
-    return valid_value && valid_size1 && valid_size2;
+
+    return passed;
+
+CATCH_DEFAULT:
+    return false;
 }

@@ -70,19 +70,6 @@ typedef int (*hashtbl_for_each_cb)(HashTbl *tblp, void *datap, void *priv, Proce
 bool ec_hashtbl_init(
     HashTbl        *hashTblp,
     ProcessContext *context);
-HashTbl *ec_hashtbl_create_generic(
-    ProcessContext *context,
-    uint64_t numberOfBuckets,
-    uint64_t datasize,
-    uint64_t sizehint,
-    const char *hashtble_name,
-    int key_len,
-    int key_offset,
-    int node_offset,
-    int refcount_offset,
-    uint64_t lruSize,
-    hashtbl_delete_cb delete_callback,
-    hashtbl_handle_cb handle_callback);
 void ec_hashtbl_destroy(HashTbl *tblp, ProcessContext *context);
 
 void *ec_hashtbl_alloc(HashTbl *tblp, ProcessContext *context);

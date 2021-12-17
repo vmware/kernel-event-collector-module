@@ -20,6 +20,7 @@ static struct
 typedef struct cache_buffer {
     uint32_t  magic;
     struct list_head  list;
+    CB_MEM_CACHE *cache;
 } cache_buffer_t;
 
 #define CACHE_BUFFER_MAGIC   0xDEADBEEF
@@ -63,7 +64,7 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
 
         cache->kmem_cache = kmem_cache_create(
             cache->name,
-            size + CACHE_BUFFER_SZ,
+            cache->object_size + CACHE_BUFFER_SZ,
             0,
             SLAB_HWCACHE_ALIGN,
             NULL);
@@ -71,7 +72,7 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
         cache->object_size = size;
 
 
-        if (cache->kmem_cache)
+        if (likely(cache->kmem_cache))
         {
             ec_spinlock_init(&cache->lock, context);
             ec_write_lock(&s_mem_cache.lock, context);
@@ -84,27 +85,27 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
     return false;
 }
 
-void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache_printval_cb printval_callback)
+uint64_t ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context)
 {
+    uint64_t allocated_count = 0;
     void *value = NULL;
     struct cache_buffer *cb = NULL;
 
-    if (cache && cache->kmem_cache)
+    if (likely(cache && cache->kmem_cache))
     {
-        uint64_t allocated_count = percpu_counter_sum_positive(&cache->allocated_count);
-
         // cache->node only needs to be deleted from the list if cache->kmem_cache was allocated
         // otherwise it was never added to s_mem_cache.list and may have invalid next and prev pointers
         ec_write_lock(&s_mem_cache.lock, context);
         list_del_init(&cache->node);
         ec_write_unlock(&s_mem_cache.lock, context);
 
+        allocated_count = percpu_counter_sum_positive(&cache->allocated_count);
         if (allocated_count > 0)
         {
             TRACE(DL_ERROR, "Destroying Memory Cache (%s) with %" PRFu64 " allocated items.",
                    cache->name, (unsigned long long)allocated_count);
 
-            if (g_enable_mem_cache_tracking && printval_callback)
+            if (g_enable_mem_cache_tracking && cache->printval_callback)
             {
                 ec_write_lock(&cache->lock, context);
                 list_for_each_entry(cb, &cache->allocation_list, list)
@@ -112,7 +113,7 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
                     if (cb)
                     {
                         value = (char *)cb + CACHE_BUFFER_SZ;
-                        printval_callback(value, context);
+                        cache->printval_callback(value, context);
                     }
                 }
                 ec_write_unlock(&cache->lock, context);
@@ -126,6 +127,8 @@ void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache
         kmem_cache_destroy(cache->kmem_cache);
         cache->kmem_cache = NULL;
     }
+
+    return allocated_count;
 }
 
 #if LINUX_VERSION_CODE == KERNEL_VERSION(3, 10, 0) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7, 3)
@@ -146,7 +149,7 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
 {
     void *value = NULL;
 
-    if (cache && cache->kmem_cache)
+    if (likely(cache && cache->kmem_cache))
     {
         value = kmem_cache_alloc(cache->kmem_cache, CHECK_GFP(context));
         if (value)
@@ -155,14 +158,14 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
 
             cache_buffer->magic = CACHE_BUFFER_MAGIC;
 
+            cache_buffer->cache = cache;
+            percpu_counter_inc(&cache->allocated_count);
             if (g_enable_mem_cache_tracking)
             {
                 ec_write_lock(&cache->lock, context);
                 list_add(&cache_buffer->list, &cache->allocation_list);
                 ec_write_unlock(&cache->lock, context);
             }
-
-            percpu_counter_inc(&cache->allocated_count);
 
             value = (char *)cache_buffer + CACHE_BUFFER_SZ;
         }
@@ -171,26 +174,26 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
     return value;
 }
 
-void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context)
+void ec_mem_cache_free(void *value, ProcessContext *context)
 {
-    if (value && cache->kmem_cache)
+    if (value)
     {
         cache_buffer_t *cache_buffer = (cache_buffer_t *)((char *)value - CACHE_BUFFER_SZ);
 
-        if (cache_buffer->magic == CACHE_BUFFER_MAGIC)
+        if (likely(cache_buffer->magic == CACHE_BUFFER_MAGIC))
         {
             if (g_enable_mem_cache_tracking)
             {
-                ec_write_lock(&cache->lock, context);
+                ec_write_lock(&cache_buffer->cache->lock, context);
                 list_del(&cache_buffer->list);
-                ec_write_unlock(&cache->lock, context);
+                ec_write_unlock(&cache_buffer->cache->lock, context);
             }
 
-            kmem_cache_free(cache->kmem_cache, (void *)cache_buffer);
-            percpu_counter_dec(&cache->allocated_count);
+            kmem_cache_free(cache_buffer->cache->kmem_cache, (void *)cache_buffer);
+            percpu_counter_dec(&cache_buffer->cache->allocated_count);
         } else
         {
-            TRACE(DL_ERROR, "Cache entry magic does not match for %s.  Failed to free memory: %p", cache->name, value);
+            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to free memory: %p", value);
             dump_stack();
         }
     }

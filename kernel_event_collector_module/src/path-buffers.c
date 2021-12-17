@@ -24,7 +24,7 @@ bool ec_path_buffers_init(ProcessContext *context)
 
 void ec_path_buffers_shutdown(ProcessContext *context)
 {
-    ec_mem_cache_destroy(&s_string_pool, context, NULL);
+    ec_mem_cache_destroy(&s_string_pool, context);
 }
 
 // Get a string buffer from the the list, or alloc a new one.
@@ -47,6 +47,6 @@ void ec_put_path_buffer(char *buffer)
 
     if (buffer)
     {
-        ec_mem_cache_free(&s_string_pool, container_of((void *)buffer, struct STRING_NODE, path), &context);
+        ec_mem_cache_free(container_of((void *)buffer, struct STRING_NODE, path), &context);
     }
 }

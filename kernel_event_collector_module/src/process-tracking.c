@@ -33,6 +33,9 @@ process_tracking_data __read_mostly g_process_tracking_data = {
         .delete_callback = ec_hashtbl_delete_callback,
         .handle_callback = ec_hashtbl_handle_callback,
     },
+    .exec_identity_cache = {
+        .printval_callback = __ec_process_exec_identity_print_callback,
+    }
 };
 
 // TODO set this list dynamically via ioctl
@@ -70,7 +73,7 @@ void ec_process_tracking_shutdown(ProcessContext *context)
 
     ec_hashtbl_destroy(&g_process_tracking_data.table, context);
 
-    ec_mem_cache_destroy(&g_process_tracking_data.exec_identity_cache, context, __ec_process_exec_identity_print_callback);
+    ec_mem_cache_destroy(&g_process_tracking_data.exec_identity_cache, context);
 
     g_print_proc_on_delete = false;
 }
@@ -625,7 +628,7 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
         // TODO: Add lock here
 
         // Free the shared data
-        ec_mem_cache_free(&g_process_tracking_data.exec_identity_cache, exec_identity, context);
+        ec_mem_cache_free(exec_identity, context);
     });
 }
 

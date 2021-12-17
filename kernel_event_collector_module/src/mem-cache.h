@@ -12,6 +12,8 @@
 
 #define CB_MEM_CACHE_NAME_LEN    43
 
+typedef void (*cache_printval_cb)(void *value, ProcessContext *context);
+
 typedef struct CB_MEM_CACHE {
     struct list_head   node;
     struct list_head   allocation_list;
@@ -20,9 +22,12 @@ typedef struct CB_MEM_CACHE {
     struct kmem_cache *kmem_cache;
     uint32_t           object_size;
     uint8_t            name[CB_MEM_CACHE_NAME_LEN + 1];
+    cache_printval_cb  printval_callback;
 } CB_MEM_CACHE;
 
-typedef void (*memcache_printval_cb)(void *value, ProcessContext *context);
+#define CB_MEM_CACHE_INIT() {  \
+    .printval_callback = NULL, \
+}
 
 
 bool ec_mem_cache_init(ProcessContext *context);
@@ -31,8 +36,8 @@ size_t ec_mem_cache_get_memory_usage(ProcessContext *context);
 int ec_mem_cache_show(struct seq_file *m, void *v);
 
 bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, ProcessContext *context);
-void ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context, memcache_printval_cb printval_callback);
+uint64_t ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context);
 
 void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context);
-void ec_mem_cache_free(CB_MEM_CACHE *cache, void *value, ProcessContext *context);
+void ec_mem_cache_free(void *value, ProcessContext *context);
 int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context);
