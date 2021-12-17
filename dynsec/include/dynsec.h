@@ -184,6 +184,10 @@ struct dynsec_file {
 // Hints that umode will likely inherit parent DAC perms
 #define DYNSEC_FILE_ATTR_POSIX_ACL      0x0100
 #define DYNSEC_FILE_ATTR_DELETED        0x0200
+// Hints device likely has an entry in /sys
+#define DYNSEC_FILE_ATTR_HAS_BACKING    0x0400
+// Hints parent's device likely has an entry in /sys
+#define DYNSEC_FILE_ATTR_PARENT_HAS_BACKING    0x0800
     uint16_t attr_mask;
     uint64_t ino;
     uint32_t dev;

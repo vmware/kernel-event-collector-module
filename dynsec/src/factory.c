@@ -1626,13 +1626,49 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
     }
 }
 
+static void has_backing_device_info(const struct super_block *sb)
+{
+    const struct backing_dev_info *bdi;
+
+    if (!sb) {
+        return false;
+    }
+    bdi = (const struct backing_dev_info *)sb->s_bdi;
+    if (!bdi) {
+        return false;
+    }
+
+    if (bdi == noop_backing_dev_info) {
+        return false;
+    }
+// TODO: Determine absolute kver this really goes away
+#ifdef LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0)
+    if (bdi == default_backing_dev_info) {
+        return false;
+    }
+#endif /* less than 4.18.0 */
+
+    // Typically the owner will match the sb's reported device.
+    if (!bdi->owner || bdi->owner->devt != sb->s_dev) {
+        return false;
+    }
+    return true;
+}
+
 static void fill_in_sb_data(struct dynsec_file *dynsec_file,
                             const struct super_block *sb)
 {
     if (sb) {
-        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DEVICE;
-        dynsec_file->dev = new_encode_dev(sb->s_dev);
-        dynsec_file->sb_magic = sb->s_magic;
+        if (!(dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE)) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DEVICE;
+            dynsec_file->dev = new_encode_dev(sb->s_dev);
+            dynsec_file->sb_magic = sb->s_magic;
+        }
+
+        if (!(dynsec_file & (DYNSEC_FILE_ATTR_HAS_BACKING)) &&
+            has_backing_device_info(sb)) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_HAS_BACKING;
+        }
     }
 }
 
@@ -1640,8 +1676,16 @@ static void fill_in_parent_sb_data(struct dynsec_file *dynsec_file,
                                    const struct super_block *sb)
 {
     if (dynsec_file && sb) {
-        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
-        dynsec_file->parent_dev = new_encode_dev(sb->s_dev);
+        if (!(dynsec_file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE)) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
+            dynsec_file->parent_dev = new_encode_dev(sb->s_dev);
+            // Currently does not send parent sb_magic value
+        }
+
+        if (!(dynsec_file & (DYNSEC_FILE_ATTR_PARENT_HAS_BACKING)) &&
+            has_backing_device_info(sb)) {
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_HAS_BACKING;
+        }
     }
 }
 
