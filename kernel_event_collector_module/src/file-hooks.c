@@ -9,6 +9,7 @@
 #include "path-buffers.h"
 #include "cb-banning.h"
 #include "event-factory.h"
+#include "mem-alloc.h"
 
 #include <linux/file.h>
 #include <linux/namei.h>
@@ -64,7 +65,7 @@ PathData *__ec_get_path_data(
         // If we did not find a path, fall back to what was supplied by the user
         struct filename *file_s = CB_RESOLVED(getname)(filename);
 
-        path_data->path = ec_mem_cache_strdup(file_s->name, context);
+        path_data->path = ec_mem_strdup(file_s->name, context);
     }
 
     return path_data;

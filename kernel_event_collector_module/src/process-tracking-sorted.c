@@ -5,6 +5,7 @@
 #include "process-tracking-private.h"
 #include "priv.h"
 #include "cb-spinlock.h"
+#include "mem-alloc.h"
 
 // Helper logic to sort the tracking table
 typedef struct SORTED_PROCESS_TREE {
@@ -22,7 +23,7 @@ typedef struct SORTED_PROCESS {
 int __ec_rbtree_compare_process_start_time(void *left, void *right);
 void __ec_rbtree_get_ref(void *data, ProcessContext *context);
 void __ec_rbtree_put_ref(void *data, ProcessContext *context);
-int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
+int __ec_sort_process_tracking_table(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 
 void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, ProcessContext *context)
 {
@@ -39,7 +40,7 @@ void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, Pro
                    __ec_rbtree_put_ref,
                    context);
 
-    ec_hashtbl_read_for_each_generic(g_process_tracking_data.table, __ec_sort_process_tracking_table, &data, context);
+    ec_hashtbl_read_for_each(&g_process_tracking_data.table, __ec_sort_process_tracking_table, &data, context);
 
     ec_rbtree_destroy(&data.tree, context);
 }
@@ -53,9 +54,9 @@ ProcessHandle *ec_sorted_tracking_table_get_handle(void *data, ProcessContext *c
     return NULL;
 }
 
-int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_sort_process_tracking_table(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context)
 {
-    PosixIdentity *posix_identity = (PosixIdentity *)nodep;
+    PosixIdentity *posix_identity = (PosixIdentity *)datap;
     SORTED_PROCESS_TREE *data  = (SORTED_PROCESS_TREE *)priv;
 
     IF_MODULE_DISABLED_GOTO(context, CATCH_DISABLED);
@@ -65,7 +66,7 @@ int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, vo
     if (posix_identity)
     {
         // Insert each process entry into a rb_tree sorted by the start time
-        SORTED_PROCESS *value = ec_mem_cache_alloc_generic(sizeof(SORTED_PROCESS), context);
+        SORTED_PROCESS *value = ec_mem_alloc(sizeof(SORTED_PROCESS), context);
 
         if (value)
         {
@@ -74,7 +75,7 @@ int __ec_sort_process_tracking_table(HashTbl *hashTblp, HashTableNode *nodep, vo
             value->pid        = posix_identity->pt_key.pid;
             if (!ec_rbtree_insert(&data->tree, value, context))
             {
-                ec_mem_cache_free_generic(value);
+                ec_mem_free(value);
             }
         }
     } else
@@ -117,5 +118,5 @@ void __ec_rbtree_get_ref(void *data, ProcessContext *context)
 
 void __ec_rbtree_put_ref(void *data, ProcessContext *context)
 {
-    ec_mem_cache_free_generic(data);
+    ec_mem_free(data);
 }

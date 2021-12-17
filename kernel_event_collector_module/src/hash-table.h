@@ -16,7 +16,7 @@
 #define  ACTION_STOP       1
 #define  ACTION_DELETE     4
 
-#define  HASHTBL_DISABLE_REF_COUNT  -1
+#define  HASHTBL_DISABLE_REF_COUNT  0
 #define  HASHTBL_DISABLE_LRU        0
 
 
@@ -46,76 +46,63 @@ typedef struct hashtbl {
     struct list_head   genTables;
     const char *name;
     uint64_t   numberOfBuckets;
+    uint64_t   datasize;
     uint64_t   lruSize;
     uint32_t   secret;
     struct percpu_counter tableInstance;
-    bool tableShutdown;  // shutting down = true running = false
+    bool initialized;
     int key_len;
     int value_len;
     CB_MEM_CACHE hash_cache;
     int key_offset;
-    int node_offset;
-    int refcount_offset;
+    int refcount_offset;// TODO: Remove
     size_t base_size;
+    bool debug_logging;
     hashtbl_delete_cb delete_callback;
     hashtbl_handle_cb handle_callback;
 } HashTbl;
 
-typedef struct hash_table_node {
-    struct hlist_node link;
-    u32 hash;
-    u32 activity;
-} HashTableNode;
+bool ec_hashtbl_startup(ProcessContext *context);
+void ec_hashtbl_shutdown(ProcessContext *context);
 
-bool ec_hashtbl_generic_init(ProcessContext *context);
-void ec_hashtbl_generic_destoy(ProcessContext *context);
+typedef int (*hashtbl_for_each_cb)(HashTbl *tblp, void *datap, void *priv, ProcessContext *context);
 
-typedef int (*hashtbl_for_each_generic_cb)(HashTbl *tblp, HashTableNode *datap, void *priv, ProcessContext *context);
+bool ec_hashtbl_init(
+    HashTbl        *hashTblp,
+    ProcessContext *context);
+void ec_hashtbl_destroy(HashTbl *tblp, ProcessContext *context);
 
-HashTbl *ec_hashtbl_init_generic(
-    ProcessContext *context,
-    uint64_t numberOfBuckets,
-    uint64_t datasize,
-    uint64_t sizehint,
-    const char *hashtble_name,
-    int key_len,
-    int key_offset,
-    int node_offset,
-    int refcount_offset,
-    uint64_t lruSize,
-    hashtbl_delete_cb delete_callback,
-    hashtbl_handle_cb handle_callback);
-void *ec_hashtbl_alloc_generic(HashTbl *tblp, ProcessContext *context);
-int64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context);
-int ec_hashtbl_add_generic(HashTbl *tblp, void *datap, ProcessContext *context);
-
-// Like ec_hashtbl_add_generic but returns -EEXIST on a duplicate entry.
-// Caller responsible for freeing on failure to add entry.
-int ec_hashtbl_add_generic_safe(HashTbl *hashTblp, void *datap, ProcessContext *context);
-
-// Finds and removes data for key from hash table. Caller must put or free return.
-void *ec_hashtbl_del_by_key_generic(HashTbl *tblp, void *key, ProcessContext *context);
-
-// Removes datap from hash table but does not free it
-// Free with ec_hashtbl_put_generic (for ref counted hashtbl) or ec_hashtbl_free_generic
-void ec_hashtbl_del_generic(HashTbl *tblp, void *datap, ProcessContext *context);
-
-void *ec_hashtbl_get_generic(HashTbl *tblp, void *key, ProcessContext *context);
-void *ec_hashtbl_get_generic_ref(HashTbl *tblp, void *datap, ProcessContext *context);
+void *ec_hashtbl_alloc(HashTbl *tblp, ProcessContext *context);
+void ec_hashtbl_free(HashTbl *tblp, void *datap, ProcessContext *context);
+void *ec_hashtbl_get(HashTbl *tblp, void *datap, ProcessContext *context);
 
 // Decrements reference count and frees datap if reference count is 0
-// Only for reference counted hash tables
-void ec_hashtbl_put_generic(HashTbl *tblp, void *datap, ProcessContext *context);
+void ec_hashtbl_put(HashTbl *tblp, void *datap, ProcessContext *context);
 
-void ec_hashtbl_free_generic(HashTbl *tblp, void *datap, ProcessContext *context);
-void ec_hashtbl_shutdown_generic(HashTbl *tblp, ProcessContext *context);
-void ec_hashtbl_clear_generic(HashTbl *tblp, ProcessContext *context);
-void ec_hashtbl_write_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context);
-void ec_hashtbl_read_for_each_generic(HashTbl *hashTblp, hashtbl_for_each_generic_cb callback, void *priv, ProcessContext *context);
+
+int64_t ec_hashtbl_get_count(HashTbl *hashTblp, ProcessContext *context);
+int ec_hashtbl_add(HashTbl *tblp, void *datap, ProcessContext *context);
+
+// Like ec_hashtbl_add but returns -EEXIST on a duplicate entry.
+// Caller responsible for freeing on failure to add entry.
+int ec_hashtbl_add_safe(HashTbl *hashTblp, void *datap, ProcessContext *context);
+
+// Finds and removes data for key from hash table. Caller must put or free return.
+void *ec_hashtbl_del_by_key(HashTbl *tblp, void *key, ProcessContext *context);
+
+// Removes datap from hash table but does not free it
+// Free with ec_hashtbl_put
+void ec_hashtbl_del(HashTbl *tblp, void *datap, ProcessContext *context);
+
+void *ec_hashtbl_find(HashTbl *tblp, void *key, ProcessContext *context);
+
+void ec_hashtbl_clear(HashTbl *tblp, ProcessContext *context);
+void ec_hashtbl_write_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void *priv, ProcessContext *context);
+void ec_hashtbl_read_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void *priv, ProcessContext *context);
 int ec_hashtbl_show_proc_cache(struct seq_file *m, void *v);
 size_t ec_hashtbl_get_memory(ProcessContext *context);
-void ec_hashtable_debug_on(void);
-void ec_hashtable_debug_off(void);
+void ec_hashtbl_debug_on(void);
+void ec_hashtbl_debug_off(void);
 
 bool ec_hashtbl_read_bkt_lock(HashTbl *hashTblp, void *key, void **datap, HashTableBkt **bkt,
                               ProcessContext *context);
@@ -131,7 +118,7 @@ void ec_hashtbl_write_lock(HashTbl *hashTblp, void *key, ProcessContext *context
 void ec_hashtbl_write_unlock(HashTbl *hashTblp, void *key, ProcessContext *context);
 
 // Do not call this directly unless you wrap around ec_hashtbl_write_bkt_lock
-int ec_hashtbl_del_generic_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *datap, ProcessContext *context);
+int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *datap, ProcessContext *context);
 
 // Debug Functions
 typedef void (*hastable_print_func)(void *, const char *, ...);

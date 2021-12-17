@@ -22,9 +22,9 @@
 #include "priv.h"
 #include "cb-banning.h"
 #include "cb-isolation.h"
-#include "hash-table-generic.h"
+#include "hash-table.h"
 #include "process-tracking.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 #include "cb-spinlock.h"
 #include "netfilter.h"
 #include "InodeState.h"
@@ -1489,6 +1489,7 @@ int ec_proc_current_memory_det(struct seq_file *m, void *v)
 size_t __ec_get_memory_usage(ProcessContext *context)
 {
     return ec_mem_cache_get_memory_usage(context) +
+           ec_mem_allocated_size(context) +
            ec_hashtbl_get_memory(context);
 }
 

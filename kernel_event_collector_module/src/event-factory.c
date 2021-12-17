@@ -5,6 +5,7 @@
 #include "event-factory.h"
 #include "net-helper.h"
 #include "priv.h"
+#include "mem-alloc.h"
 
 const char *ec_StartAction_ToString(int start_action)
 {
@@ -78,8 +79,8 @@ void ec_event_send_start(
     event->processStart.start_action   = start_action;
     event->processStart.observed       = ec_process_posix_identity(process_handle)->is_real_start;
 
-    event->processStart.path  = ec_mem_cache_get_generic(ec_process_cmdline(process_handle), context);// take reference
-    event->processStart.path_size = ec_mem_cache_get_size_generic(event->processStart.path);
+    event->processStart.path  = ec_mem_get(ec_process_cmdline(process_handle), context);// take reference
+    event->processStart.path_size = ec_mem_size(event->processStart.path);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
@@ -178,7 +179,7 @@ void ec_event_send_block(
 
     if (cmdline)
     {
-        event->blockResponse.path = ec_mem_cache_strdup_x(cmdline, &path_size, context);
+        event->blockResponse.path = ec_mem_strdup_x(cmdline, &path_size, context);
         if (event->blockResponse.path && path_size)
         {
             event->blockResponse.path_size = (uint16_t)path_size;
@@ -236,7 +237,7 @@ void ec_event_send_file(
 
     if (path)
     {
-        event->fileGeneric.path = ec_mem_cache_strdup_x(path, &path_size, context);
+        event->fileGeneric.path = ec_mem_strdup_x(path, &path_size, context);
         if (event->fileGeneric.path && path_size)
         {
             event->fileGeneric.path_size = (uint16_t)path_size;
@@ -299,7 +300,7 @@ void ec_event_send_modload(
 
     if (path)
     {
-        event->moduleLoad.path = ec_mem_cache_strdup_x(path, &path_size, context);
+        event->moduleLoad.path = ec_mem_strdup_x(path, &path_size, context);
         if (event->moduleLoad.path)
         {
             event->moduleLoad.path_size = (uint16_t)path_size;
@@ -348,7 +349,7 @@ void ec_event_send_net_proxy(
     {
         size_t size = 0;
 
-        event->netConnect.actual_server = ec_mem_cache_strdup_x(actual_server, &size, context);
+        event->netConnect.actual_server = ec_mem_strdup_x(actual_server, &size, context);
         if (event->netConnect.actual_server && size)
         {
             event->netConnect.server_size = (uint16_t)size;

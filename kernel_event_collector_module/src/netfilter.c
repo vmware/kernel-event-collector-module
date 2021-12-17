@@ -4,7 +4,7 @@
 
 #include "priv.h"
 #include "net-helper.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 #include "path-buffers.h"
 #include "cb-isolation.h"
 #include "cb-spinlock.h"

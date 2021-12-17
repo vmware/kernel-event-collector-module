@@ -6,6 +6,7 @@
 #include "cb-spinlock.h"
 #include "cb-test.h"
 #include "priv.h"
+#include "mem-alloc.h"
 
 PathData * __ec_process_tracking_get_path_data(ExecIdentity * exec_identity, ProcessContext *context);
 
@@ -53,13 +54,13 @@ void ec_process_tracking_set_cmdline(ExecHandle *exec_handle, char *cmdline, Pro
         ExecIdentity *exec_identity = ec_exec_identity(exec_handle);
 
         ec_write_lock(&exec_identity->string_lock, context);
-        ec_mem_cache_put_generic(exec_identity->cmdline);
-        exec_identity->cmdline = ec_mem_cache_get_generic(cmdline, context);
+        ec_mem_put(exec_identity->cmdline);
+        exec_identity->cmdline = ec_mem_get(cmdline, context);
         ec_write_unlock(&exec_identity->string_lock, context);
 
         // No need to be locked while doing this
-        ec_mem_cache_put_generic(exec_handle->cmdline);
-        exec_handle->cmdline = ec_mem_cache_get_generic(cmdline, context);
+        ec_mem_put(exec_handle->cmdline);
+        exec_handle->cmdline = ec_mem_get(cmdline, context);
     }
 }
 
@@ -70,7 +71,7 @@ char *ec_process_tracking_get_cmdline(ExecIdentity *exec_identity, ProcessContex
     if (exec_identity)
     {
         ec_read_lock(&exec_identity->string_lock, context);
-        cmdline = ec_mem_cache_get_generic(exec_identity->cmdline, context);
+        cmdline = ec_mem_get(exec_identity->cmdline, context);
         ec_read_unlock(&exec_identity->string_lock, context);
     }
     return cmdline;
@@ -81,11 +82,11 @@ void ec_process_tracking_set_proc_cmdline(ProcessHandle *process_handle, char *c
     CANCEL_VOID(process_handle && cmdline);
 
     // Duplicate the command line for storage
-    cmdline = ec_mem_cache_strdup(cmdline, context);
+    cmdline = ec_mem_strdup(cmdline, context);
 
     ec_process_tracking_set_cmdline(ec_process_exec_handle(process_handle), cmdline, context);
 
-    ec_mem_cache_put_generic(cmdline);
+    ec_mem_put(cmdline);
 }
 
 ExecIdentity *ec_process_tracking_get_exec_identity_ref(ExecIdentity *exec_identity, ProcessContext *context)
@@ -148,9 +149,9 @@ void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecId
     if (process_handle && exec_identity)
     {
         // We need to lock the hash table to change the data here
-        ec_hashtbl_write_lock(g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+        ec_hashtbl_write_lock(&g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
         ec_process_posix_identity_set_exec_identity(ec_process_posix_identity(process_handle), exec_identity, context);
-        ec_hashtbl_write_unlock(g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+        ec_hashtbl_write_unlock(&g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
 
         // Updating the handle does not need to be done while locked
         ec_process_exec_handle_set_exec_identity(&process_handle->exec_handle, exec_identity, context);
@@ -159,7 +160,7 @@ void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecId
 
 ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessContext *context)
 {
-    ProcessHandle *process_handle = ec_mem_cache_alloc_generic(
+    ProcessHandle *process_handle = ec_mem_alloc(
         sizeof(ProcessHandle),
         context);
 
@@ -185,8 +186,8 @@ void ec_process_tracking_put_handle(ProcessHandle *process_handle, ProcessContex
     if (process_handle)
     {
         ec_process_tracking_put_exec_handle(&process_handle->exec_handle, context);
-        ec_hashtbl_put_generic(g_process_tracking_data.table, process_handle->posix_identity, context);
-        ec_mem_cache_free_generic(process_handle);
+        ec_hashtbl_put(&g_process_tracking_data.table, process_handle->posix_identity, context);
+        ec_mem_free(process_handle);
     }
 }
 
@@ -195,7 +196,7 @@ void ec_process_tracking_put_exec_handle(ExecHandle *exec_handle, ProcessContext
     if (exec_handle)
     {
         ec_path_cache_put(exec_handle->path_data, context);
-        ec_mem_cache_put_generic(exec_handle->cmdline);
+        ec_mem_put(exec_handle->cmdline);
         ec_process_tracking_put_exec_identity(exec_handle->identity, context);
 
         memset(exec_handle, 0, sizeof(ExecHandle));
@@ -212,7 +213,7 @@ void ec_process_exec_handle_clone(ExecHandle *from, ExecHandle *to, ProcessConte
         //  handle and not get pointers from from->identity
         to->identity = ec_process_tracking_get_exec_identity_ref(from->identity, context);
         to->path_data = ec_path_cache_get(from->path_data, context);
-        to->cmdline = ec_mem_cache_get_generic(from->cmdline, context);
+        to->cmdline = ec_mem_get(from->cmdline, context);
     }
 }
 
@@ -255,8 +256,8 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
 
 
     event->procInfo.path_found      = ec_process_exec_identity(process_handle)->path_data->path_found;
-    event->procInfo.path            = ec_mem_cache_get_generic(ec_process_path(process_handle), context);// hold reference
-    event->procInfo.path_size       = ec_mem_cache_get_size_generic(event->procInfo.path);
+    event->procInfo.path            = ec_mem_get(ec_process_path(process_handle), context);// hold reference
+    event->procInfo.path_size       = ec_mem_size(event->procInfo.path);
 
     // We need to ensure that user-space does not get any exit events for a
     //  process until all events for that process are already collected.
@@ -306,7 +307,7 @@ char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *
     if (exec_identity)
     {
         ec_read_lock(&exec_identity->string_lock, context);
-        path = ec_mem_cache_get_generic(exec_identity->path_data->path, context);
+        path = ec_mem_get(exec_identity->path_data->path, context);
         ec_read_unlock(&exec_identity->string_lock, context);
     }
 
@@ -344,7 +345,7 @@ void ec_process_tracking_set_path(ProcessHandle *process_handle, PathData *path_
 
 void ec_process_tracking_put_path(char *path, ProcessContext *context)
 {
-    ec_mem_cache_put_generic(path);
+    ec_mem_put(path);
 }
 
 void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVENT event, ProcessContext *context)
@@ -363,11 +364,11 @@ void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVE
     ec_process_tracking_put_exec_identity(exec_identity, context);
 }
 
-int __ec_hashtbl_search_callback(HashTbl * hashTblp, HashTableNode * nodep, void *priv, ProcessContext *context);
+int __ec_hashtbl_search_callback(HashTbl * hashTblp, void *datap, void *priv, ProcessContext *context);
 
 void ec_is_process_tracked_get_state_by_inode(RUNNING_BANNED_INODE_S *psRunningInodesToBan, ProcessContext *context)
 {
-    ec_hashtbl_read_for_each_generic(g_process_tracking_data.table, __ec_hashtbl_search_callback, psRunningInodesToBan, context);
+    ec_hashtbl_read_for_each(&g_process_tracking_data.table, __ec_hashtbl_search_callback, psRunningInodesToBan, context);
 
     return;
 }
@@ -386,27 +387,26 @@ CATCH_DEFAULT:
     return result;
 }
 
-// Note: This function is used as a callback by ec_hashtbl_read_for_each_generic called from
+// Note: This function is used as a callback by ec_hashtbl_read_for_each called from
 //       ec_is_process_tracked_get_state_by_inode also note that it is called from inside a spinlock.
 //       Therefore, in the future if modifications are required be aware that any function call that may
 //       sleep should be avoided.
 //       We also allocate an array of pointers and it is the responsibility of the caller to free them when done.
-int __ec_hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_hashtbl_search_callback(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context)
 {
-    PosixIdentity *posix_identity = NULL;
+    PosixIdentity *posix_identity = (PosixIdentity *)datap;
     RUNNING_BANNED_INODE_S *psRunningInodesToBan = NULL;
     RUNNING_PROCESSES_TO_BAN *temp = NULL;
 
-    TRY(nodep);
+    TRY(posix_identity);
 
     // Saftey first
     // TRY_DO(priv,
     // {
-    //     TRACE( DL_ERROR, "%s:%d NULL ptr provided as function argument [%p=nodep %p=priv]. Bailing...",
-    //                      __func__, __LINE__, nodep, priv);
+    //     TRACE( DL_ERROR, "%s:%d NULL ptr provided as function argument [%p=posix_data %p=priv]. Bailing...",
+    //                      __func__, __LINE__, posix_data, priv);
     // });
 
-    posix_identity = (PosixIdentity *)nodep;
     psRunningInodesToBan = (RUNNING_BANNED_INODE_S *)priv;
 
     //Did we match based on inode?
@@ -414,14 +414,14 @@ int __ec_hashtbl_search_callback(HashTbl *hashTblp, HashTableNode *nodep, void *
         posix_identity->posix_details.inode == psRunningInodesToBan->inode)
     {
         //Allocate a new list element for banning to hold this process pointer
-        temp = (RUNNING_PROCESSES_TO_BAN *)ec_mem_cache_alloc_generic(sizeof(RUNNING_PROCESSES_TO_BAN), context);
+        temp = (RUNNING_PROCESSES_TO_BAN *)ec_mem_alloc(sizeof(RUNNING_PROCESSES_TO_BAN), context);
         TRY_DO(temp,
         {
             TRACE(DL_ERROR, "%s:%d Out of memory!\n", __func__, __LINE__);
         });
 
         //Update our structure
-        temp->process_handle = ec_hashtbl_get_generic_ref(hashTblp, nodep, context);
+        temp->process_handle = ec_hashtbl_get(hashTblp, posix_identity, context);
         list_add(&(temp->list), &(psRunningInodesToBan->BanList.list));
         psRunningInodesToBan->count++;
     }

@@ -3,7 +3,7 @@
 
 #include "net-tracking.h"
 #include "net-helper.h"
-#include "hash-table-generic.h"
+#include "hash-table.h"
 #include "cb-spinlock.h"
 
 #include <linux/inet.h>
@@ -22,7 +22,6 @@ typedef struct table_value {
 } NET_TBL_VALUE;
 
 typedef struct table_node {
-    HashTableNode     link;
     NET_TBL_KEY       key;
     NET_TBL_VALUE     value;
 } NET_TBL_NODE;
@@ -34,36 +33,29 @@ void __ec_net_tracking_set_key(NET_TBL_KEY    *key,
                       CB_SOCK_ADDR   *remoteAddr,
                       uint16_t        proto,
                       CONN_DIRECTION  conn_dir);
-
-static HashTbl            *s_net_hash_table;
+int __ec_print_net_tracking(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 
 #define NET_TBL_SIZE     65536
 #define NET_LRU_SIZE     262144  // (4 * bucket size)
 
+static HashTbl __read_mostly s_net_hash_table = {
+    .numberOfBuckets = NET_TBL_SIZE,
+    .name = "network_tracking_table",
+    .datasize = sizeof(NET_TBL_NODE),
+    .key_len     = sizeof(NET_TBL_KEY),
+    .key_offset  = offsetof(NET_TBL_NODE, key),
+    .lruSize = NET_LRU_SIZE,
+};
+
 
 bool ec_net_tracking_initialize(ProcessContext *context)
 {
-    s_net_hash_table = ec_hashtbl_init_generic(context,
-                                               NET_TBL_SIZE,
-                                               sizeof(NET_TBL_NODE),
-                                               0,
-                                               "network_tracking_table",
-                                               sizeof(NET_TBL_KEY),
-                                               offsetof(NET_TBL_NODE, key),
-                                               offsetof(NET_TBL_NODE, link),
-                                               HASHTBL_DISABLE_REF_COUNT,
-                                               NET_LRU_SIZE,
-                                               NULL,
-                                               NULL);
-    TRY(s_net_hash_table);
-
-CATCH_DEFAULT:
-    return s_net_hash_table != NULL;
+    return ec_hashtbl_init(&s_net_hash_table, context);
 }
 
 void ec_net_tracking_shutdown(ProcessContext *context)
 {
-    ec_hashtbl_shutdown_generic(s_net_hash_table, context);
+    ec_hashtbl_destroy(&s_net_hash_table, context);
 }
 
 // Track this connection in the local table
@@ -85,12 +77,12 @@ bool ec_net_tracking_check_cache(
     __ec_net_tracking_set_key(&key, pid, localAddr, remoteAddr, proto, conn_dir);
 
     // Check to see if this item is already tracked
-    node = ec_hashtbl_get_generic(s_net_hash_table, &key, context);
+    node = ec_hashtbl_find(&s_net_hash_table, &key, context);
 
     if (!node)
     {
         xcode = true;
-        node = (NET_TBL_NODE *) ec_hashtbl_alloc_generic(s_net_hash_table, context);
+        node = (NET_TBL_NODE *) ec_hashtbl_alloc(&s_net_hash_table, context);
         TRY_MSG(node, DL_ERROR, "Failed to allocate a network tracking node, event will be sent!");
 
         memcpy(&node->key, &key, sizeof(NET_TBL_KEY));
@@ -98,8 +90,8 @@ bool ec_net_tracking_check_cache(
 
         __ec_net_tracking_print_message("ADD", &key);
 
-        TRY_DO_MSG(!ec_hashtbl_add_generic(s_net_hash_table, node, context),
-                   { ec_hashtbl_free_generic(s_net_hash_table, node, context); },
+        TRY_DO_MSG(!ec_hashtbl_add(&s_net_hash_table, node, context),
+                   { ec_hashtbl_free(&s_net_hash_table, node, context); },
                    DL_ERROR, "Failed to add a network tracking node, event will be sent!");
     }
 
@@ -139,44 +131,42 @@ ssize_t ec_net_track_purge(struct file *file, const char *buf, size_t size, loff
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    ec_hashtbl_clear_generic(s_net_hash_table, &context);
+    ec_hashtbl_clear(&s_net_hash_table, &context);
 
     return size;
 }
-
-int __ec_print_net_tracking(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context);
 
 int ec_net_track_show(struct seq_file *m, void *v)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    ec_hashtbl_read_for_each_generic(s_net_hash_table, __ec_print_net_tracking, m, &context);
+    ec_hashtbl_read_for_each(&s_net_hash_table, __ec_print_net_tracking, m, &context);
 
     return 0;
 }
 
-int __ec_print_net_tracking(HashTbl *hashTblp, HashTableNode *nodep, void *priv, ProcessContext *context)
+int __ec_print_net_tracking(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context)
 {
-    NET_TBL_NODE *datap = (NET_TBL_NODE *)nodep;
+    NET_TBL_NODE *net_data = (NET_TBL_NODE *)datap;
     struct seq_file *m = priv;
 
     IF_MODULE_DISABLED_GOTO(context, CATCH_DISABLED);
 
-    if (datap)
+    if (net_data)
     {
         uint16_t  rport                         = 0;
         uint16_t  lport                         = 0;
         char      raddr_str[INET6_ADDRSTRLEN*2] = {0};
         char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
-        ec_ntop(&datap->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
-        ec_ntop(&datap->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
+        ec_ntop(&net_data->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
+        ec_ntop(&net_data->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
         seq_printf(m, "NET-TRACK %d %s-%s %s:%u -> %s:%u (%d)\n",
-                   datap->key.pid,
-                   PROTOCOL_STR(datap->key.proto),
-                   (datap->key.conn_dir == CONN_IN ? "in" : (datap->key.conn_dir == CONN_OUT ? "out" : "??")),
+                   net_data->key.pid,
+                   PROTOCOL_STR(net_data->key.proto),
+                   (net_data->key.conn_dir == CONN_IN ? "in" : (net_data->key.conn_dir == CONN_OUT ? "out" : "??")),
                    laddr_str, ntohs(lport), raddr_str, ntohs(rport),
-                   (int)datap->value.last_seen.tv_sec);
+                   (int)net_data->value.last_seen.tv_sec);
     }
 
     return ACTION_CONTINUE;

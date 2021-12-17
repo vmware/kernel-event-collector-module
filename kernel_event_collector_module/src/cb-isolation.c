@@ -6,7 +6,7 @@
 #include <linux/list.h>
 #include <linux/inet.h>
 #include "priv.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 #include "cb-spinlock.h"
 #include "netfilter.h"
 
@@ -52,7 +52,7 @@ VOID ec_DestroyNetworkIsolation(ProcessContext *context)
     {
         if (_pCurrentCbIsolationModeControl)
         {
-            ec_mem_cache_free_generic(_pCurrentCbIsolationModeControl);
+            ec_mem_free(_pCurrentCbIsolationModeControl);
             _pCurrentCbIsolationModeControl = NULL;
         }
 
@@ -100,7 +100,7 @@ NTSTATUS ec_ProcessIsolationIoctl(
     TRY_SET_MSG(IoControlCode == IOCTL_SET_ISOLATION_MODE, STATUS_INVALID_PARAMETER_4,
                  DL_WARNING, "CB_ISOLATION_MODE_CONTROL size is invalid");
 
-    tmpIsolationModeControl = (PCB_ISOLATION_MODE_CONTROL)ec_mem_cache_alloc_generic(InputBufLen, context);
+    tmpIsolationModeControl = (PCB_ISOLATION_MODE_CONTROL)ec_mem_alloc(InputBufLen, context);
 
     TRY_SET_MSG(tmpIsolationModeControl, STATUS_INSUFFICIENT_RESOURCES,
                  DL_ERROR, "%s: failed to allocate memory for network isolation control\n", __func__);
@@ -120,7 +120,7 @@ NTSTATUS ec_ProcessIsolationIoctl(
 
     if (_pCurrentCbIsolationModeControl)
     {
-        ec_mem_cache_free_generic(_pCurrentCbIsolationModeControl);
+        ec_mem_free(_pCurrentCbIsolationModeControl);
     }
 
     _pCurrentCbIsolationModeControl = tmpIsolationModeControl;
@@ -144,7 +144,7 @@ CATCH_RESOURCE:
     RELEASE_RESOURCE(context);
 
 CATCH_DEFAULT:
-    ec_mem_cache_free_generic(tmpIsolationModeControl);
+    ec_mem_free(tmpIsolationModeControl);
     return xcode;
 }
 

@@ -2,7 +2,7 @@
 // Copyright 2021 VMware Inc.  All rights reserved.
 
 #include "plru.h"
-#include "mem-cache.h"
+#include "mem-alloc.h"
 #include "cb-test.h"
 
 // In a full binary plru, any row will be one more than the sum of all nodes above it.
@@ -21,7 +21,7 @@ bool ec_plru_init(PLruTree *plru, uint64_t leaf_count, void *tree_head, ProcessC
 
     if (!tree_head)
     {
-        tree_head = ec_mem_cache_alloc_generic(ec_plru_get_allocation_size(leaf_count), context);
+        tree_head = ec_mem_alloc(ec_plru_get_allocation_size(leaf_count), context);
         CANCEL(tree_head != NULL, false);
 
         plru->owned_head = tree_head;
@@ -37,7 +37,7 @@ void ec_plru_destroy(PLruTree *plru, ProcessContext *context)
 {
     CANCEL_VOID(plru != NULL && plru->head != NULL);
 
-    ec_mem_cache_free_generic(plru->owned_head);
+    ec_mem_free(plru->owned_head);
 }
 
 #define GET_LEFT_CHILD(X)    (2*X+1)       // 1 based index

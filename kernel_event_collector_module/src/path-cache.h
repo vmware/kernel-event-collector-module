@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include "hash-table-generic.h"
 #include "process-context.h"
 
 typedef struct PATH_KEY {
@@ -13,7 +12,6 @@ typedef struct PATH_KEY {
 } PathKey;
 
 typedef struct PATH_DATA {
-    HashTableNode       node;
     PathKey             key;
     char               *path;
     bool                path_found;

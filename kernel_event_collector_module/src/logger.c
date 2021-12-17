@@ -6,6 +6,7 @@
 #include <linux/gfp.h>
 #include "priv.h"
 #include "mem-cache.h"
+#include "mem-alloc.h"
 #include "cb-banning.h"
 #include "process-tracking.h"
 #include "version.h"
@@ -61,7 +62,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         //  for a process.
         ec_event_set_process_data(event, NULL, context);
 
-        ec_mem_cache_free_generic(event->procInfo.path);
+        ec_mem_free(event->procInfo.path);
         event->procInfo.path = NULL;
 
         switch (event->eventType)
@@ -69,7 +70,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_PROCESS_START:
             if (event->processStart.path)
             {
-                ec_mem_cache_free_generic(event->processStart.path);
+                ec_mem_free(event->processStart.path);
                 event->processStart.path = NULL;
             }
             break;
@@ -77,7 +78,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_MODULE_LOAD:
             if (event->moduleLoad.path)
             {
-                ec_mem_cache_free_generic(event->moduleLoad.path);
+                ec_mem_free(event->moduleLoad.path);
                 event->moduleLoad.path = NULL;
             }
             break;
@@ -89,7 +90,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_FILE_CLOSE:
             if (event->fileGeneric.path)
             {
-                ec_mem_cache_free_generic(event->fileGeneric.path);
+                ec_mem_free(event->fileGeneric.path);
                 event->fileGeneric.path = NULL;
             }
             break;
@@ -97,7 +98,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_DNS_RESPONSE:
             if (event->dnsResponse.records)
             {
-                ec_mem_cache_free_generic(event->dnsResponse.records);
+                ec_mem_free(event->dnsResponse.records);
                 event->dnsResponse.records = NULL;
             }
             break;
@@ -108,7 +109,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_WEB_PROXY:
             if (event->netConnect.actual_server)
             {
-                ec_mem_cache_free_generic(event->netConnect.actual_server);
+                ec_mem_free(event->netConnect.actual_server);
                 event->netConnect.actual_server = NULL;
             }
             break;
@@ -116,7 +117,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_PROCESS_BLOCKED:
             if (event->blockResponse.path)
             {
-                ec_mem_cache_free_generic(event->blockResponse.path);
+                ec_mem_free(event->blockResponse.path);
                 event->blockResponse.path = NULL;
             }
             break;
@@ -125,7 +126,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             break;
         }
 
-        ec_mem_cache_free(&s_event_cache, node, context);
+        ec_mem_cache_free(node, context);
     }
 }
 
@@ -297,6 +298,6 @@ bool ec_logger_initialize(ProcessContext *context)
 
 void ec_logger_shutdown(ProcessContext *context)
 {
-    ec_mem_cache_destroy(&s_event_cache, context, NULL);
+    ec_mem_cache_destroy(&s_event_cache, context);
 }
 
