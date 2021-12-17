@@ -245,7 +245,6 @@ bool ec_user_comm_initialize(ProcessContext *context)
     INIT_DELAYED_WORK(&s_fops_config.stats_work, __ec_stats_work_task);
     schedule_delayed_work(&s_fops_config.stats_work, s_fops_config.stats_work_delay);
 
-    s_fops_config.enabled  = true;
     return true;
 }
 
@@ -263,7 +262,6 @@ bool ec_user_devnode_init(ProcessContext *context)
     cdev_init(&s_fops_config.device, &driver_fops);
     TRY_STEP_DO(CHRDEV_ALLOC, cdev_add(&s_fops_config.device, s_fops_config.major, 1) >= 0, TRACE(DL_ERROR, "cdev_add failed"););
 
-    s_fops_config.enabled  = true;
     return true;
 
 CATCH_CHRDEV_ALLOC:
@@ -282,8 +280,6 @@ void ec_user_devnode_close(ProcessContext *context)
 
 void ec_user_comm_shutdown(ProcessContext *context)
 {
-    s_fops_config.enabled  = false;
-
     /**
      * Calling the sync flavor gives the guarantee that on the return of the
      * routine, work is not pending and not executing on any CPU.
@@ -292,11 +288,25 @@ void ec_user_comm_shutdown(ProcessContext *context)
      */
     cancel_delayed_work_sync(&s_fops_config.stats_work);
 
+    ec_spinlock_destroy(&s_fops_data.lock, context);
+}
+
+bool ec_user_comm_enable(ProcessContext *context)
+{
+    s_fops_config.enabled = true;
+    return true;
+}
+
+void ec_user_comm_disable(ProcessContext *context)
+{
+    // We need to disable the user comms and signal the polling process to wakeup
+    s_fops_config.enabled = false;
+    ec_fops_comm_wake_up_reader(context);
+
+    // Clear the queues now so all the memory can be freed properly before the subsystems are shutdown
     ec_write_lock(&s_fops_data.lock, context);
     __ec_user_comm_clear_queues_locked(context);
-    s_fops_config.enabled  = false;
     ec_write_unlock(&s_fops_data.lock, context);
-    ec_spinlock_destroy(&s_fops_data.lock, context);
 }
 
 void ec_user_comm_clear_queues(ProcessContext *context)
@@ -313,7 +323,7 @@ void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, Proce
 
     list_for_each_safe(eventNode, safeNode, tx_queue)
     {
-        list_del(eventNode);
+        list_del_init(eventNode);
         ec_free_event(&(container_of(eventNode, CB_EVENT_NODE, listEntry)->data), context);
         atomic64_dec(tx_ready);
     }
@@ -344,6 +354,7 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 
     TRY(ALLOW_SEND_EVENTS(context));
 
+    TRY(s_fops_config.enabled);
     TRY(msg && ec_is_reader_connected());
 
     eventNode = container_of(msg, CB_EVENT_NODE, data);
@@ -379,8 +390,7 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 
     ec_write_lock(&s_fops_data.lock, context);
     readyCount = atomic64_read(tx_ready);
-    if (s_fops_config.enabled &&
-        (readyCount < max_queue_size ||
+    if ((readyCount < max_queue_size ||
          __ec_try_to_gain_capacity(tx_queue)))
     {
         list_add_tail(&(eventNode->listEntry), tx_queue);
@@ -859,16 +869,16 @@ int ec_device_release(struct inode *inode, struct file *filp)
 
 unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
 {
-    uint64_t qlen;
+    int      xcode = 0;
+    uint64_t qlen  = 0;
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
+
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Check if data is available and lets go
     qlen = atomic64_read(&tx_ready_pri0) + atomic64_read(&tx_ready_pri1) + atomic64_read(&tx_ready_pri2);
-
-    if (qlen != 0)
-    {
-        TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
-        goto data_avail;
-    }
+    TRY_MSG(qlen == 0, DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
     // We should call poll_wait here if we want the kernel to actually
     // sleep when waiting for us.
@@ -876,19 +886,21 @@ unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
     poll_wait(filp, &s_fops_config.wq, pts);
 
     qlen = atomic64_read(&tx_ready_pri0) + atomic64_read(&tx_ready_pri1) + atomic64_read(&tx_ready_pri2);
+    TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
-    if (qlen != 0)
+CATCH_DEFAULT:
+    // If comms have been disabled while we were waiting send POLLHUP
+    if (!s_fops_config.enabled)
     {
-        TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
-        goto data_avail;
+        xcode = POLLHUP;
+    } else
+    {
+        // Report if we have events to read
+        xcode = qlen != 0 ? (POLLIN | POLLRDNORM) : 0;
     }
 
-    TRACE(DL_COMMS, "%s: msg queued qlen=%llu", __func__, qlen);
-
-data_avail:
-
-    // We should also return POLLHUP if we ever desire to shutdown
-    return (qlen != 0 ? (POLLIN | POLLRDNORM) : 0);
+    FINISH_MODULE_DISABLE_CHECK(&context);
+    return xcode;
 }
 
 

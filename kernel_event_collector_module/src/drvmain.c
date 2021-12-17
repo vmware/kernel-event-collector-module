@@ -513,6 +513,7 @@ static struct subsystem_init s_module_enable[] = {
     SUBSYSTEM_INIT(ec_task_initialize,                ec_task_shutdown),
     SUBSYSTEM_INIT(ec_file_tracking_init,             ec_file_tracking_shutdown),
     SUBSYSTEM_INIT(ec_stats_proc_initialize,          ec_stats_proc_shutdown),
+    SUBSYSTEM_INIT(ec_user_comm_enable,               ec_user_comm_disable),
 
     SUBSYSTEM_INIT_END
 };
