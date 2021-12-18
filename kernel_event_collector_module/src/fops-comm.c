@@ -40,10 +40,7 @@ unsigned int ec_device_poll(struct file *filep, struct poll_table_struct *poll);
 long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 int __ec_DoAction(ProcessContext *context, uint32_t action);
 void ec_user_comm_clear_queues(ProcessContext *context);
-void __ec_user_comm_clear_queues_locked(ProcessContext *context);
 bool __ec_try_to_gain_capacity(struct list_head *tx_queue);
-void __ec_get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready);
-void __ec_decrease_holdoff_counter(atomic64_t *tx_ready);
 bool __ec_is_action_allowed(ModuleState moduleState, CB_EVENT_ACTION_TYPE action);
 bool __ec_is_ioctl_allowed(ModuleState module_state, unsigned int cmd);
 size_t __ec_get_memory_usage(ProcessContext *context);
@@ -54,6 +51,7 @@ void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
 int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *context);
 int __ec_precompute_payload(struct CB_EVENT *cb_event);
 void __ec_stats_work_task(struct work_struct *work);
+void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *readyCount, ProcessContext *context);
 
 // checkpatch-ignore: CONST_STRUCT
 struct file_operations driver_fops = {
@@ -66,14 +64,10 @@ struct file_operations driver_fops = {
 };
 // checkpatch-no-ignore: CONST_STRUCT
 
-static LIST_HEAD(msg_queue_pri0);
-static LIST_HEAD(msg_queue_pri1);
-static LIST_HEAD(msg_queue_pri2);
-
 static const uint64_t MAX_VALID_INTERVALS =   60;
 #define  MAX_INTERVALS           62
-#define  NUM_STATS               18
-#define  EVENT_STATS             13
+#define  NUM_STATS               15
+#define  EVENT_STATS             11
 #define  MEM_START               EVENT_STATS
 #define  MEM_STATS               (EVENT_STATS + 4)
 
@@ -81,9 +75,7 @@ typedef struct CB_EVENT_STATS {
     // This is a circular array of elements were each element is an increasing sum from the
     //  previous element. You can always get the sum of any two elements, and divide by the
     //  number of elements between them to yield the average.
-    //  tx_queued_pri0;
-    //  tx_queued_pri1;
-    //  tx_queued_pri2;
+    //  tx_ready;
     //  tx_dropped;
     //  tx_total;
     //  tx_other
@@ -99,13 +91,8 @@ typedef struct CB_EVENT_STATS {
 
     // These are live counters that rise and fall as events are generated.  This variable
     //  will be added to the stats end the end of each interval.
-    atomic64_t      tx_ready_pri0;
-    atomic64_t      tx_ready_pri1;
-    atomic64_t      tx_ready_pri1_holdoff;
-    atomic64_t      tx_ready_pri2;
-    atomic64_t      tx_ready_prev0;
-    atomic64_t      tx_ready_prev1;
-    atomic64_t      tx_ready_prev2;
+    atomic64_t      tx_ready_max;
+    atomic64_t      tx_ready;
 
     // The current index into the list
     uint64_t        curr;
@@ -120,10 +107,7 @@ const static struct {
     const char *str_format;
     const char *num_format;
 } STAT_STRINGS[] = {
-    { "Total Queued",   " %12s ||", " %12d ||" },
-    { "Queued in P0",   " %12s |", " %12d |" },
-    { "Queued in P1",   " %12s |", " %12d |" },
-    { "Queued in P2",   " %12s |", " %12d |" },
+    { "Max Queued",   " %12s ||", " %12d ||" },
     { "Dropped",        " %7s |", " %7d |" },
     { "All",            " %7s |", " %7d |" },
     { "Process",        " %7s |", " %7d |" },
@@ -142,35 +126,27 @@ const static struct {
 
 #define current_stat        (s_fops_data.event_stats.curr)
 #define valid_stats         (s_fops_data.event_stats.validStats)
-#define tx_ready_pri0       (s_fops_data.event_stats.tx_ready_pri0)
-#define tx_ready_pri1       (s_fops_data.event_stats.tx_ready_pri1)
-#define tx_ready_pri1_holdoff (s_fops_data.event_stats.tx_ready_pri1_holdoff)
-#define tx_ready_pri2       (s_fops_data.event_stats.tx_ready_pri2)
-#define tx_ready_prev0      (s_fops_data.event_stats.tx_ready_prev0)
-#define tx_ready_prev1      (s_fops_data.event_stats.tx_ready_prev1)
-#define tx_ready_prev2      (s_fops_data.event_stats.tx_ready_prev2)
-#define tx_queued_t         (s_fops_data.event_stats.stats[current_stat][0])
-#define tx_queued_pri0      (s_fops_data.event_stats.stats[current_stat][1])
-#define tx_queued_pri1      (s_fops_data.event_stats.stats[current_stat][2])
-#define tx_queued_pri2      (s_fops_data.event_stats.stats[current_stat][3])
-#define tx_dropped          (s_fops_data.event_stats.stats[current_stat][4])
-#define tx_total            (s_fops_data.event_stats.stats[current_stat][5])
-#define tx_process          (s_fops_data.event_stats.stats[current_stat][6])
-#define tx_modload          (s_fops_data.event_stats.stats[current_stat][7])
-#define tx_file             (s_fops_data.event_stats.stats[current_stat][8])
-#define tx_net              (s_fops_data.event_stats.stats[current_stat][9])
-#define tx_dns              (s_fops_data.event_stats.stats[current_stat][10])
-#define tx_proxy            (s_fops_data.event_stats.stats[current_stat][11])
-#define tx_block            (s_fops_data.event_stats.stats[current_stat][12])
-#define tx_other            (s_fops_data.event_stats.stats[current_stat][13])
+#define tx_ready_max        (s_fops_data.event_stats.tx_ready_max)
+#define tx_ready            (s_fops_data.event_stats.tx_ready)
+#define tx_queued_max       (s_fops_data.event_stats.stats[current_stat][0])
+#define tx_dropped          (s_fops_data.event_stats.stats[current_stat][1])
+#define tx_total            (s_fops_data.event_stats.stats[current_stat][2])
+#define tx_process          (s_fops_data.event_stats.stats[current_stat][3])
+#define tx_modload          (s_fops_data.event_stats.stats[current_stat][4])
+#define tx_file             (s_fops_data.event_stats.stats[current_stat][5])
+#define tx_net              (s_fops_data.event_stats.stats[current_stat][6])
+#define tx_dns              (s_fops_data.event_stats.stats[current_stat][7])
+#define tx_proxy            (s_fops_data.event_stats.stats[current_stat][8])
+#define tx_block            (s_fops_data.event_stats.stats[current_stat][9])
+#define tx_other            (s_fops_data.event_stats.stats[current_stat][10])
 
 
-#define mem_user            (s_fops_data.event_stats.stats[current_stat][14])
-#define mem_user_peak       (s_fops_data.event_stats.stats[current_stat][15])
-#define mem_kernel          (s_fops_data.event_stats.stats[current_stat][16])
-#define mem_kernel_peak     (s_fops_data.event_stats.stats[current_stat][17])
+#define mem_user            (s_fops_data.event_stats.stats[current_stat][11])
+#define mem_user_peak       (s_fops_data.event_stats.stats[current_stat][12])
+#define mem_kernel          (s_fops_data.event_stats.stats[current_stat][13])
+#define mem_kernel_peak     (s_fops_data.event_stats.stats[current_stat][14])
 
-static struct  fops_config_t
+static struct fops_config_t
 {
     // Our device special major number
     dev_t                  major;
@@ -187,6 +163,7 @@ static struct  fops_config_t
 static struct fops_data_t
 {
     uint64_t               lock;
+    struct list_head       tx_queue;
     CB_EVENT_STATS         event_stats;
 } s_fops_data;
 
@@ -226,10 +203,8 @@ bool ec_user_comm_initialize(ProcessContext *context)
 
     current_stat = 0;
     valid_stats  = 0;
-    atomic64_set(&tx_ready_pri0,         0);
-    atomic64_set(&tx_ready_pri1,         0);
-    atomic64_set(&tx_ready_pri1_holdoff, 0);
-    atomic64_set(&tx_ready_pri2,         0);
+    atomic64_set(&tx_ready,            0);
+    atomic64_set(&tx_ready_max,        0);
 
     memset(&s_fops_data.event_stats.stats, 0, sizeof(s_fops_data.event_stats.stats));
 
@@ -239,6 +214,7 @@ bool ec_user_comm_initialize(ProcessContext *context)
     mem_kernel_peak = kernel_mem;
 
     init_waitqueue_head(&s_fops_config.wq);
+    INIT_LIST_HEAD(&s_fops_data.tx_queue);
 
     // Initialize a workque struct to police the hashtable
     s_fops_config.stats_work_delay = msecs_to_jiffies(STAT_INTERVAL * 1000);
@@ -304,19 +280,26 @@ void ec_user_comm_disable(ProcessContext *context)
     ec_fops_comm_wake_up_reader(context);
 
     // Clear the queues now so all the memory can be freed properly before the subsystems are shutdown
-    ec_write_lock(&s_fops_data.lock, context);
-    __ec_user_comm_clear_queues_locked(context);
-    ec_write_unlock(&s_fops_data.lock, context);
+    ec_user_comm_clear_queues(context);
 }
 
 void ec_user_comm_clear_queues(ProcessContext *context)
 {
+    LIST_HEAD(local_tx_queue);
+
+    // We only need to lock when moving the contents from the real list to our local one
     ec_write_lock(&s_fops_data.lock, context);
-    __ec_user_comm_clear_queues_locked(context);
+    list_cut_position(&local_tx_queue, &s_fops_data.tx_queue, &s_fops_data.tx_queue);
     ec_write_unlock(&s_fops_data.lock, context);
+
+    // Clearing the queues can trigger sending an exit event. Since we're clearing the queues we don't need to send
+    //  the exit events.
+    DISABLE_SEND_EVENTS(context);
+    __ec_clear_tx_queue(&local_tx_queue, &tx_ready, context);
+    ENABLE_SEND_EVENTS(context);
 }
 
-void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, ProcessContext *context)
+void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *readyCount, ProcessContext *context)
 {
     struct list_head *eventNode;
     struct list_head *safeNode;
@@ -325,91 +308,67 @@ void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, Proce
     {
         list_del_init(eventNode);
         ec_free_event(&(container_of(eventNode, CB_EVENT_NODE, listEntry)->data), context);
-        atomic64_dec(tx_ready);
+        atomic64_dec(readyCount);
     }
 }
 
-void __ec_user_comm_clear_queues_locked(ProcessContext *context)
+void __ec_atomic64_set_if_greater(atomic64_t *item, uint64_t new_value)
 {
-    TRACE(DL_INFO, "%s: clear queues", __func__);
+    while (true)
+    {
+        uint64_t old_value = atomic64_read(item);
 
-    // Clearing the queues can trigger sending an exit event which will hang when ec_send_event
-    // locks this same lock. Since we're clearing the queues we don't need to send exit events.
-    DISABLE_SEND_EVENTS(context);
-     __ec_clear_tx_queue(&msg_queue_pri0, &tx_ready_pri0, context);
-     __ec_clear_tx_queue(&msg_queue_pri1, &tx_ready_pri1, context);
-     __ec_clear_tx_queue(&msg_queue_pri2, &tx_ready_pri2, context);
-    ENABLE_SEND_EVENTS(context);
+        if (new_value > old_value)
+        {
+            // If some other thread changed the atomic value we try again
+            if (atomic64_cmpxchg(item, old_value, new_value) != old_value)
+            {
+                continue;
+            }
+        }
+        break;
+    }
+}
+
+int ec_may_send_event(ProcessContext *context)
+{
+    CANCEL(s_fops_config.enabled, 0);
+    CANCEL(ALLOW_SEND_EVENTS(context), 0);
+    CANCEL(ec_is_reader_connected(), 0);
+
+    CANCEL_DO(atomic64_read(&tx_ready) < g_max_queue_size, 0, {
+        ++tx_dropped;
+    });
+
+    // If we get past the tests above we are safe to send
+    return 1;
 }
 
 int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 {
-    int               result     = -1;
-    uint64_t          readyCount = 0;
-    struct list_head *tx_queue   = NULL;
-    atomic64_t       *tx_ready   = NULL;
-    uint64_t          max_queue_size = 0;
-    int               payload;
-    CB_EVENT_NODE    *eventNode;
+    int                result     = -1;
+    uint64_t           readyCount = 0;
+    CB_EVENT_NODE     *eventNode = container_of(msg, CB_EVENT_NODE, data);
 
     TRY(ALLOW_SEND_EVENTS(context));
 
     TRY(s_fops_config.enabled);
     TRY(msg && ec_is_reader_connected());
 
-    eventNode = container_of(msg, CB_EVENT_NODE, data);
-    payload = __ec_precompute_payload(msg);
-
-    // Should not happen but it can
-    TRY(payload >= sizeof(struct CB_EVENT_UM));
-
-    eventNode->payload = (uint16_t)payload;
-
-    switch (msg->eventType)
-    {
-    case CB_EVENT_TYPE_PROCESS_START:
-    case CB_EVENT_TYPE_PROCESS_EXIT:
-    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-    case CB_EVENT_TYPE_PROCESS_BLOCKED:
-    case CB_EVENT_TYPE_PROCESS_NOT_BLOCKED:
-        tx_queue       = &msg_queue_pri0;
-        tx_ready       = &tx_ready_pri0;
-        max_queue_size = g_max_queue_size_pri0;
-        break;
-    case CB_EVENT_TYPE_MODULE_LOAD:
-        tx_queue       = &msg_queue_pri2;
-        tx_ready       = &tx_ready_pri2;
-        max_queue_size = g_max_queue_size_pri2;
-        break;
-    default:
-        tx_queue       = &msg_queue_pri1;
-        tx_ready       = &tx_ready_pri1;
-        max_queue_size = g_max_queue_size_pri1;
-        break;
-    }
-
     ec_write_lock(&s_fops_data.lock, context);
-    readyCount = atomic64_read(tx_ready);
-    if ((readyCount < max_queue_size ||
-         __ec_try_to_gain_capacity(tx_queue)))
-    {
-        list_add_tail(&(eventNode->listEntry), tx_queue);
-        atomic64_inc(tx_ready);
-        TRACE(DL_VERBOSE, "send_event_atomic %p %llu", msg, readyCount);
-        msg = NULL;
-    }
+    list_add_tail(&(eventNode->listEntry), &s_fops_data.tx_queue);
     ec_write_unlock(&s_fops_data.lock, context);
 
-    // This should be NULL by now.
-    TRY(!msg);
+    readyCount = atomic64_inc_return(&tx_ready);
+    TRACE(DL_VERBOSE, "send_event_atomic %p %llu", msg, readyCount);
+    msg = NULL;
 
-    // If we did enqueue the event, wake up the reader task if we are allowed to
-    if (ALLOW_WAKE_UP(context))
-    {
-        // NOTE: This call must happen outside the lock or it may cause a
-        //       deadlock woking up the task
-        ec_fops_comm_wake_up_reader(context);
-    }
+    // Possibly update the tx_ready_max if this is the most events queued for this interval
+    // TODO: percpu
+    __ec_atomic64_set_if_greater(&tx_ready_max, readyCount);
+
+    // Wake up the reader task if we are allowed to
+    ec_fops_comm_wake_up_reader(context);
     result = 0;
 
 CATCH_DEFAULT:
@@ -430,79 +389,6 @@ void ec_fops_comm_wake_up_reader(ProcessContext *context)
     {
         wake_up(&s_fops_config.wq);
     }
-}
-
-bool __ec_try_to_gain_capacity(struct list_head *tx_queue)
-{
-    bool              tx_queue_is_pri1 = tx_queue == &msg_queue_pri1;
-    uint64_t          qlen_pri0        = atomic64_read(&tx_ready_pri0);
-    uint64_t          qlen_pri1        = atomic64_read(&tx_ready_pri1);
-    uint64_t          pri1_holdoff     = atomic64_read(&tx_ready_pri1_holdoff);
-
-    //Calculate the percentage of used capacity
-    uint64_t          qlen_pri1_pct = (qlen_pri1*100) / g_max_queue_size_pri1;
-
-    // If P1 reaches 90% of its capacity we attempt to move some of its items to P0
-    //  before dropping events.  This allows us to always service P0 in priority order.
-    //  This will also guarantee that we will still service any process start event
-    //  before other events for the same process. (Any events currently in P1 must
-    //  already have an associated process start in P0.)
-    //
-    // We don't however want to do this if P0 also has a significant number of events
-    //  queued.  We use the simple criteria that the current number of events in P0 must
-    //  be less than what is in P1.
-    //
-    // We never want to drop any events if it can be avoided.  The events in P0 are
-    //  only more important than P1 because our tracking logic depends on it.  In
-    //  reality the events in P1 are more important to the customer, because these
-    //  represent the "interesting" events.  The events in P2 are really just informational,
-    //  so we do not take special care to preserved.hem.
-    //
-    // The legacy logic for CbR requires the Fork events to be at the P0 priority
-    //  for its tracking purpose.  In reality these events are not very interesting,
-    //  and could be placed in the P2 queue.
-    if (tx_queue_is_pri1 &&
-        pri1_holdoff == 0 &&
-        qlen_pri1_pct >= 90 &&
-        qlen_pri0 < qlen_pri1)
-    {
-        LIST_HEAD(tempList);
-        struct list_head *eventNode;
-        uint64_t           events_to_move = qlen_pri1 / 2;
-        const unsigned int overrun_log_frequency = 1000;
-        static unsigned int overrun_count;
-
-        // Update the counters to reflect that we moved some events
-        //  We set the holdoff to three times what we moved
-        pri1_holdoff = events_to_move * 3;
-        atomic64_set(&tx_ready_pri1_holdoff, pri1_holdoff);
-        atomic64_add(events_to_move, &tx_ready_pri0);
-        atomic64_sub(events_to_move, &tx_ready_pri1);
-
-        if (overrun_count++ % overrun_log_frequency == 0) {
-            TRACE(DL_WARNING,
-                  "P1 queue full, moving %llu events to P0.  Will holdoff for at least %llu events (count=%u).",
-                  events_to_move, pri1_holdoff, overrun_count);
-        }
-
-        // We need to iterate over the P1 queue from the beginning to find the point
-        //  where we want to split the queue.
-        list_for_each(eventNode, &msg_queue_pri1)
-        {
-            if (--events_to_move == 0)
-            {
-                break;
-            }
-        }
-
-        // Use the split point to move a bunch of events to a temporary list, and leave
-        //  rest at the head of the P1 queue.  The tepmorary list can then be added
-        //  to the end of the P0 queue.
-        list_cut_position(&tempList, &msg_queue_pri1, eventNode);
-        list_splice_tail(&tempList, &msg_queue_pri0);
-        return true;
-    }
-    return false;
 }
 
 ssize_t ec_device_read(struct file *f,  char __user *ubuf, size_t count, loff_t *offset)
@@ -526,56 +412,39 @@ CATCH_DEFAULT:
 
 int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessContext *context)
 {
-    uint64_t qlen_pri0;
-    uint64_t qlen_pri1;
-    uint64_t qlen_pri2;
-    struct list_head  *tx_queue = NULL;
-    atomic64_t        *tx_ready = NULL;
-    CB_EVENT_NODE     *eventNode = NULL;
     int xcode = -ENOMEM;
+    uint64_t qlen;
 
     if (count < sizeof(struct CB_EVENT_UM))
     {
         return -ENOMEM;
     }
 
-    qlen_pri0 = atomic64_read(&tx_ready_pri0);
-    qlen_pri1 = atomic64_read(&tx_ready_pri1);
-    qlen_pri2 = atomic64_read(&tx_ready_pri2);
-
-    TRY_DO_MSG((qlen_pri0 > 0 || qlen_pri1 > 0 || qlen_pri2 > 0),
+    qlen = atomic64_read(&tx_ready);
+    TRY_DO_MSG(qlen > 0,
                 { xcode = -ENOMEM; },
                 DL_COMMS,
                 "%s: empty queue", __func__);
 
-    ec_write_lock(&s_fops_data.lock, context);
-    // select the queue - taken from __ec_get_tx_queue_to_serve
-    if (qlen_pri0 != 0)
     {
-        tx_queue = &msg_queue_pri0;
-        tx_ready = &tx_ready_pri0;
-    } else if (qlen_pri1 != 0)
-    {
-        tx_queue = &msg_queue_pri1;
-        tx_ready = &tx_ready_pri1;
-    } else
-    {
-        tx_queue = &msg_queue_pri2;
-        tx_ready = &tx_ready_pri2;
-    }
+        CB_EVENT_NODE *eventNode = NULL;
 
-    eventNode = list_first_entry_or_null(tx_queue, CB_EVENT_NODE, listEntry);
-    if (eventNode && count >= eventNode->payload &&
-        eventNode->payload >= sizeof(struct CB_EVENT_UM))
-    {
-        // when we know for sure we can send this event
-        __ec_decrease_holdoff_counter(tx_ready);
-        list_del_init(&eventNode->listEntry);
-        atomic64_dec(tx_ready);
-        *cb_event = &eventNode->data;
-        xcode = eventNode->payload;
+        ec_write_lock(&s_fops_data.lock, context);
+        eventNode = list_first_entry_or_null(&s_fops_data.tx_queue, CB_EVENT_NODE, listEntry);
+        if (eventNode)
+        {
+            list_del(&eventNode->listEntry);
+        }
+        ec_write_unlock(&s_fops_data.lock, context);
+
+        if (eventNode && count >= eventNode->payload &&
+            eventNode->payload >= sizeof(struct CB_EVENT_UM))
+        {
+            atomic64_dec(&tx_ready);
+            *cb_event = &eventNode->data;
+            xcode = eventNode->payload;
+        }
     }
-    ec_write_unlock(&s_fops_data.lock, context);
 
 CATCH_DEFAULT:
 
@@ -784,51 +653,6 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-// Note, this is expected to be called with the lock held
-void __ec_get_tx_queue_to_serve(struct list_head **tx_queue, atomic64_t **tx_ready)
-{
-    uint64_t          qlen_pri0    = atomic64_read(&tx_ready_pri0);
-    uint64_t          qlen_pri1    = atomic64_read(&tx_ready_pri1);
-
-    if (qlen_pri0 != 0)
-    {
-        *tx_queue = &msg_queue_pri0;
-        *tx_ready = &tx_ready_pri0;
-    } else if (qlen_pri1 != 0)
-    {
-        *tx_queue = &msg_queue_pri1;
-        *tx_ready = &tx_ready_pri1;
-    } else
-    {
-        *tx_queue = &msg_queue_pri2;
-        *tx_ready = &tx_ready_pri2;
-    }
-
-    __ec_decrease_holdoff_counter(*tx_ready);
-}
-
-void __ec_decrease_holdoff_counter(atomic64_t *tx_ready)
-{
-    uint64_t pri1_holdoff = atomic64_read(&tx_ready_pri1_holdoff);
-
-    // The holdoff counter helps us to ensure that we do not allow the P0 queue
-    //  to get backed up.  If we moved events from P1 to P0 then we want to decrese
-    //  the holdoff counter.  Only worry about counting this down if we are actually
-    //  servicing events from the P0 queue.  If we are able to service events from
-    //  another queue, just reset the counter.  This is because moveing events from
-    //  P1 again would not be introducing a backup in P0.
-    if (pri1_holdoff != 0)
-    {
-        if (tx_ready == &tx_ready_pri0)
-        {
-            atomic64_dec(&tx_ready_pri1_holdoff);
-        } else
-        {
-            atomic64_set(&tx_ready_pri1_holdoff, 0);
-        }
-    }
-}
-
 int ec_device_open(struct inode *inode, struct file *filp)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
@@ -877,7 +701,7 @@ unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
     // Check if data is available and lets go
-    qlen = atomic64_read(&tx_ready_pri0) + atomic64_read(&tx_ready_pri1) + atomic64_read(&tx_ready_pri2);
+    qlen = atomic64_read(&tx_ready);
     TRY_MSG(qlen == 0, DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
     // We should call poll_wait here if we want the kernel to actually
@@ -885,7 +709,7 @@ unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
     TRACE(DL_COMMS, "%s: waiting for data", __func__);
     poll_wait(filp, &s_fops_config.wq, pts);
 
-    qlen = atomic64_read(&tx_ready_pri0) + atomic64_read(&tx_ready_pri1) + atomic64_read(&tx_ready_pri2);
+    qlen = atomic64_read(&tx_ready);
     TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
 CATCH_DEFAULT:
@@ -1279,12 +1103,6 @@ void __ec_stats_work_task(struct work_struct *work)
 {
     uint32_t         curr   = s_fops_data.event_stats.curr;
     uint32_t         next   = (curr + 1) % MAX_INTERVALS;
-    uint64_t         ready0 = atomic64_read(&tx_ready_pri0);
-    uint64_t         ready1 = atomic64_read(&tx_ready_pri1);
-    uint64_t         ready2 = atomic64_read(&tx_ready_pri2);
-    uint64_t         prev0  = atomic64_read(&tx_ready_prev0);
-    uint64_t         prev1  = atomic64_read(&tx_ready_prev1);
-    uint64_t         prev2  = atomic64_read(&tx_ready_prev2);
     int              i;
     size_t           kernel_mem;
     size_t           kernel_mem_peak;
@@ -1295,25 +1113,9 @@ void __ec_stats_work_task(struct work_struct *work)
     //  chance that a counter will be missed.  I am willing to allow that for the sake of
     //  performance.
 
-    // tx_ready_X are live counters that rise and fall as events are generated. Add whatever
-    //  is new in this variable to the current stat.
-    if (ready0 > prev0)
-    {
-        tx_queued_pri0 = ready0 - prev0;
-    }
-    if (ready1 > prev1)
-    {
-        tx_queued_pri1 = ready1 - prev1;
-    }
-    if (ready2 > prev2)
-    {
-        tx_queued_pri2 = ready2 - prev2;
-    }
-
-    // Save the current totals for nex time
-    atomic64_set(&tx_ready_prev0, ready0);
-    atomic64_set(&tx_ready_prev1, ready1);
-    tx_queued_t = ready0 + ready1;
+    // tx_ready_max is a live counters that is set for each interval.
+    //   Clear tx_ready_max and set the current value at the same time
+    tx_queued_max += atomic64_xchg(&tx_ready_max, 0);
 
     // Copy over the current total to the next interval
     for (i = 0; i < NUM_STATS; ++i)

@@ -35,9 +35,7 @@ uint32_t g_traceLevel = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARNING | DL_ERROR
 uint64_t g_enableHooks = HOOK_MASK;
 uid_t    g_edr_server_uid = (uid_t)-1;
 bool     g_exiting;
-uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
+uint32_t g_max_queue_size = MSG_QUEUE_SIZE;
 uint32_t ec_prsock_buflen;
 bool     g_run_self_tests;
 bool     g_enable_hook_tracking;
@@ -52,9 +50,7 @@ CB_DRIVER_CONFIG g_driver_config = {
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param(g_max_queue_size, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param(g_enable_hook_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
