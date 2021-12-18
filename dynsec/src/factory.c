@@ -1633,7 +1633,6 @@ static void fill_in_task_ctx(struct dynsec_task_ctx *task_ctx)
 
 static inline bool has_backing_device_info(const struct super_block *sb)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
     const struct backing_dev_info *bdi;
 
     if (!sb) {
@@ -1655,22 +1654,17 @@ static inline bool has_backing_device_info(const struct super_block *sb)
     if (bdi->capabilities & BDI_CAP_SWAP_BACKED) {
         return false;
     }
-    return (bdi->dev && bdi->dev->devt == sb->s_dev);
+    return true;
 #else
+    // Checking for an owning device always valid?
     if (!bdi->owner) {
         return false;
     }
-
-    // Having an owner might be enough?
-    // return true;
-
+    return true;
     // Typically the owner's devt will match the sb's s_dev,
     // when it has a backing device.
-    return (bdi->owner->devt == sb->s_dev);
+    // return (bdi->owner->devt == sb->s_dev);
 #endif /* less than 4.18.0 */
-#else
-    return false;
-#endif
 }
 
 static void fill_in_sb_data(struct dynsec_file *dynsec_file,
