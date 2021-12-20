@@ -1672,13 +1672,17 @@ static void fill_in_sb_data(struct dynsec_file *dynsec_file,
 {
     if (sb) {
         if (!(dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE)) {
-            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DEVICE;
             dynsec_file->dev = new_encode_dev(sb->s_dev);
             dynsec_file->sb_magic = sb->s_magic;
+
+            // set device attr flag
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_DEVICE;
         }
 
         if (!(dynsec_file->attr_mask & (DYNSEC_FILE_ATTR_HAS_BACKING)) &&
             has_backing_device_info(sb)) {
+
+            // set backing device attr flag
             dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_HAS_BACKING;
         }
     }
@@ -1689,13 +1693,17 @@ static void fill_in_parent_sb_data(struct dynsec_file *dynsec_file,
 {
     if (dynsec_file && sb) {
         if (!(dynsec_file->attr_mask & DYNSEC_FILE_ATTR_PARENT_DEVICE)) {
-            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
             dynsec_file->parent_dev = new_encode_dev(sb->s_dev);
             // Currently does not send parent sb_magic value
+
+            // set parent dev attr flag
+            dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_DEVICE;
         }
 
         if (!(dynsec_file->attr_mask & (DYNSEC_FILE_ATTR_PARENT_HAS_BACKING)) &&
             has_backing_device_info(sb)) {
+
+            // set parent dev backing attr flag
             dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_HAS_BACKING;
         }
     }
@@ -1705,7 +1713,6 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
                                  const struct inode *inode)
 {
     if (dynsec_file && inode) {
-        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_INODE;
         dynsec_file->ino = inode->i_ino;
         dynsec_file->umode = inode->i_mode;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -1718,7 +1725,11 @@ static void fill_in_inode_data(struct dynsec_file *dynsec_file,
         dynsec_file->size = inode->i_size;
         dynsec_file->count = atomic_read(&inode->i_count);
         dynsec_file->nlink = inode->i_nlink;
-        // This is likely in accurate and should be over written
+
+        // set inode attr flag
+        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_INODE;
+
+        // This could be in accurate and should be over written
         // by either dentry or vfsmount accessed super_block
         fill_in_sb_data(dynsec_file, inode->i_sb);
     }
@@ -1729,7 +1740,6 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
                                 struct inode *parent_dir)
 {
     if (dynsec_file && parent_dir) {
-        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_INODE;
         dynsec_file->parent_ino = parent_dir->i_ino;
         dynsec_file->parent_umode = parent_dir->i_mode;
         if (!IS_POSIXACL(parent_dir)) {
@@ -1743,6 +1753,9 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
         dynsec_file->parent_uid = parent_dir->i_uid;
         dynsec_file->parent_gid = parent_dir->i_gid;
 #endif
+
+        // set parent inode attr flag
+        dynsec_file->attr_mask |= DYNSEC_FILE_ATTR_PARENT_INODE;
     }
 }
 
