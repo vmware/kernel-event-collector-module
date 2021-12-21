@@ -46,8 +46,6 @@ char  *static_interpreter_names[] = {
 char **g_interpreter_names = static_interpreter_names;
 int    g_interpreter_names_count = sizeof(static_interpreter_names)/sizeof(char *);
 
-bool g_print_proc_on_delete;
-
 bool ec_process_tracking_should_track_user(void)
 {
     return g_driver_config.report_process_user == ENABLE;
@@ -55,11 +53,11 @@ bool ec_process_tracking_should_track_user(void)
 
 bool ec_process_tracking_initialize(ProcessContext *context)
 {
-    g_print_proc_on_delete = false;
     ec_hashtbl_init(&g_process_tracking_data.table, context);
 
     TRY(ec_mem_cache_create(&g_process_tracking_data.exec_identity_cache, "pt_exec_identity_cache", sizeof(ExecIdentity), context));
 
+    g_process_tracking_data.initialized = true;
     return true;
 
 CATCH_DEFAULT:
@@ -69,13 +67,11 @@ CATCH_DEFAULT:
 
 void ec_process_tracking_shutdown(ProcessContext *context)
 {
-    g_print_proc_on_delete = true;
+    g_process_tracking_data.initialized = false;
 
     ec_hashtbl_destroy(&g_process_tracking_data.table, context);
 
     ec_mem_cache_destroy(&g_process_tracking_data.exec_identity_cache, context);
-
-    g_print_proc_on_delete = false;
 }
 
 ProcessHandle *ec_process_tracking_get_handle(pid_t pid, ProcessContext *context)
@@ -263,14 +259,16 @@ ProcessHandle *ec_process_tracking_create_process(
 
         if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
         {
-            TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d) (active: %" PRFs64 ")",
+            TRACE(DL_PROC_TRACKING, "TRACK-INS %s%s of %d by %d (reported as %d by %d)",
                   msg,
                   ec_process_path(process_handle),
                   pid,
                   parent,
                   ec_process_exec_identity(process_handle)->exec_details.pid,
-                  ec_process_exec_identity(process_handle)->exec_parent_details.pid,
-                  (long long) atomic64_read(&ec_process_exec_identity(process_handle)->active_process_count));
+                  ec_process_exec_identity(process_handle)->exec_parent_details.pid);
+            #ifdef _REF_DEBUGGING
+            __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, ec_process_exec_identity(process_handle), context);
+            #endif
         }
     }
 
@@ -430,7 +428,7 @@ ProcessHandle *ec_process_tracking_update_process(
 
     if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
     {
-        TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld) (active: %" PRFs64 ")",
+        TRACE(DL_PROC_TRACKING, "TRACK-UPD %s%s of %d by %d (reported as %d:%ld by %d:%ld)",
               msg,
               SAFE_STRING(ec_process_path(process_handle)),
               pid,
@@ -438,8 +436,10 @@ ProcessHandle *ec_process_tracking_update_process(
               exec_identity->exec_details.pid,
               exec_identity->exec_details.start_time,
               exec_identity->exec_parent_details.pid,
-              exec_identity->exec_parent_details.start_time,
-              (long long)atomic64_read(&exec_identity->active_process_count));
+              exec_identity->exec_parent_details.start_time);
+        #ifdef _REF_DEBUGGING
+        __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
+        #endif
     }
 
 CATCH_DEFAULT:
@@ -590,49 +590,6 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
     }
 }
 
-void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
-{
-    PCB_EVENT exit_event;
-
-    CANCEL_VOID(exec_identity);
-
-    #ifdef _REF_DEBUGGING
-    if (MAY_TRACE_LEVEL(DL_PROC_TRACKING))
-    {
-        char *path = ec_process_tracking_get_path(exec_identity, context);
-
-        TRACE(DL_PROC_TRACKING, "    %s: %s %d exec_identity Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
-            __func__,
-            ec_process_tracking_get_proc_name(path),
-            exec_identity->exec_details.pid,
-            (long long)atomic64_read(&exec_identity->reference_count),
-            (long long)atomic64_read(&exec_identity->active_process_count),
-            exec_identity);
-        ec_process_tracking_put_path(path, context);
-    }
-    #endif
-
-    // If the reference count reaches 0, then delete it
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->reference_count, {
-        // Free the lock
-        ec_spinlock_destroy(&exec_identity->string_lock, context);
-
-        // Free the path and commandline
-        ec_path_cache_put(exec_identity->path_data, context);
-        ec_mem_put(exec_identity->cmdline);
-
-        exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
-
-        // Send the exit
-        ec_event_send_last_exit(exit_event, context);
-
-        // TODO: Add lock here
-
-        // Free the shared data
-        ec_mem_cache_free(exec_identity, context);
-    });
-}
-
 // Note: This function is used as a callback by the generic hash table to
 //  delete our private data.
 void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
@@ -641,23 +598,9 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
     {
         PosixIdentity *posix_identity = (PosixIdentity *)data;
 
-        if (g_print_proc_on_delete && posix_identity && MAY_TRACE_LEVEL(DL_INFO))
+        if (!g_process_tracking_data.initialized)
         {
-            ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
-            char *path = ec_process_tracking_get_path(exec_identity, context);
-
-            if (exec_identity)
-            {
-                TRACE(DL_INFO, "    %s: %s %d exec_identity Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
-                      __func__,
-                      ec_process_tracking_get_proc_name(path),
-                      exec_identity->exec_details.pid,
-                      (long long) atomic64_read(&(exec_identity->reference_count)),
-                      (long long) atomic64_read(&(exec_identity->active_process_count)),
-                      exec_identity);
-            }
-            ec_process_tracking_put_path(path, context);
-            ec_process_tracking_put_exec_identity(exec_identity, context);
+            __ec_process_tracking_print_ref(DL_INFO, __func__, posix_identity->exec_identity, context);
         }
 
         // We do not need to lock here because it is done in the delete callback (from the last reference)
@@ -677,18 +620,8 @@ void *ec_hashtbl_handle_callback(void *data, ProcessContext *context)
 // kmem cache entries that are still alive when the cache is destroyed.
 void __ec_process_exec_identity_print_callback(void *data, ProcessContext *context)
 {
-    if (data && MAY_TRACE_LEVEL(DL_INFO))
-    {
-        ExecIdentity *exec_identity = (ExecIdentity *)data;
-        char *path = ec_process_tracking_get_path(exec_identity, context);
+    ExecIdentity *exec_identity = (ExecIdentity *)data;
 
-        TRACE(DL_INFO, "    %s: %s %d exec_identity Ref count: %" PRFs64 "/%" PRFs64 " (%p)",
-              __func__,
-              ec_process_tracking_get_proc_name(path),
-              exec_identity->exec_details.pid,
-              (long long)atomic64_read(&(exec_identity->reference_count)),
-              (long long)atomic64_read(&(exec_identity->active_process_count)),
-              exec_identity);
-        ec_process_tracking_put_path(path, context);
-    }
+    CANCEL_VOID(exec_identity);
+    __ec_process_tracking_print_ref(DL_ERROR, __func__, exec_identity, context);
 }
