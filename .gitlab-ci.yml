@@ -5,7 +5,7 @@
 # Include gitlab-ci-base.yml from cb-build-util.
 #  Update the git hash to use a newer version of the base yaml
 #  Note: This can be a branch name for testing but should be a git hash/tag for reproducability
-include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/raw/f4f2b65c386b4c9a5b9a8a1a1c3cc6a5e4534801/gitlab-ci-base.yml'
+include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/-/raw/809cd39ce7ce348ce0170ca6c712962d4223a952/gitlab-ci-base.yml'
 
 # Gitlab CI configuration script for event-collector-app.
 variables:
