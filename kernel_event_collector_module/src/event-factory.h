@@ -65,3 +65,5 @@ void ec_event_send_net_proxy(ProcessHandle  *process_handle,
 void ec_event_send_dns(CB_EVENT_TYPE          net_event_type,
                        CB_EVENT_DNS_RESPONSE *response,
                        ProcessContext        *context);
+
+const char *ec_EventType_ToString(int event_type);

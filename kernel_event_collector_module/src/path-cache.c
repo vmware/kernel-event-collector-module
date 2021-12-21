@@ -12,6 +12,7 @@
 
 void __ec_path_cache_delete_callback(void *data, ProcessContext *context);
 int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
+void __ec_path_cache_print_callback(void *datap, ProcessContext *context);
 
 static HashTbl __read_mostly s_path_cache = {
     .numberOfBuckets = 1024,
@@ -21,6 +22,7 @@ static HashTbl __read_mostly s_path_cache = {
     .key_offset  = offsetof(PathData, key),
     .refcount_offset = offsetof(PathData, reference_count),
     .delete_callback = __ec_path_cache_delete_callback,
+    .printval_callback = __ec_path_cache_print_callback,
 };
 
 
@@ -154,4 +156,20 @@ int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessCon
     }
 
     return ACTION_CONTINUE;
+}
+
+void __ec_path_cache_print_callback(void *datap, ProcessContext *context)
+{
+    PathData *path_data = (PathData *)datap;
+
+    if (datap)
+    {
+        TRACE(DL_ERROR, "    FILE-CACHE [%llu:%llu] %s (%s) (ref: %lld) (%p)",
+                   path_data->key.device,
+                   path_data->key.inode,
+                   path_data->path,
+                   ec_mem_cache_is_owned(path_data, context) ? "owned" : "not owned",
+                   ec_mem_cache_ref_count(path_data, context),
+                   path_data);
+    }
 }

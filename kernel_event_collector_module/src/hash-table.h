@@ -34,6 +34,8 @@ typedef void (*hashtbl_delete_cb)(void *datap, ProcessContext *context);
 // Optionally get a handle pointer
 typedef void *(*hashtbl_handle_cb)(void *datap, ProcessContext *context);
 
+typedef void (*hashtbl_printval_cb)(void *datap, ProcessContext *context);
+
 typedef struct hashbtl_bkt {
     uint64_t lock;
     struct hlist_head head;
@@ -60,6 +62,7 @@ typedef struct hashtbl {
     bool debug_logging;
     hashtbl_delete_cb delete_callback;
     hashtbl_handle_cb handle_callback;
+    hashtbl_printval_cb printval_callback;
 } HashTbl;
 
 bool ec_hashtbl_startup(ProcessContext *context);

@@ -11,6 +11,7 @@ typedef struct hash_table_node {
     struct hlist_node link;
     u32 hash;
     u32 activity;
+    HashTbl *hashTblp;
 } HashTableNode;
 
 static const size_t HASH_NODE_SZ = sizeof(HashTableNode);
@@ -18,6 +19,7 @@ static const size_t HASH_NODE_SZ = sizeof(HashTableNode);
 bool __ec_hashtbl_proc_initialize(HashTbl *hashTblp, ProcessContext *context);
 void __ec_hashtbl_proc_shutdown(HashTbl *hashTblp, ProcessContext *context);
 void __ec_hashtbl_free(HashTbl *hashTblp, HashTableNode *nodep, ProcessContext *context);
+void __ec_hashtbl_print_callback(void *data, ProcessContext *context);
 
 static inline atomic64_t *__ec_get_refcountp(const HashTbl *hashTblp, void *datap)
 {
@@ -150,6 +152,11 @@ bool ec_hashtbl_init(
         void *plru_storage_p = tbl_storage_p + sizeof(HashTbl) + (hashTblp->numberOfBuckets * sizeof(HashTableBkt));
 
         ec_plru_init(&hashTblp->plru, hashTblp->numberOfBuckets, plru_storage_p, context);
+    }
+
+    if (hashTblp->printval_callback)
+    {
+        hashTblp->hash_cache.printval_callback = __ec_hashtbl_print_callback;
     }
 
     TRY_MSG(ec_mem_cache_create(&hashTblp->hash_cache, hashTblp->name, hashTblp->datasize + HASH_NODE_SZ, context),
@@ -543,6 +550,7 @@ int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *data
     } else
     {
         pr_err("Attempt to delete a NULL object from the hash table");
+        dump_stack();
     }
 
     return -1;
@@ -628,6 +636,7 @@ void *ec_hashtbl_alloc(HashTbl *hashTblp, ProcessContext *context)
 
     nodep->activity = 0;
     nodep->hash = 0;
+    nodep->hashTblp = hashTblp;
     INIT_HLIST_NODE(&nodep->link);
     return __ec_get_datap(hashTblp, nodep);
 }
@@ -917,5 +926,15 @@ void __ec_hashtbl_proc_shutdown(HashTbl *hashTblp, ProcessContext *context)
     CANCEL_VOID(hashTblp);
 
     remove_proc_entry(hashTblp->name, g_cb_hashtbl_proc_dir);
+}
+
+void __ec_hashtbl_print_callback(void *data, ProcessContext *context)
+{
+    HashTableNode *nodep = (HashTableNode *)data;
+
+    if (nodep && nodep->hashTblp && nodep->hashTblp->printval_callback)
+    {
+        nodep->hashTblp->printval_callback(__ec_get_datap(nodep->hashTblp, nodep), context);
+    }
 }
 

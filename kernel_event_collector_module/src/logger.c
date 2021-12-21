@@ -9,7 +9,10 @@
 #include "mem-alloc.h"
 #include "cb-banning.h"
 #include "process-tracking.h"
+#include "event-factory.h"
 #include "version.h"
+
+void __ec_logger_event_print_callback(void *data, ProcessContext *context);
 
 #pragma pack(push, 1)
 typedef struct _logger_work {
@@ -21,7 +24,9 @@ typedef struct _logger_work {
 logger_work, *plogger_work;
 #pragma pack(pop)
 
-static CB_MEM_CACHE s_event_cache;
+static CB_MEM_CACHE s_event_cache = {
+    .printval_callback = __ec_logger_event_print_callback,
+};
 
 static const struct timespec null_time = {0, 0};
 
@@ -299,5 +304,19 @@ bool ec_logger_initialize(ProcessContext *context)
 void ec_logger_shutdown(ProcessContext *context)
 {
     ec_mem_cache_destroy(&s_event_cache, context);
+}
+
+// Note: This function is used as a callback by the cb-mem-cache to print any
+// kmem cache entries that are still alive when the cache is destroyed.
+void __ec_logger_event_print_callback(void *data, ProcessContext *context)
+{
+    if (data && MAY_TRACE_LEVEL(DL_ERROR))
+    {
+        CB_EVENT_NODE *node = (CB_EVENT_NODE *)data;
+
+        TRACE(DL_ERROR, "    %s: %s",
+              __func__,
+              ec_EventType_ToString(node->data.eventType));
+    }
 }
 

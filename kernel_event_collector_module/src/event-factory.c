@@ -408,3 +408,31 @@ void ec_event_send_dns(
     // Queue it to be sent to usermode
     ec_send_event(event, context);
 }
+
+const char *ec_EventType_ToString(int event_type)
+{
+    switch (event_type)
+    {
+    case CB_EVENT_TYPE_PROCESS_START: return "START"; break;
+    case CB_EVENT_TYPE_PROCESS_EXIT: return "EXIT"; break;
+    case CB_EVENT_TYPE_MODULE_LOAD: return "MODULE LOAD"; break;
+    case CB_EVENT_TYPE_FILE_CREATE: return "FILE CREATE"; break;
+    case CB_EVENT_TYPE_FILE_DELETE: return "FILE DELETE"; break;
+    case CB_EVENT_TYPE_FILE_WRITE: return "FILE WRITE"; break;
+    case CB_EVENT_TYPE_FILE_CLOSE: return "FILE CLOSE"; break;
+    case CB_EVENT_TYPE_FILE_OPEN: return "FILE OPEN"; break;
+    case CB_EVENT_TYPE_NET_CONNECT_PRE: return "NET CONECT PRE"; break;
+    case CB_EVENT_TYPE_NET_CONNECT_POST: return "NET CONNECT POST"; break;
+    case CB_EVENT_TYPE_NET_ACCEPT: return "NET ACCEPT"; break;
+    case CB_EVENT_TYPE_DNS_RESPONSE: return "DNS RESPONSE"; break;
+    case CB_EVENT_TYPE_PROCESS_BLOCKED: return "BLOCK"; break;
+    case CB_EVENT_TYPE_WEB_PROXY: return "WEB PROXY"; break;
+    case CB_EVENT_TYPE_HEARTBEAT: return "HEARTBEAT"; break;
+    case CB_EVENT_TYPE_PROCESS_START_FORK: return "FORK"; break;
+    case CB_EVENT_TYPE_PROCESS_START_EXEC: return "EXEC"; break;
+    case CB_EVENT_TYPE_PROCESS_LAST_EXIT: return "LAST EXIT"; break;
+    default:
+        break;
+    }
+    return "UNKNOWN";
+}
