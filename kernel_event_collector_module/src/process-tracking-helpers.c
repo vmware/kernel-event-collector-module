@@ -536,5 +536,5 @@ ExecIdentity *ec_exec_identity(ExecHandle *exec_handle)
 
 char *ec_exec_path(ExecHandle *exec_handle)
 {
-    return exec_handle ? exec_handle->path_data->path : NULL;
+    return (exec_handle && exec_handle->path_data) ? exec_handle->path_data->path : NULL;
 }

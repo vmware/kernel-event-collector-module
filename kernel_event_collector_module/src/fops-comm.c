@@ -53,6 +53,7 @@ char *__ec_driver_config_option_to_string(CB_CONFIG_OPTION config_option);
 void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
 int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *context);
 int __ec_precompute_payload(struct CB_EVENT *cb_event);
+void __ec_stats_work_task(struct work_struct *work);
 
 // checkpatch-ignore: CONST_STRUCT
 struct file_operations driver_fops = {
@@ -65,10 +66,6 @@ struct file_operations driver_fops = {
 };
 // checkpatch-no-ignore: CONST_STRUCT
 
-// Our device special major number
-static dev_t g_maj_t;
-struct cdev ec_cdev;
-
 static LIST_HEAD(msg_queue_pri0);
 static LIST_HEAD(msg_queue_pri1);
 static LIST_HEAD(msg_queue_pri2);
@@ -79,8 +76,6 @@ static const uint64_t MAX_VALID_INTERVALS =   60;
 #define  EVENT_STATS             13
 #define  MEM_START               EVENT_STATS
 #define  MEM_STATS               (EVENT_STATS + 4)
-
-
 
 typedef struct CB_EVENT_STATS {
     // This is a circular array of elements were each element is an increasing sum from the
@@ -120,7 +115,7 @@ typedef struct CB_EVENT_STATS {
     uint64_t        validStats;
 } CB_EVENT_STATS, *PCB_EVENT_STATS;
 
-const struct {
+const static struct {
     const char *name;
     const char *str_format;
     const char *num_format;
@@ -145,82 +140,89 @@ const struct {
     { "Kernel Peak",    " %12s |", " %12d |" }
 };
 
-static CB_EVENT_STATS s_event_stats;
+#define current_stat        (s_fops_data.event_stats.curr)
+#define valid_stats         (s_fops_data.event_stats.validStats)
+#define tx_ready_pri0       (s_fops_data.event_stats.tx_ready_pri0)
+#define tx_ready_pri1       (s_fops_data.event_stats.tx_ready_pri1)
+#define tx_ready_pri1_holdoff (s_fops_data.event_stats.tx_ready_pri1_holdoff)
+#define tx_ready_pri2       (s_fops_data.event_stats.tx_ready_pri2)
+#define tx_ready_prev0      (s_fops_data.event_stats.tx_ready_prev0)
+#define tx_ready_prev1      (s_fops_data.event_stats.tx_ready_prev1)
+#define tx_ready_prev2      (s_fops_data.event_stats.tx_ready_prev2)
+#define tx_queued_t         (s_fops_data.event_stats.stats[current_stat][0])
+#define tx_queued_pri0      (s_fops_data.event_stats.stats[current_stat][1])
+#define tx_queued_pri1      (s_fops_data.event_stats.stats[current_stat][2])
+#define tx_queued_pri2      (s_fops_data.event_stats.stats[current_stat][3])
+#define tx_dropped          (s_fops_data.event_stats.stats[current_stat][4])
+#define tx_total            (s_fops_data.event_stats.stats[current_stat][5])
+#define tx_process          (s_fops_data.event_stats.stats[current_stat][6])
+#define tx_modload          (s_fops_data.event_stats.stats[current_stat][7])
+#define tx_file             (s_fops_data.event_stats.stats[current_stat][8])
+#define tx_net              (s_fops_data.event_stats.stats[current_stat][9])
+#define tx_dns              (s_fops_data.event_stats.stats[current_stat][10])
+#define tx_proxy            (s_fops_data.event_stats.stats[current_stat][11])
+#define tx_block            (s_fops_data.event_stats.stats[current_stat][12])
+#define tx_other            (s_fops_data.event_stats.stats[current_stat][13])
 
 
-#define current_stat        (s_event_stats.curr)
-#define valid_stats         (s_event_stats.validStats)
-#define tx_ready_pri0       (s_event_stats.tx_ready_pri0)
-#define tx_ready_pri1       (s_event_stats.tx_ready_pri1)
-#define tx_ready_pri1_holdoff (s_event_stats.tx_ready_pri1_holdoff)
-#define tx_ready_pri2       (s_event_stats.tx_ready_pri2)
-#define tx_ready_prev0      (s_event_stats.tx_ready_prev0)
-#define tx_ready_prev1      (s_event_stats.tx_ready_prev1)
-#define tx_ready_prev2      (s_event_stats.tx_ready_prev2)
-#define tx_queued_t         (s_event_stats.stats[current_stat][0])
-#define tx_queued_pri0      (s_event_stats.stats[current_stat][1])
-#define tx_queued_pri1      (s_event_stats.stats[current_stat][2])
-#define tx_queued_pri2      (s_event_stats.stats[current_stat][3])
-#define tx_dropped          (s_event_stats.stats[current_stat][4])
-#define tx_total            (s_event_stats.stats[current_stat][5])
-#define tx_process          (s_event_stats.stats[current_stat][6])
-#define tx_modload          (s_event_stats.stats[current_stat][7])
-#define tx_file             (s_event_stats.stats[current_stat][8])
-#define tx_net              (s_event_stats.stats[current_stat][9])
-#define tx_dns              (s_event_stats.stats[current_stat][10])
-#define tx_proxy            (s_event_stats.stats[current_stat][11])
-#define tx_block            (s_event_stats.stats[current_stat][12])
-#define tx_other            (s_event_stats.stats[current_stat][13])
+#define mem_user            (s_fops_data.event_stats.stats[current_stat][14])
+#define mem_user_peak       (s_fops_data.event_stats.stats[current_stat][15])
+#define mem_kernel          (s_fops_data.event_stats.stats[current_stat][16])
+#define mem_kernel_peak     (s_fops_data.event_stats.stats[current_stat][17])
 
+static struct  fops_config_t
+{
+    // Our device special major number
+    dev_t                  major;
+    struct cdev            device;
+    atomic_t               reader_pid;
 
-#define mem_user            (s_event_stats.stats[current_stat][14])
-#define mem_user_peak       (s_event_stats.stats[current_stat][15])
-#define mem_kernel          (s_event_stats.stats[current_stat][16])
-#define mem_kernel_peak     (s_event_stats.stats[current_stat][17])
+    // Flag to identify if the queue is enabled
+    bool                   enabled;
+    struct delayed_work    stats_work;
+    uint32_t               stats_work_delay;
+    wait_queue_head_t      wq;
+} s_fops_config __read_mostly;
 
-atomic_t reader_pid;
-
-bool event_queue_enabled;
-uint64_t dev_spinlock;
-
-DECLARE_WAIT_QUEUE_HEAD(wq);
+static struct fops_data_t
+{
+    uint64_t               lock;
+    CB_EVENT_STATS         event_stats;
+} s_fops_data;
 
 #define STAT_INTERVAL    15
-static struct delayed_work stats_work;
-void ec_stats_work_task(struct work_struct *work);
-static uint32_t g_stats_work_delay;
 
 bool ec_reader_init(ProcessContext *context)
 {
-    atomic_set(&reader_pid, 0);
+    atomic_set(&s_fops_config.reader_pid, 0);
     return true;
 }
 
 bool ec_is_reader_connected(void)
 {
-    return (0 != atomic_cmpxchg(&reader_pid, 0, 0));
+    return (0 != atomic_cmpxchg(&s_fops_config.reader_pid, 0, 0));
 }
 
 bool __ec_connect_reader(ProcessContext *context)
 {
-    return (0 == atomic_cmpxchg(&reader_pid, 0, context->pid));
+    return (0 == atomic_cmpxchg(&s_fops_config.reader_pid, 0, context->pid));
 }
 
 bool ec_disconnect_reader(pid_t pid)
 {
-    return (pid == atomic_cmpxchg(&reader_pid, pid, 0));
+    return (pid == atomic_cmpxchg(&s_fops_config.reader_pid, pid, 0));
 }
 
 bool __ec_is_process_connected_reader(pid_t pid)
 {
-    return (pid == atomic_cmpxchg(&reader_pid, pid, pid));
+    return (pid == atomic_cmpxchg(&s_fops_config.reader_pid, pid, pid));
 }
 
 bool ec_user_comm_initialize(ProcessContext *context)
 {
     size_t kernel_mem;
 
-    ec_spinlock_init(&dev_spinlock, context);
+    ec_spinlock_init(&s_fops_data.lock, context);
 
     current_stat = 0;
     valid_stats  = 0;
@@ -229,19 +231,21 @@ bool ec_user_comm_initialize(ProcessContext *context)
     atomic64_set(&tx_ready_pri1_holdoff, 0);
     atomic64_set(&tx_ready_pri2,         0);
 
-    memset(&s_event_stats.stats, 0, sizeof(s_event_stats.stats));
+    memset(&s_fops_data.event_stats.stats, 0, sizeof(s_fops_data.event_stats.stats));
 
-    getnstimeofday(&s_event_stats.time[0]);
+    getnstimeofday(&s_fops_data.event_stats.time[0]);
     kernel_mem = __ec_get_memory_usage(context);
     mem_kernel =      kernel_mem;
     mem_kernel_peak = kernel_mem;
 
-    // Initialize a workque struct to police the hashtable
-    g_stats_work_delay = msecs_to_jiffies(STAT_INTERVAL * 1000);
-    INIT_DELAYED_WORK(&stats_work, ec_stats_work_task);
-    schedule_delayed_work(&stats_work, g_stats_work_delay);
+    init_waitqueue_head(&s_fops_config.wq);
 
-    event_queue_enabled  = true;
+    // Initialize a workque struct to police the hashtable
+    s_fops_config.stats_work_delay = msecs_to_jiffies(STAT_INTERVAL * 1000);
+    INIT_DELAYED_WORK(&s_fops_config.stats_work, __ec_stats_work_task);
+    schedule_delayed_work(&s_fops_config.stats_work, s_fops_config.stats_work_delay);
+
+    s_fops_config.enabled  = true;
     return true;
 }
 
@@ -251,20 +255,20 @@ bool ec_user_devnode_init(ProcessContext *context)
     int maj_no;
 
     // Allocate Major / Minor number of device special file
-    TRY_STEP_DO(DEVNUM_ALLOC, alloc_chrdev_region(&g_maj_t, MINOR_FIRST, MINOR_COUNT, DRIVER_NAME) >= 0,
+    TRY_STEP_DO(DEVNUM_ALLOC, alloc_chrdev_region(&s_fops_config.major, MINOR_FIRST, MINOR_COUNT, DRIVER_NAME) >= 0,
 
                 TRACE(DL_ERROR, "Failed allocating character device region."););
 
-    maj_no = MAJOR(g_maj_t);
-    cdev_init(&ec_cdev, &driver_fops);
-    TRY_STEP_DO(CHRDEV_ALLOC, cdev_add(&ec_cdev, g_maj_t, 1) >= 0, TRACE(DL_ERROR, "cdev_add failed"););
+    maj_no = MAJOR(s_fops_config.major);
+    cdev_init(&s_fops_config.device, &driver_fops);
+    TRY_STEP_DO(CHRDEV_ALLOC, cdev_add(&s_fops_config.device, s_fops_config.major, 1) >= 0, TRACE(DL_ERROR, "cdev_add failed"););
 
-    event_queue_enabled  = true;
+    s_fops_config.enabled  = true;
     return true;
 
 CATCH_CHRDEV_ALLOC:
-        unregister_chrdev_region(g_maj_t, MINOR_COUNT);
-        cdev_del(&ec_cdev);
+        unregister_chrdev_region(s_fops_config.major, MINOR_COUNT);
+        cdev_del(&s_fops_config.device);
 
 CATCH_DEVNUM_ALLOC:
     return false;
@@ -272,32 +276,34 @@ CATCH_DEVNUM_ALLOC:
 
 void ec_user_devnode_close(ProcessContext *context)
 {
-    cdev_del(&ec_cdev);
-    unregister_chrdev_region(g_maj_t, MINOR_COUNT);
+    cdev_del(&s_fops_config.device);
+    unregister_chrdev_region(s_fops_config.major, MINOR_COUNT);
 }
 
 void ec_user_comm_shutdown(ProcessContext *context)
 {
+    s_fops_config.enabled  = false;
+
     /**
      * Calling the sync flavor gives the guarantee that on the return of the
      * routine, work is not pending and not executing on any CPU.
      *
      * Its supposed to work even if the work schedules itself.
      */
-    cancel_delayed_work_sync(&stats_work);
+    cancel_delayed_work_sync(&s_fops_config.stats_work);
 
-    ec_write_lock(&dev_spinlock, context);
+    ec_write_lock(&s_fops_data.lock, context);
     __ec_user_comm_clear_queues_locked(context);
-    event_queue_enabled  = false;
-    ec_write_unlock(&dev_spinlock, context);
-    ec_spinlock_destroy(&dev_spinlock, context);
+    s_fops_config.enabled  = false;
+    ec_write_unlock(&s_fops_data.lock, context);
+    ec_spinlock_destroy(&s_fops_data.lock, context);
 }
 
 void ec_user_comm_clear_queues(ProcessContext *context)
 {
-    ec_write_lock(&dev_spinlock, context);
+    ec_write_lock(&s_fops_data.lock, context);
     __ec_user_comm_clear_queues_locked(context);
-    ec_write_unlock(&dev_spinlock, context);
+    ec_write_unlock(&s_fops_data.lock, context);
 }
 
 void __ec_clear_tx_queue(struct list_head *tx_queue, atomic64_t *tx_ready, ProcessContext *context)
@@ -371,9 +377,9 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
         break;
     }
 
-    ec_write_lock(&dev_spinlock, context);
+    ec_write_lock(&s_fops_data.lock, context);
     readyCount = atomic64_read(tx_ready);
-    if (event_queue_enabled &&
+    if (s_fops_config.enabled &&
         (readyCount < max_queue_size ||
          __ec_try_to_gain_capacity(tx_queue)))
     {
@@ -382,7 +388,7 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
         TRACE(DL_VERBOSE, "send_event_atomic %p %llu", msg, readyCount);
         msg = NULL;
     }
-    ec_write_unlock(&dev_spinlock, context);
+    ec_write_unlock(&s_fops_data.lock, context);
 
     // This should be NULL by now.
     TRY(!msg);
@@ -390,7 +396,7 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     // If we did enqueue the event, wake up the reader task if we are allowed to
     if (ALLOW_WAKE_UP(context))
     {
-        // NOTE: This call must happen outside the dev_spinlock or it may cause a
+        // NOTE: This call must happen outside the lock or it may cause a
         //       deadlock woking up the task
         ec_fops_comm_wake_up_reader(context);
     }
@@ -412,7 +418,7 @@ void ec_fops_comm_wake_up_reader(ProcessContext *context)
     // Wake up the reader task if we are allowed to
     if (ALLOW_WAKE_UP(context))
     {
-        wake_up(&wq);
+        wake_up(&s_fops_config.wq);
     }
 }
 
@@ -532,7 +538,7 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
                 DL_COMMS,
                 "%s: empty queue", __func__);
 
-    ec_write_lock(&dev_spinlock, context);
+    ec_write_lock(&s_fops_data.lock, context);
     // select the queue - taken from __ec_get_tx_queue_to_serve
     if (qlen_pri0 != 0)
     {
@@ -559,7 +565,7 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
         *cb_event = &eventNode->data;
         xcode = eventNode->payload;
     }
-    ec_write_unlock(&dev_spinlock, context);
+    ec_write_unlock(&s_fops_data.lock, context);
 
 CATCH_DEFAULT:
 
@@ -841,7 +847,7 @@ int ec_device_open(struct inode *inode, struct file *filp)
 
 int ec_device_release(struct inode *inode, struct file *filp)
 {
-    TRACE(DL_INFO, "%s: releasing device from pid[%d]; reader_pid[%d]", __func__, ec_getpid(current), atomic_read(&reader_pid));
+    TRACE(DL_INFO, "%s: releasing device from pid[%d]; s_fops_config.reader_pid[%d]", __func__, ec_getpid(current), atomic_read(&s_fops_config.reader_pid));
 
     if (!ec_disconnect_reader(ec_getpid(current)))
     {
@@ -867,7 +873,7 @@ unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
     // We should call poll_wait here if we want the kernel to actually
     // sleep when waiting for us.
     TRACE(DL_COMMS, "%s: waiting for data", __func__);
-    poll_wait(filp, &wq, pts);
+    poll_wait(filp, &s_fops_config.wq, pts);
 
     qlen = atomic64_read(&tx_ready_pri0) + atomic64_read(&tx_ready_pri1) + atomic64_read(&tx_ready_pri2);
 
@@ -912,7 +918,7 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
     // Only the connected process can send ioctls to this kernel module.
     if (!__ec_is_process_connected_reader(context.pid))
     {
-        TRACE(DL_ERROR, "%s: Cannot process cmd=%d, process not authorized; pid[%d], reader-pid[%d]", __func__, cmd, context.pid, atomic_read(&reader_pid));
+        TRACE(DL_ERROR, "%s: Cannot process cmd=%d, process not authorized; pid[%d], reader-pid[%d]", __func__, cmd, context.pid, atomic_read(&s_fops_config.reader_pid));
         return -EPERM;
     }
 
@@ -1257,9 +1263,9 @@ void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config)
     }
 }
 
-void ec_stats_work_task(struct work_struct *work)
+void __ec_stats_work_task(struct work_struct *work)
 {
-    uint32_t         curr   = s_event_stats.curr;
+    uint32_t         curr   = s_fops_data.event_stats.curr;
     uint32_t         next   = (curr + 1) % MAX_INTERVALS;
     uint64_t         ready0 = atomic64_read(&tx_ready_pri0);
     uint64_t         ready1 = atomic64_read(&tx_ready_pri1);
@@ -1300,17 +1306,17 @@ void ec_stats_work_task(struct work_struct *work)
     // Copy over the current total to the next interval
     for (i = 0; i < NUM_STATS; ++i)
     {
-        s_event_stats.stats[next][i] = s_event_stats.stats[curr][i];
+        s_fops_data.event_stats.stats[next][i] = s_fops_data.event_stats.stats[curr][i];
     }
     current_stat = next;
     ++valid_stats;
-    getnstimeofday(&s_event_stats.time[next]);
+    getnstimeofday(&s_fops_data.event_stats.time[next]);
     kernel_mem      = __ec_get_memory_usage(&context);
     kernel_mem_peak = mem_kernel_peak;
     mem_kernel      = kernel_mem;
     mem_kernel_peak = (kernel_mem > kernel_mem_peak ? kernel_mem : kernel_mem_peak);
 
-    schedule_delayed_work(&stats_work, g_stats_work_delay);
+    schedule_delayed_work(&s_fops_config.stats_work, s_fops_config.stats_work_delay);
 }
 
 // Print event stats
@@ -1318,8 +1324,8 @@ int ec_proc_show_events_avg(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = s_event_stats.curr + MAX_INTERVALS;
-    uint32_t    valid   = s_event_stats.validStats;
+    uint32_t    curr    = s_fops_data.event_stats.curr + MAX_INTERVALS;
+    uint32_t    valid   = s_fops_data.event_stats.validStats;
     int32_t     avg1_c  = (valid >  4 ?  4 : valid);
     int32_t     avg2_c  = (valid > 20 ? 20 : valid);
     int32_t     avg3_c  = (valid > 60 ? 60 : valid);
@@ -1347,12 +1353,12 @@ int ec_proc_show_events_avg(struct seq_file *m, void *v)
         // This is a circular array of elements were each element is an increasing sum from the
         //  previous element. You can always get the sum of any two elements, and divide by the
         //  number of elements between them to yield the average.
-        uint64_t currentStat = s_event_stats.stats[curr][i];
+        uint64_t currentStat = s_fops_data.event_stats.stats[curr][i];
 
         seq_printf(m, " %15s | %9lld | %9lld | %9lld | %10lld |\n", STAT_STRINGS[i].name, currentStat,
-                   (currentStat - s_event_stats.stats[avg1][i]) / avg1_c / STAT_INTERVAL,
-                   (currentStat - s_event_stats.stats[avg2][i]) / avg2_c / STAT_INTERVAL,
-                   (currentStat - s_event_stats.stats[avg3][i]) / avg3_c / STAT_INTERVAL);
+                   (currentStat - s_fops_data.event_stats.stats[avg1][i]) / avg1_c / STAT_INTERVAL,
+                   (currentStat - s_fops_data.event_stats.stats[avg2][i]) / avg2_c / STAT_INTERVAL,
+                   (currentStat - s_fops_data.event_stats.stats[avg3][i]) / avg3_c / STAT_INTERVAL);
     }
 
     seq_puts(m, "\n");
@@ -1364,8 +1370,8 @@ int ec_proc_show_events_det(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = s_event_stats.curr;
-    uint32_t    valid   = min(s_event_stats.validStats, MAX_VALID_INTERVALS);
+    uint32_t    curr    = s_fops_data.event_stats.curr;
+    uint32_t    valid   = min(s_fops_data.event_stats.validStats, MAX_VALID_INTERVALS);
     uint32_t    start   = (MAX_INTERVALS + curr - valid) % MAX_INTERVALS + MAX_INTERVALS;
     int         i;
     int         j;
@@ -1389,10 +1395,10 @@ int ec_proc_show_events_det(struct seq_file *m, void *v)
         uint64_t left  = (start + i - 1) % MAX_INTERVALS;
         uint64_t right = (start + i) % MAX_INTERVALS;
 
-        seq_printf(m, " %19lld |", ec_to_windows_timestamp(&s_event_stats.time[right]));
+        seq_printf(m, " %19lld |", ec_to_windows_timestamp(&s_fops_data.event_stats.time[right]));
         for (j = 0; j < EVENT_STATS; ++j)
         {
-            seq_printf(m, STAT_STRINGS[j].num_format, s_event_stats.stats[right][j] - s_event_stats.stats[left][j]);
+            seq_printf(m, STAT_STRINGS[j].num_format, s_fops_data.event_stats.stats[right][j] - s_fops_data.event_stats.stats[left][j]);
         }
         seq_puts(m, "\n");
     }
@@ -1405,7 +1411,7 @@ ssize_t ec_proc_show_events_rst(struct file *file, const char *buf, size_t size,
     int i;
 
     // Cancel the currently scheduled job
-    cancel_delayed_work(&stats_work);
+    cancel_delayed_work(&s_fops_config.stats_work);
 
     // I do not need to zero out everything, just the new active interval
     current_stat = 0;
@@ -1413,13 +1419,13 @@ ssize_t ec_proc_show_events_rst(struct file *file, const char *buf, size_t size,
     for (i = 0; i < NUM_STATS; ++i)
     {
         // We make sure the first and last interval are 0 for the average calculations
-        s_event_stats.stats[0][i]                 = 0;
-        s_event_stats.stats[MAX_INTERVALS - 1][i] = 0;
+        s_fops_data.event_stats.stats[0][i]                 = 0;
+        s_fops_data.event_stats.stats[MAX_INTERVALS - 1][i] = 0;
     }
-    getnstimeofday(&s_event_stats.time[0]);
+    getnstimeofday(&s_fops_data.event_stats.time[0]);
 
     // Resatrt the job from now
-    schedule_delayed_work(&stats_work, g_stats_work_delay);
+    schedule_delayed_work(&s_fops_config.stats_work, s_fops_config.stats_work_delay);
     return size;
 }
 
@@ -1427,7 +1433,7 @@ int ec_proc_current_memory_avg(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = s_event_stats.curr;
+    uint32_t    curr    = s_fops_data.event_stats.curr;
 
     int         i;
 
@@ -1436,7 +1442,7 @@ int ec_proc_current_memory_avg(struct seq_file *m, void *v)
         // This is a circular array of elements were each element is an increasing sum from the
         //  previous element. You can always get the sum of any two elements, and divide by the
         //  number of elements between them to yield the average.
-        uint64_t currentStat = s_event_stats.stats[curr][i];
+        uint64_t currentStat = s_fops_data.event_stats.stats[curr][i];
 
         seq_printf(m, "%9lld ", currentStat);
     }
@@ -1450,8 +1456,8 @@ int ec_proc_current_memory_det(struct seq_file *m, void *v)
 {
     // I add MAX_INTERVALS to some of the items below so that when I subtract 1 it will
     //  still be a positive number.  The modulus math will clean it up later.
-    uint32_t    curr    = s_event_stats.curr;
-    uint32_t    valid   = min(s_event_stats.validStats, MAX_VALID_INTERVALS);
+    uint32_t    curr    = s_fops_data.event_stats.curr;
+    uint32_t    valid   = min(s_fops_data.event_stats.validStats, MAX_VALID_INTERVALS);
     uint32_t    start   = (MAX_INTERVALS + curr - valid) % MAX_INTERVALS + MAX_INTERVALS;
     int         i;
     int         j;
@@ -1474,10 +1480,10 @@ int ec_proc_current_memory_det(struct seq_file *m, void *v)
     {
         uint64_t right = (start + i) % MAX_INTERVALS;
 
-        seq_printf(m, " %19lld |", ec_to_windows_timestamp(&s_event_stats.time[right]));
+        seq_printf(m, " %19lld |", ec_to_windows_timestamp(&s_fops_data.event_stats.time[right]));
         for (j = MEM_START; j < MEM_STATS; ++j)
         {
-            seq_printf(m, STAT_STRINGS[j].num_format, s_event_stats.stats[right][j]);
+            seq_printf(m, STAT_STRINGS[j].num_format, s_fops_data.event_stats.stats[right][j]);
         }
         //seq_printf(m, " %9lld | %9lld |", left, right );
         seq_puts(m, "\n");
