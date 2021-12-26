@@ -96,9 +96,10 @@ ExecIdentity *ec_process_tracking_get_exec_identity_ref(ExecIdentity *exec_ident
 
     ec_mem_cache_get(exec_identity, context);
 
-    #ifdef _REF_DEBUGGING
-    __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
-    #endif
+    if (g_process_tracking_ref_debug)
+    {
+        __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
+    }
 
 CATCH_DEFAULT:
     return exec_identity;
@@ -108,9 +109,10 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
 {
     CANCEL_VOID(exec_identity);
 
-    #ifdef _REF_DEBUGGING
-    __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
-    #endif
+    if (g_process_tracking_ref_debug)
+    {
+        __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
+    }
 
     ec_mem_cache_put(exec_identity, context);
 }
@@ -244,7 +246,10 @@ void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, Exe
 {
     CANCEL_VOID(process_handle);
 
-    TRACE_IF_REF_DEBUGGING(DL_PROC_TRACKING, "    %s temp_exec_identity", (exec_handle ? "set" : "clear"));
+    if (g_process_tracking_ref_debug && MAY_TRACE_LEVEL(DL_PROC_TRACKING))
+    {
+        TRACE(DL_PROC_TRACKING, "    %s temp_exec_identity", (exec_handle ? "set" : "clear"));
+    }
 
     ec_process_exec_handle_clone(exec_handle, &ec_process_posix_identity(process_handle)->temp_exec_handle, context);
 }
