@@ -34,9 +34,3 @@ ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessCon
 void ec_process_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_put_path(char *path, ProcessContext *context);
 void __ec_process_tracking_print_ref(int log_level, const char *calling_func, ExecIdentity *exec_identity, ProcessContext *context);
-
-#ifdef _REF_DEBUGGING
-    #define TRACE_IF_REF_DEBUGGING(...)  TRACE(__VA_ARGS__)
-#else
-    #define TRACE_IF_REF_DEBUGGING(...)
-#endif
