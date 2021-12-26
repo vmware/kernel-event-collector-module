@@ -561,6 +561,7 @@ ProcessHandle *ec_create_process_start_by_exec_event(struct task_struct *task, P
                     context);
 
 CATCH_DEFAULT:
+    ec_path_cache_put(path_data, context);
     return process_handle;
 }
 
