@@ -192,7 +192,7 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
             cache_buffer->is_owned = true;
 
             // Init the refcount and take an initial reference-
-            TRY(!percpu_ref_init(&cache_buffer->refcnt, __ec_mem_cache_release_callback, 0, GFP_MODE(context)));
+            TRY(!ec_percpu_ref_init(&cache_buffer->refcnt, __ec_mem_cache_release_callback, 0, GFP_MODE(context)));
             percpu_ref_get(&cache_buffer->refcnt);
 
             cache_buffer->cache = cache;
