@@ -52,23 +52,16 @@ PathData *__ec_get_path_data(
     const char __user *filename,
     ProcessContext    *context)
 {
-    PathData *path_data = NULL;
     struct path path = {};
-    int error = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path);
+    struct path_lookup path_lookup = {
+        .path = &path,
+        .filename = filename,
+        .ignore_spcial = false,
+    };
 
-    CANCEL(!error, NULL);
+    CANCEL(!user_path_at(dfd, filename, LOOKUP_FOLLOW, &path), NULL);
 
-    path_data = ec_file_get_path_data_from_path(&path, context);
-
-    if (path_data && !path_data->path_found)
-    {
-        // If we did not find a path, fall back to what was supplied by the user
-        struct filename *file_s = CB_RESOLVED(getname)(filename);
-
-        path_data->path = ec_mem_strdup(file_s->name, context);
-    }
-
-    return path_data;
+    return ec_file_get_path_data(&path_lookup, context);
 }
 
 void __ec_do_generic_file_event(
@@ -156,13 +149,18 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     } else //status == CLOSED
     {
         PathData *path_data = NULL;
+        struct path_lookup path_lookup = {
+            .file = file,
+            .ignore_spcial = true,
+        };
 
         TRY(eventType == CB_EVENT_TYPE_FILE_WRITE || eventType == CB_EVENT_TYPE_FILE_CREATE);
 
         // If this file is deleted already, then just skip it
         TRY(!d_unlinked(file->f_path.dentry));
 
-        path_data = ec_file_get_path_data(file, context);
+        path_data = ec_file_get_path_data(&path_lookup, context);
+        TRY(path_data);
 
         fileProcess = ec_file_process_status_open(
             file,

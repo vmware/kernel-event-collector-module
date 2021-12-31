@@ -9,7 +9,7 @@
 #include "mem-alloc.h"
 #include "event-factory.h"
 
-PathData * __ec_process_tracking_get_path_data(ExecIdentity * exec_identity, ProcessContext *context);
+PathData *__ec_process_tracking_get_path_data(ExecIdentity * exec_identity, ProcessContext *context);
 
 bool ec_is_process_tracked(pid_t pid, ProcessContext *context)
 {

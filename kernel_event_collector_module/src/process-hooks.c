@@ -223,8 +223,14 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     stat = g_original_ops_ptr->bprm_set_creds(bprm);
 #endif  //}
 
-    path_data = ec_file_get_path_data(bprm->file, &context);
-    TRY(path_data);
+    {
+        struct path_lookup path_lookup = {
+            .file = bprm->file,
+        };
+
+        path_data = ec_file_get_path_data(&path_lookup, &context);
+        TRY(path_data);
+    }
 
     if (tid != INITTASK)
     {
