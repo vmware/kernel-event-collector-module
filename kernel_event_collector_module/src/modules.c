@@ -50,7 +50,15 @@ int ec_lsm_file_mmap(struct file *file,
     //
     // This is a valid file, allocate an event
     //
-    path_data = ec_file_get_path_data(file, &context);
+    {
+        struct path_lookup path_lookup = {
+            .file = file,
+            .ignore_spcial = true,
+        };
+
+        path_data = ec_file_get_path_data(&path_lookup, &context);
+        TRY(path_data);
+    }
 
     process_handle = ec_get_procinfo_and_create_process_start_if_needed(pid, "MODLOAD", &context);
     ec_event_send_modload(

@@ -26,13 +26,15 @@ int ec_is_special_file(char *pathname, int len);
 bool ec_may_skip_unsafe_vfs_calls(struct file const *file);
 bool ec_file_exists(int dfd, const char __user *filename);
 
+struct path_lookup
+{
+    struct file const  *file;
+    struct path const  *path;
+    const char __user  *filename;
+    char               *path_buffer;
+    bool                ignore_spcial;
+};
+
 PathData *ec_file_get_path_data(
-    struct file const *file,
-    ProcessContext    *context);
-PathData *ec_file_get_path_data_with_buffer(
-    struct file const  *file,
-    char               *path_buffer,
-    ProcessContext     *context);
-PathData *ec_file_get_path_data_from_path(
-    struct path const  *path,
+    struct path_lookup *path_lookup,
     ProcessContext     *context);

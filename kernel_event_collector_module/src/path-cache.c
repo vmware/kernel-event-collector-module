@@ -13,6 +13,8 @@
 void __ec_path_cache_delete_callback(void *data, ProcessContext *context);
 int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 void __ec_path_cache_print_callback(void *datap, ProcessContext *context);
+bool __ec_path_cache_verify_callback(void *datap, void *key, ProcessContext *context);
+void __ec_path_cache_print_ref(int log_level, const char *calling_func, PathData *path_data, ProcessContext *context);
 
 static HashTbl __read_mostly s_path_cache = {
     .numberOfBuckets = 1024,
@@ -23,6 +25,7 @@ static HashTbl __read_mostly s_path_cache = {
     .refcount_offset = offsetof(PathData, reference_count),
     .delete_callback = __ec_path_cache_delete_callback,
     .printval_callback = __ec_path_cache_print_callback,
+    .find_verify_callback = __ec_path_cache_verify_callback,
 };
 
 
@@ -37,22 +40,38 @@ void ec_path_cache_shutdown(ProcessContext *context)
 }
 
 PathData *ec_path_cache_find(
-    uint64_t            ns_id,
-    uint64_t            device,
-    uint64_t            inode,
+    PathQuery          *query,
     ProcessContext     *context)
 {
-    PathKey key = { ns_id, device, inode };
-
-    return ec_hashtbl_find(&s_path_cache, &key, context);
+    CANCEL(likely(query), NULL);
+    return ec_hashtbl_find(&s_path_cache, &query->key, context);
 }
 
+bool __ec_path_cache_verify_callback(void *datap, void *keyp, ProcessContext *context)
+{
+    PathData *path_data = (PathData *)datap;
+    PathQuery *verify = container_of(keyp, PathQuery, key);
+
+    CANCEL(likely(datap && keyp), false);
+
+    if (verify->ignore_special)
+    {
+        verify->path_ignored = path_data->is_special_file;
+        return !path_data->is_special_file;
+    }
+
+    return true;
+}
 
 PathData *ec_path_cache_get(
     PathData           *path_data,
     ProcessContext     *context)
 {
-    return ec_hashtbl_get(&s_path_cache, path_data, context);
+    path_data = ec_hashtbl_get(&s_path_cache, path_data, context);
+
+    __ec_path_cache_print_ref(DL_FILE, __func__, path_data, context);
+
+    return path_data;
 }
 
 PathData *ec_path_cache_add(
@@ -87,10 +106,16 @@ PathData *ec_path_cache_add(
 
         if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
         {
+            PathQuery query = {
+                .key = { ns_id, device, inode },
+            };
+
             // If the insert failed we free the local reference and get the existing value for the return
+            __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
             ec_hashtbl_free(&s_path_cache, value, context);
-            value = ec_path_cache_find(ns_id, device, inode, context);
+            value = ec_path_cache_find(&query, context);
         }
+        __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
     }
 
     // Return the reference
@@ -103,6 +128,7 @@ void ec_path_cache_delete(
 {
     CANCEL_VOID(value);
 
+    __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
     ec_hashtbl_del(&s_path_cache, value, context);
 
     TRACE(DL_FILE, "[%llu:%llu] %s was removed from path cache.",
@@ -115,6 +141,8 @@ void ec_path_cache_put(
     PathData           *path_data,
     ProcessContext     *context)
 {
+    __ec_path_cache_print_ref(DL_FILE, __func__, path_data, context);
+
     ec_hashtbl_put(&s_path_cache, path_data, context);
 }
 
@@ -124,6 +152,7 @@ void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
     {
         PathData *value = (PathData *)data;
 
+        __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
         ec_mem_put(value->path);
         value->path = NULL;
     }
@@ -149,7 +178,7 @@ int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessCon
 
     if (datap)
     {
-        seq_printf(m, "FILE-CACHE [%llu:%llu] %s\n",
+        seq_printf(m, "PATH-CACHE [%llu:%llu] %s\n",
                    path_data->key.device,
                    path_data->key.inode,
                    path_data->path);
@@ -164,12 +193,37 @@ void __ec_path_cache_print_callback(void *datap, ProcessContext *context)
 
     if (datap)
     {
-        TRACE(DL_ERROR, "    FILE-CACHE [%llu:%llu] %s (%s) (ref: %lld) (%p)",
+        TRACE(DL_ERROR, "    PATH-CACHE [%llu:%llu] %s (ref: %lld) (%p)",
                    path_data->key.device,
                    path_data->key.inode,
                    path_data->path,
-                   ec_mem_cache_is_owned(path_data, context) ? "owned" : "not owned",
-                   ec_mem_cache_ref_count(path_data, context),
+                   ec_hashtbl_ref_count(&s_path_cache, datap, context),
                    path_data);
+        __ec_path_cache_print_ref(DL_FILE, __func__, path_data, context);
     }
+}
+
+void __ec_path_cache_print_ref(int log_level, const char *calling_func, PathData *path_data, ProcessContext *context)
+{
+    char *ref_str = NULL;
+
+    CANCEL_VOID(g_path_cache_ref_debug);
+    CANCEL_VOID(path_data);
+    CANCEL_VOID(MAY_TRACE_LEVEL(log_level));
+
+    ref_str = ec_mem_alloc(20, context);
+    CANCEL_VOID(ref_str);
+
+    ec_hashtbl_cache_ref_str(&s_path_cache, path_data, ref_str, ec_mem_size(ref_str), context);
+
+    TRACE(log_level, "    %s: [%llu:%llu] %s (ref: %lld) [%s] (%p)",
+          calling_func,
+          path_data->key.device,
+          path_data->key.inode,
+          path_data->path,
+          ec_hashtbl_ref_count(&s_path_cache, path_data, context),
+          ref_str,
+          path_data);
+
+    ec_mem_free(ref_str);
 }

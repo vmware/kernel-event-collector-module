@@ -11,6 +11,12 @@
 #include <linux/magic.h>
 #include <linux/namei.h>
 
+typedef PathData *(*path_find_fn)(
+    uint64_t            ns_id,
+    uint64_t            device,
+    uint64_t            inode,
+    ProcessContext     *context);
+
 bool ec_file_helper_init(ProcessContext *context)
 {
     return true;
@@ -74,53 +80,55 @@ bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen
     return ec_path_get_path(&file->f_path, buffer, buflen, pathname);
 }
 
-PathData *__ec_file_get_path_data(
-    struct file const  *file,
-    struct path const  *path,
-    char               *path_buffer,
+PathData *ec_file_get_path_data(
+    struct path_lookup *path_lookup,
     ProcessContext     *context)
 {
-    uint64_t ns_id = 0;
-    uint64_t device = 0;
-    uint64_t inode = 0;
+    PathQuery query = {
+        .key = { 0, 0, 0 },
+    };
     uint64_t fs_magic = 0;
     PathData *path_data = NULL;
 
-    CANCEL(file || path, NULL);    // We need at least one of file or path
-    CANCEL(!(file && path), NULL); // But not both
+    CANCEL(likely(path_lookup), NULL);
+
+    CANCEL(path_lookup->file || path_lookup->path, NULL);    // We need at least one of file or path
+    CANCEL(!(path_lookup->file && path_lookup->path), NULL); // But not both
+
+    query.ignore_special = path_lookup->ignore_spcial;
 
     // Get the device info
     // TODO: Get the namespace
-    if (file)
+    if (path_lookup->file)
     {
-        ec_get_devinfo_fs_magic_from_file(file, &device, &inode, &fs_magic);
+        ec_get_devinfo_fs_magic_from_file(path_lookup->file, &query.key.device, &query.key.inode, &fs_magic);
     } else
     {
-        ec_get_devinfo_from_path(path, &device, &inode, &fs_magic);
+        ec_get_devinfo_from_path(path_lookup->path, &query.key.device, &query.key.inode, &fs_magic);
     }
 
-    path_data = ec_path_cache_find(ns_id, device, inode, context);
+    path_data = ec_path_cache_find(&query, context);
 
     // PSCLNX-5220
     //  If we are in the clone hook it is possible for the ec_task_get_path functon
     //  to schedule. (Softlock!)  Do not lookup the path in this case.
-    if (!path_data && ALLOW_WAKE_UP(context))
+    if (!path_data && !query.path_ignored && ALLOW_WAKE_UP(context))
     {
         char *owned_path_buffer = NULL;
         char *path_str = NULL;
         bool path_found = false;
 
-        if (!path_buffer)
+        if (!path_lookup->path_buffer)
         {
-            owned_path_buffer = path_buffer = ec_get_path_buffer(context);
+            owned_path_buffer = path_lookup->path_buffer = ec_get_path_buffer(context);
         }
 
-        if (path_buffer)
+        if (path_lookup->path_buffer)
         {
-            if (file)
+            if (path_lookup->file)
             {
                 // We have a file, so use the path from that
-                path = &file->f_path;
+                path_lookup->path = &path_lookup->file->f_path;
             }
             // ec_file_get_path() uses dpath which builds the path efficently
             //  by walking back to the root. It starts with a string terminator
@@ -128,8 +136,8 @@ PathData *__ec_file_get_path_data(
             //
             // The `path` variable will point to the start of the string, so we will
             //  use that directly later to copy into the tracking entry and event.
-            path_found = ec_path_get_path(path, path_buffer, PATH_MAX, &path_str);
-            path_buffer[PATH_MAX] = 0;
+            path_found = ec_path_get_path(path_lookup->path, path_lookup->path_buffer, PATH_MAX, &path_str);
+            path_lookup->path_buffer[PATH_MAX] = 0;
 
             if (!path_found)
             {
@@ -140,36 +148,26 @@ PathData *__ec_file_get_path_data(
         if (path_str)
         {
             path_str = ec_mem_strdup(path_str, context);
+        } else if (path_lookup->filename)
+        {
+            // Fallback to a supplied filename
+            struct filename *file_s = CB_RESOLVED(getname)(path_lookup->filename);
+
+            path_str = ec_mem_strdup(file_s->name, context);
         }
-        path_data = ec_path_cache_add(ns_id, device, inode, path_str, fs_magic, context);
+
+        path_data = ec_path_cache_add(query.key.ns_id, query.key.device, query.key.inode, path_str, fs_magic, context);
+        if (path_lookup->ignore_spcial && path_data && path_data->is_special_file)
+        {
+            ec_path_cache_put(path_data, context);
+            path_data = NULL;
+        }
 
         ec_mem_put(path_str);
         ec_put_path_buffer(owned_path_buffer);
     }
 
     return path_data;
-}
-
-PathData *ec_file_get_path_data(
-    struct file const  *file,
-    ProcessContext     *context)
-{
-    return __ec_file_get_path_data(file, NULL, NULL, context);
-}
-
-PathData *ec_file_get_path_data_from_path(
-    struct path const  *path,
-    ProcessContext     *context)
-{
-    return __ec_file_get_path_data(NULL, path, NULL, context);
-}
-
-PathData *ec_file_get_path_data_with_buffer(
-    struct file const  *file,
-    char               *path_buffer,
-    ProcessContext     *context)
-{
-    return __ec_file_get_path_data(file, NULL, path_buffer, context);
 }
 
 char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen)
@@ -427,6 +425,7 @@ typedef struct special_file_t_ {
 #define MIN_SPECIAL_FILE_LEN 4
 static const special_file_t special_files[] = {
 
+    ENABLE_SPECIAL_FILE_SETUP("/var/lib/rsyslog"),
     ENABLE_SPECIAL_FILE_SETUP("/var/log/messages"),
     ENABLE_SPECIAL_FILE_SETUP("/var/lib/cb"),
     ENABLE_SPECIAL_FILE_SETUP("/var/log"),
@@ -434,9 +433,6 @@ static const special_file_t special_files[] = {
     ENABLE_SPECIAL_FILE_SETUP("/sys"),
     ENABLE_SPECIAL_FILE_SETUP("/proc"),
     ENABLE_SPECIAL_FILE_SETUP("/var/opt/carbonblack"),
-    DISABLE_SPECIAL_FILE_SETUP(""),
-    DISABLE_SPECIAL_FILE_SETUP(""),
-    DISABLE_SPECIAL_FILE_SETUP(""),
     DISABLE_SPECIAL_FILE_SETUP(""),
 };
 

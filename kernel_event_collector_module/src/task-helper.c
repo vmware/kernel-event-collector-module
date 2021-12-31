@@ -105,7 +105,14 @@ PathData *ec_task_get_path_data(struct task_struct const *task, char *path_buffe
 
     CANCEL(task, false);
 
-    path_data = ec_file_get_path_data_with_buffer(__ec_get_file_from_mm(task->mm), path_buffer, context);
+    {
+        struct path_lookup path_lookup = {
+            .file = __ec_get_file_from_mm(task->mm),
+            .path_buffer = path_buffer,
+        };
+
+        path_data = ec_file_get_path_data(&path_lookup, context);
+    }
 
     if (path_data && !path_data->path_found)
     {

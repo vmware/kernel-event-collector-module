@@ -21,13 +21,18 @@ typedef struct PATH_DATA {
     atomic64_t          reference_count;
 } PathData;
 
+typedef struct path_query
+{
+    PathKey key;
+    bool    ignore_special;
+    bool    path_ignored;
+} PathQuery;
+
 bool ec_path_cache_init(ProcessContext *context);
 void ec_path_cache_shutdown(ProcessContext *context);
 
 PathData *ec_path_cache_find(
-    uint64_t            ns_id,
-    uint64_t            device,
-    uint64_t            inode,
+    PathQuery          *query,
     ProcessContext     *context);
 PathData *ec_path_cache_add(
     uint64_t            ns_id,
