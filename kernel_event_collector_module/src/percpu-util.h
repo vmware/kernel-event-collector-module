@@ -5,15 +5,91 @@
 
 #include <linux/version.h>
 #include <linux/percpu_counter.h>
-#include <linux/percpu-refcount.h>
+
+#include "cb-test.h"
 
 #if RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7, 1)
 #define ec_percpu_counter_init(fbc, value, gfp)  percpu_counter_init(fbc, value)
 #define ec_alloc_percpu(type, gfp)               alloc_percpu(type)
+#define ec_percpu_ref_init(ref, cb, flags, gfp)  percpu_ref_init(ref, cb)
+
+struct percpu_ref;
+
+typedef void (percpu_ref_func_t)(struct percpu_ref *);
+
+struct percpu_ref {
+    atomic64_t count;
+    percpu_ref_func_t *release_callback;
+};
+
+static inline int __must_check percpu_ref_init(
+    struct percpu_ref *ref,
+	percpu_ref_func_t *release)
+{
+    CANCEL(ref, 1);
+
+    atomic64_set(&ref->count, 1);
+    ref->release_callback = release;
+
+    return 0;
+}
+
+static inline void percpu_ref_exit(struct percpu_ref *ref)
+{
+}
+
+static inline void percpu_ref_get(struct percpu_ref *ref)
+{
+    CANCEL_VOID(ref);
+
+     atomic64_inc(&ref->count);
+}
+
+static inline void percpu_ref_put(struct percpu_ref *ref)
+{
+    CANCEL_VOID(ref);
+
+     IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&ref->count, {
+         if (ref->release_callback)
+         {
+             ref->release_callback(ref);
+         }
+     });
+}
+
+static inline void percpu_ref_kill_and_confirm(
+    struct percpu_ref *ref,
+	percpu_ref_func_t *confirm_kill)
+{
+    CANCEL_VOID(ref);
+
+    percpu_ref_put(ref);
+    confirm_kill(ref);
+}
+
+static inline int64_t percpu_ref_sum(struct percpu_ref *ref)
+{
+    CANCEL(ref, 0);
+
+    return atomic64_read(&ref->count);
+}
+
 #else
+#include <linux/percpu-refcount.h>
+
 #define ec_percpu_counter_init(fbc, value, gfp)  percpu_counter_init(fbc, value, gfp)
 #define ec_alloc_percpu(type, gfp)               alloc_percpu_gfp(type, gfp)
-#endif
+
+static inline int ec_percpu_ref_init(struct percpu_ref *ref,
+                                     percpu_ref_func_t *release, unsigned int flags,
+                                     gfp_t gfp)
+{
+    // confirm_switch needs to be initialized to NULL, without it percpu_ref_kill_and_confirm deadlocks.
+    // It is initialized correctly in some kernel versions but not others (RHEL 7.5).
+    ref->confirm_switch = NULL;
+
+    return percpu_ref_init(ref, release, flags, gfp);
+}
 
 
 /**
@@ -48,3 +124,4 @@ static inline int64_t percpu_ref_sum(struct percpu_ref *ref)
 
     return sum;
 }
+#endif
