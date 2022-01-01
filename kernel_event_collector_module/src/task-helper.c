@@ -177,7 +177,7 @@ bool ec_get_cmdline_from_binprm(struct linux_binprm const *bprm, char *cmdLine, 
     // arguments, because it is not ready yet when we are called. we can however,
     // use the bprm->p pointer. this gives us the current stack top of the new
     // processes memory. at the time we are being called, this points to directly
-    // before the the argument list. so basically at the time we are called,
+    // before the argument list. so basically at the time we are called,
     // it has the same value as mm->arg_start even in the 3.10.0-1127 kernel.
 
 }
@@ -474,6 +474,8 @@ void __ec_add_tracking_for_task(
                     CB_EVENT_TYPE_PROCESS_START_EXEC,
                     FAKE_START,
                     context);
+
+            ec_path_cache_put(path_data, context);
 
             if (handle && path_buffer)
             {
