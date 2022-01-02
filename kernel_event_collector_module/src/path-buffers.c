@@ -47,6 +47,6 @@ void ec_put_path_buffer(char *buffer)
 
     if (buffer)
     {
-        ec_mem_cache_free(container_of((void *)buffer, struct STRING_NODE, path), &context);
+        ec_mem_cache_disown(container_of((void *)buffer, struct STRING_NODE, path), &context);
     }
 }

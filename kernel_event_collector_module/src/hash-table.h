@@ -6,10 +6,10 @@
 
 #include <linux/hash.h>
 #include <linux/list.h>
-#include <linux/percpu_counter.h>
 
 #include "version.h"
 #include "mem-cache.h"
+#include "percpu-util.h"
 #include "plru.h"
 
 #define  ACTION_CONTINUE   0
