@@ -21,30 +21,34 @@ bool __init run_tests(ProcessContext *context)
     bool all_passed = true;
 
     uint32_t origTraceLevel = g_traceLevel;
-    g_traceLevel |= (uint32_t)DL_INFO;
+    g_traceLevel |= (uint32_t)DL_INFO | DL_COMMS;
 
     pr_alert("Running self-tests\n");
 
-    RUN_TEST(test__hash_table(context));
-    RUN_TEST(test__hashtbl_double_del(context));
-    RUN_TEST(test__hashtbl_refcount_double_del(context));
-    RUN_TEST(test__hashtbl_refcount(context));
-    RUN_TEST(test__hashtbl_add_duplicate(context));
+    RUN_TEST(test__oversize_payload(context));
+    RUN_TEST(test__normal_payload(context));
+    RUN_TEST(test__parse_dns(context));
 
-    RUN_TEST(test__proc_track_report_double_exit(context));
-
-    RUN_TEST(test__begin_finish_macros(context));
-    RUN_TEST(test__hook_tracking_add_del(context));
-
-    RUN_TEST(test__stall_enable(context));
-    RUN_TEST(test__perm_id(context));
-    RUN_TEST(test__perm_id_disabled(context));
-    RUN_TEST(test__stall_timedout(context));
-    RUN_TEST(test__stall_event_EPERM(context));
-    RUN_TEST(test__stall_one_during_disable(context));
-    RUN_TEST(test__kthread_may_stall());
-    RUN_TEST(test__insmod_may_stall());
-    RUN_TEST(test__stall_event_abort(context));
+//    RUN_TEST(test__hash_table(context));
+//    RUN_TEST(test__hashtbl_double_del(context));
+//    RUN_TEST(test__hashtbl_refcount_double_del(context));
+//    RUN_TEST(test__hashtbl_refcount(context));
+//    RUN_TEST(test__hashtbl_add_duplicate(context));
+//
+//    RUN_TEST(test__proc_track_report_double_exit(context));
+//
+//    RUN_TEST(test__begin_finish_macros(context));
+//    RUN_TEST(test__hook_tracking_add_del(context));
+//
+//    RUN_TEST(test__stall_enable(context));
+//    RUN_TEST(test__perm_id(context));
+//    RUN_TEST(test__perm_id_disabled(context));
+//    RUN_TEST(test__stall_timedout(context));
+//    RUN_TEST(test__stall_event_EPERM(context));
+//    RUN_TEST(test__stall_one_during_disable(context));
+//    RUN_TEST(test__kthread_may_stall());
+//    RUN_TEST(test__insmod_may_stall());
+//    RUN_TEST(test__stall_event_abort(context));
 
     g_traceLevel = origTraceLevel;
     return all_passed;

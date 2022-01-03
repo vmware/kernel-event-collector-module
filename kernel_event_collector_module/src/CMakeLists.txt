@@ -115,7 +115,8 @@ set(SOURCE_FILES drvmain.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c
         tests/module-state-tests.c
-        tests/stall-tests.c)
+        tests/stall-tests.c
+        tests/comms-tests.c)
 
 do_build_kernel_module()
 do_post_build_kernel_module()
