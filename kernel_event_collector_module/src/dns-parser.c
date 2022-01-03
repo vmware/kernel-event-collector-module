@@ -27,7 +27,7 @@
 #define DNS_RCODE_NOERROR 0
 #define DNS_RCODE_NXDOMAIN 3
 
-#define  DNS_PRINT_LEVEL DL_VERBOSE
+#define  DNS_PRINT_LEVEL DL_INFO
 
 const char *__ec_dns_type_to_str(int dns_type);
 int __ec_dns_check_overrun(uint8_t *dns_data, uint8_t *dataPos, uint32_t dns_data_len);
@@ -57,7 +57,7 @@ int ec_dns_parse_data(char                *dns_data,
     int             i;
 
     TRY(dns_data);
-    TRY(dns_data_len >= 12 && dns_data_len <= 512);
+    TRY_MSG(dns_data_len >= 12 && dns_data_len <= 512, DL_COMMS, "dns_data_len %d", dns_data_len);
     TRY(response);
     TRY(context);
 
@@ -78,6 +78,12 @@ int ec_dns_parse_data(char                *dns_data,
     TRY_SET_DO(!(header->response_code != DNS_RCODE_NOERROR || ntohs(header->qdcount) != 1),
                E_INVALIDARG,
                { response->status = DNS_ERROR_NAME_DOES_NOT_EXIST; });
+
+    if (response->record_count > PATH_MAX / sizeof(CB_DNS_RECORD))
+    {
+        TRACE(DL_COMMS, "DNS response has %d records, will only report %zu", response->record_count, PATH_MAX / sizeof(CB_DNS_RECORD));
+        response->record_count = PATH_MAX / sizeof(CB_DNS_RECORD);
+    }
 
     response->status = DNS_STATUS_OK;
 

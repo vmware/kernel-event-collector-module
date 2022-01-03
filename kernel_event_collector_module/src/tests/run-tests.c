@@ -19,6 +19,7 @@ bool __init run_tests(ProcessContext *context)
     RUN_TEST(test__plru(context));
     RUN_TEST(test__proc_tracking(context));
     RUN_TEST(test__module_state(context));
+    RUN_TEST(test__comms(context));
 
     g_traceLevel = origTraceLevel;
 

@@ -38,7 +38,7 @@ bool     g_exiting __read_mostly;
 uint32_t g_max_queue_size = DEFAULT_QUEUE_SIZE * 3;
 uint32_t ec_prsock_buflen __read_mostly;
 bool     g_run_self_tests __read_mostly;
-bool     g_enable_hook_tracking __read_mostly;
+bool     g_enable_hook_tracking __read_mostly = true;
 bool     g_enable_mem_cache_tracking __read_mostly;
 bool     g_process_tracking_ref_debug __read_mostly;
 bool     g_path_cache_ref_debug __read_mostly;
