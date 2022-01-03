@@ -93,6 +93,7 @@ bool ec_banning_SetBannedProcessInodeWithoutKillingProcs(ProcessContext *context
         ec_hashtbl_free(&s_banning.banning_table, bep, context);
         return false;
     }
+    ec_hashtbl_put(&s_banning.banning_table, bep, context);
 
     return true;
 }
@@ -124,7 +125,7 @@ inline bool ec_banning_ClearBannedProcessInode(ProcessContext *context, uint64_t
     }
     TRACE(DL_INFO, "Clearing banned file [%llu:%llu]", device, ino);
 
-    ec_hashtbl_free(&s_banning.banning_table, bep, context);
+    ec_hashtbl_put(&s_banning.banning_table, bep, context);
     return true;
 }
 
@@ -136,6 +137,7 @@ void ec_banning_ClearAllBans(ProcessContext *context)
 
 bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t device, uint64_t ino)
 {
+    bool ret = false;
     BanningEntry *bep;
     BL_TBL_KEY key = { device, ino };
 
@@ -161,11 +163,12 @@ bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t devic
     if (device == bep->device && ino == bep->inode)
     {
         TRACE(DL_INFO, "Banned [%llu:%llu]", device, ino);
-        return true;
+        ret = true;
     }
+    ec_hashtbl_put(&s_banning.banning_table, bep, context);
 
 kbpbi_exit:
-    return false;
+    return ret;
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0) && RHEL_MINOR >= 1  //{

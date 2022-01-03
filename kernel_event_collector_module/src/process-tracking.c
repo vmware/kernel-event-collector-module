@@ -30,7 +30,6 @@ process_tracking_data __read_mostly g_process_tracking_data = {
         .datasize = sizeof(PosixIdentity),
         .key_len     = sizeof(PT_TBL_KEY),
         .key_offset  = offsetof(PosixIdentity, pt_key),
-        .refcount_offset = offsetof(PosixIdentity, reference_count),
         .delete_callback = ec_hashtbl_delete_callback,
         .handle_callback = ec_hashtbl_handle_callback,
     },
@@ -236,7 +235,6 @@ ProcessHandle *ec_process_tracking_create_process(
 
         posix_identity->posix_parent_details      = posix_parent_details;
         posix_identity->posix_grandparent_details = posix_grandparent_details;
-        atomic64_set(&posix_identity->reference_count, 1);
 
         g_process_tracking_data.op_cnt += 1;
         g_process_tracking_data.create += 1;

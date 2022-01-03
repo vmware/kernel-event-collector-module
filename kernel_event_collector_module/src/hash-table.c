@@ -18,13 +18,9 @@ static const size_t HASH_NODE_SZ = sizeof(HashTableNode);
 
 bool __ec_hashtbl_proc_initialize(HashTbl *hashTblp, ProcessContext *context);
 void __ec_hashtbl_proc_shutdown(HashTbl *hashTblp, ProcessContext *context);
-void __ec_hashtbl_free(HashTbl *hashTblp, HashTableNode *nodep, ProcessContext *context);
+void __ec_hashtbl_cache_delete_cb(void *value, ProcessContext *context);
 void __ec_hashtbl_print_callback(void *data, ProcessContext *context);
 
-static inline atomic64_t *__ec_get_refcountp(const HashTbl *hashTblp, void *datap)
-{
-    return (atomic64_t *)(datap + hashTblp->refcount_offset);
-}
 static inline void *__ec_get_datap(const HashTbl *hashTblp, HashTableNode *nodep)
 {
     return (void *)((char *)nodep + HASH_NODE_SZ);
@@ -154,6 +150,7 @@ bool ec_hashtbl_init(
         ec_plru_init(&hashTblp->plru, hashTblp->numberOfBuckets, plru_storage_p, context);
     }
 
+    hashTblp->hash_cache.delete_callback = __ec_hashtbl_cache_delete_cb;
     if (hashTblp->printval_callback)
     {
         hashTblp->hash_cache.printval_callback = __ec_hashtbl_print_callback;
@@ -296,7 +293,7 @@ void __ec_hashtbl_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void
                     hlist_del_init(&nodep->link);
                     --bucketp->itemCount;
                     percpu_counter_dec(&hashTblp->tableInstance);
-                    __ec_hashtbl_free(hashTblp, nodep, context);
+                    ec_mem_cache_disown(nodep, context);
                     break;
                 case ACTION_STOP:
                     if (haveWriteLock)
@@ -401,12 +398,6 @@ int __ec_hashtbl_add(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessCo
             void *datap = __ec_get_datap(hashTblp, tableNode);
 
             ec_hashtbl_del_lockheld(hashTblp, bucketp, datap, context);
-
-            // If ref counting is disabled, we need to delete this item
-            if (hashTblp->refcount_offset == HASHTBL_DISABLE_REF_COUNT)
-            {
-                ec_hashtbl_free(hashTblp, datap, context);
-            }
         }
         ec_hashtbl_bkt_write_unlock(bucketp, context);
     }
@@ -438,10 +429,7 @@ int __ec_hashtbl_add(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessCo
     hlist_add_head(&nodep->link, &bucketp->head);
     ++bucketp->itemCount;
     percpu_counter_inc(&hashTblp->tableInstance);
-    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-    {
-        atomic64_inc(__ec_get_refcountp(hashTblp, datap));
-    }
+    ec_mem_cache_get(nodep, context);
 
 CATCH_DEFAULT:
     ec_hashtbl_bkt_write_unlock(bucketp, context);
@@ -515,10 +503,7 @@ void *ec_hashtbl_get(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
     CANCEL(hashTblp && datap, NULL);
 
-    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-    {
-        atomic64_inc(__ec_get_refcountp(hashTblp, datap));
-    }
+    ec_mem_cache_get(__ec_get_nodep(hashTblp, datap), context);
     if (hashTblp->handle_callback)
     {
         void *handle = hashTblp->handle_callback(datap, context);
@@ -540,12 +525,7 @@ int64_t ec_hashtbl_ref_count(HashTbl *hashTblp, void *datap, ProcessContext *con
 {
     CANCEL(hashTblp && datap, -1);
 
-    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-    {
-        return (int64_t)atomic64_read(__ec_get_refcountp(hashTblp, datap));
-    }
-
-    return -1;
+    return ec_mem_cache_ref_count(__ec_get_nodep(hashTblp, datap), context);
 }
 
 void ec_hashtbl_cache_ref_str(HashTbl *hashTblp, void *datap, char *buffer, size_t size, ProcessContext *context)
@@ -569,15 +549,7 @@ int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *data
         --bucketp->itemCount;
         percpu_counter_dec(&hashTblp->tableInstance);
 
-        // The only reason this should happen is if ec_hashtbl_del and
-        // ec_hashtbl_put are called out of order,
-        // e.g. ec_hashtbl_put -> ec_hashtbl_del
-        if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-        {
-            WARN(atomic64_read(__ec_get_refcountp(hashTblp, datap)) == 1, "hashtbl will free while lock held");
-        }
-
-        ec_hashtbl_put(hashTblp, datap, context);
+        ec_mem_cache_disown(nodep, context);
 
         return 0;
     } else
@@ -617,11 +589,8 @@ void *ec_hashtbl_del_by_key(HashTbl *hashTblp, void *key, ProcessContext *contex
     {
         datap = __ec_get_datap(hashTblp, nodep);
 
-        // Will be needed as long ec_hashtbl_del_lockheld is used
-        if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-        {
-            atomic64_inc(__ec_get_refcountp(hashTblp, datap));
-        }
+        // We need to keep a lock for when we return
+        ec_mem_cache_get(nodep, context);
 
         ec_hashtbl_del_lockheld(hashTblp, bucketp, datap, context);
     }
@@ -676,36 +645,32 @@ void *ec_hashtbl_alloc(HashTbl *hashTblp, ProcessContext *context)
 
 void ec_hashtbl_put(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
-    CANCEL_VOID(hashTblp != NULL);
+    CANCEL_VOID(likely(hashTblp != NULL));
     CANCEL_VOID(datap != NULL);
 
-    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
-    {
-         IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(__ec_get_refcountp(hashTblp, datap), {
-            ec_hashtbl_free(hashTblp, datap, context);
-        });
-    }
-}
-
-void __ec_hashtbl_free(HashTbl *hashTblp, HashTableNode *nodep, ProcessContext *context)
-{
-    CANCEL_VOID(hashTblp);
-
-    if (nodep)
-    {
-        if (hashTblp->delete_callback)
-        {
-            hashTblp->delete_callback(__ec_get_datap(hashTblp, nodep), context);
-        }
-        ec_mem_cache_disown(nodep, context);
-    }
+    ec_mem_cache_put(__ec_get_nodep(hashTblp, datap), context);
 }
 
 void ec_hashtbl_free(HashTbl *hashTblp, void *datap, ProcessContext *context)
 {
-    CANCEL_VOID(datap);
+    CANCEL_VOID(likely(hashTblp && datap));
 
-    __ec_hashtbl_free(hashTblp, __ec_get_nodep(hashTblp, datap), context);
+    ec_mem_cache_disown(__ec_get_nodep(hashTblp, datap), context);
+}
+
+void __ec_hashtbl_cache_delete_cb(void *value, ProcessContext *context)
+{
+    HashTableNode *nodep = (HashTableNode *)value;
+
+    if (likely(nodep))
+    {
+        HashTbl *hashTblp = nodep->hashTblp;
+
+        if (hashTblp->delete_callback)
+        {
+            hashTblp->delete_callback(__ec_get_datap(hashTblp, nodep), context);
+        }
+    }
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
@@ -877,7 +842,7 @@ void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m
         int write_index = 0;
         uint64_t itemCount = hashTblp->tablePtr[bucket_index].itemCount;
 
-
+        ec_read_lock(&hashTblp->tablePtr[bucket_index].lock, context);
         for (; write_index < output_size; ++write_index)
         {
             if (itemCount == items[write_index].itemCount)
@@ -897,6 +862,7 @@ void ec_hastable_bkt_show(HashTbl *hashTblp, hastable_print_func _print, void *m
                 break;
             }
         }
+        ec_read_unlock(&hashTblp->tablePtr[bucket_index].lock, context);
         if (items[write_index].bucketCount++ == 0)
         {
             items[write_index].itemCount = itemCount;

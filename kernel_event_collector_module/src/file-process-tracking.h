@@ -16,7 +16,6 @@ typedef struct FILE_PROCESS_VALUE {
     FILE_PROCESS_KEY    key;
     uint32_t            pid;
     PathData           *path_data;
-    atomic64_t          reference_count;
 } FILE_PROCESS_VALUE;
 
 extern uint32_t g_file_tracking_buckets;

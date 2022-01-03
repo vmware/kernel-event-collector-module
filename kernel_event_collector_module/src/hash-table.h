@@ -16,7 +16,6 @@
 #define  ACTION_STOP       1
 #define  ACTION_DELETE     4
 
-#define  HASHTBL_DISABLE_REF_COUNT  0
 #define  HASHTBL_DISABLE_LRU        0
 
 
@@ -58,7 +57,6 @@ typedef struct hashtbl {
     int value_len;
     CB_MEM_CACHE hash_cache;
     int key_offset;
-    int refcount_offset;// TODO: Remove
     size_t base_size;
     bool debug_logging;
     hashtbl_delete_cb delete_callback; // Delete private data in object

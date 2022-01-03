@@ -23,7 +23,6 @@ static HashTbl __read_mostly s_path_cache = {
     .datasize = sizeof(PathData),
     .key_len     = sizeof(PathKey),
     .key_offset  = offsetof(PathData, key),
-    .refcount_offset = offsetof(PathData, reference_count),
     .delete_callback = __ec_path_cache_delete_callback,
     .printval_callback = __ec_path_cache_print_callback,
     .find_verify_callback = __ec_path_cache_verify_callback,
@@ -98,7 +97,6 @@ PathData *ec_path_cache_add(
         value->file_id = ec_get_current_time(); // Use this as a unique ID
         value->is_special_file = ec_is_special_file(value->path, ec_mem_size(value->path));
         value->fs_magic = fs_magic;
-        atomic64_set(&value->reference_count, 1);
 
         TRACE(DL_FILE, "[%llu:%llu] %s was added to path cache.",
             value->key.device,
