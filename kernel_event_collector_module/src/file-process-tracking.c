@@ -18,7 +18,6 @@ static HashTbl __read_mostly s_file_hash_table = {
     .datasize = sizeof(FILE_PROCESS_VALUE),
     .key_len     = sizeof(FILE_PROCESS_KEY),
     .key_offset  = offsetof(FILE_PROCESS_VALUE, key),
-    .refcount_offset = offsetof(FILE_PROCESS_VALUE, reference_count),
     .delete_callback = __ec_file_tracking_delete_callback,
 };
 
@@ -56,9 +55,6 @@ FILE_PROCESS_VALUE *ec_file_process_status_open(
     {
         value = ec_hashtbl_alloc(&s_file_hash_table, context);
         TRY(value);
-
-        // Initialize the reference count
-        atomic64_set(&value->reference_count, 1);
 
         value->key.file      = (uint64_t)file;
         value->pid           = pid;

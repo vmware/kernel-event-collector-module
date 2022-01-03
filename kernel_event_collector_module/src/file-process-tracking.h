@@ -16,7 +16,6 @@ typedef struct FILE_PROCESS_VALUE {
     FILE_PROCESS_KEY    key;
     uint32_t            pid;
     PathData           *path_data;
-    atomic64_t          reference_count;
 } FILE_PROCESS_VALUE;
 
 void ec_file_process_put_ref(FILE_PROCESS_VALUE *value, ProcessContext *context);

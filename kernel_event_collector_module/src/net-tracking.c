@@ -101,6 +101,7 @@ bool ec_net_tracking_check_cache(
 
 CATCH_DEFAULT:
 
+    ec_hashtbl_put(&s_net_hash_table, node, context);
     return xcode;
 }
 

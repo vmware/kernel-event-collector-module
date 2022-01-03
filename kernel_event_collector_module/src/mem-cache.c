@@ -138,7 +138,7 @@ uint64_t ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context)
                     {
                         TRACE(DL_ERROR, "    CACHE %s (ref: %lld) (%p)",
                             cache->name,
-                            percpu_ref_sum(&cache_buffer->refcnt),
+                            percpu_ref_sum_positive(&cache_buffer->refcnt),
                             cache_buffer);
                         if (cache->printval_callback)
                         {
@@ -343,7 +343,7 @@ int64_t ec_mem_cache_ref_count(void *value, ProcessContext *context)
     {
         cache_buffer_t *cache_buffer = (cache_buffer_t *) ((char *) value - CACHE_BUFFER_SZ);
 
-        return percpu_ref_sum(&cache_buffer->refcnt);
+        return percpu_ref_sum_positive(&cache_buffer->refcnt);
     }
 
     return 0;

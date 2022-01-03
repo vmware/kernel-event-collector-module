@@ -114,3 +114,10 @@ static inline int64_t percpu_ref_sum(struct percpu_ref *ref)
     return sum;
 }
 #endif
+
+static inline int64_t percpu_ref_sum_positive(struct percpu_ref *ref)
+{
+    int64_t sum = percpu_ref_sum(ref);
+
+    return (sum > 0 ? sum : 0);
+}

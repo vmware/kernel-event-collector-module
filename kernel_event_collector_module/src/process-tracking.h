@@ -69,9 +69,6 @@ typedef struct ExecIdentity_handle {
 typedef struct posix_identity {
     PT_TBL_KEY        pt_key;
 
-    // This tracks the owners of this struct (can be more than the number of active processes)
-    atomic64_t        reference_count;
-
     ProcessDetails    posix_details;
     ProcessDetails    posix_parent_details;
     ProcessDetails    posix_grandparent_details;
