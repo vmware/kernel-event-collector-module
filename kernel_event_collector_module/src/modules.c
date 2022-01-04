@@ -64,11 +64,8 @@ int ec_lsm_file_mmap(struct file *file,
     ec_event_send_modload(
         process_handle,
         CB_EVENT_TYPE_MODULE_LOAD,
-        path_data->key.device,
-        path_data->key.inode,
-        //path_data->fs_magic, // We should include the fs_magic
+        path_data,
         MMAP_ADDRESS(),
-        path_data->path,
         &context);
 
 CATCH_DEFAULT:

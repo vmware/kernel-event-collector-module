@@ -94,7 +94,7 @@ PathData *ec_path_cache_add(
         value->key.inode = inode;
         value->path = ec_mem_get(path, context);
         value->path_found = !!path; // It is possible that the path will be NULL now but set later
-        value->file_id = ec_get_current_time(); // Use this as a unique ID
+        value->uid = ec_get_current_time(); // Use this as a unique ID
         value->is_special_file = ec_is_special_file(value->path, ec_mem_size(value->path));
         value->fs_magic = fs_magic;
 
@@ -157,6 +157,9 @@ void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
     }
 }
 
+
+int __ec_path_cache_path_discovery(HashTbl *hashTblp, void *data, void *priv, ProcessContext *context);
+
 int ec_path_cache_show(struct seq_file *m, void *v)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
@@ -168,6 +171,11 @@ int ec_path_cache_show(struct seq_file *m, void *v)
 CATCH_DISABLED:
     MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return 0;
+}
+
+void ec_path_cache_send_path_discovery(ProcessContext *context)
+{
+    ec_hashtbl_read_for_each(&s_path_cache, __ec_path_cache_path_discovery, NULL, context);
 }
 
 int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context)
@@ -225,4 +233,11 @@ void __ec_path_cache_print_ref(int log_level, const char *calling_func, PathData
           path_data);
 
     ec_mem_free(ref_str);
+}
+
+int __ec_path_cache_path_discovery(HashTbl *hashTblp, void *data, void *priv, ProcessContext *context)
+{
+    ec_file_helper_send_path_event((PathData *)data, context);
+
+    return ACTION_CONTINUE;
 }

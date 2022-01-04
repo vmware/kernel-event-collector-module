@@ -611,14 +611,14 @@ void __ec_exec_identity_delete_callback(void *value, ProcessContext *context)
         // Free the lock
         ec_spinlock_destroy(&exec_identity->string_lock, context);
 
-        // Free the path and commandline
-        ec_path_cache_put(exec_identity->path_data, context);
-        ec_mem_put(exec_identity->cmdline);
-
         exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
 
         // Send the exit
         ec_event_send_last_exit(exit_event, context);
+
+        // Free the path and commandline
+        ec_path_cache_put(exec_identity->path_data, context);
+        ec_mem_put(exec_identity->cmdline);
     }
 }
 

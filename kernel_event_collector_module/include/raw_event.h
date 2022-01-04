@@ -61,7 +61,8 @@ typedef enum CB_EVENT_ACTION_TYPE {
     CB_EVENT_ACTION_CLEAR_EVENT_QUEUE = 1,
     CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR = 2,
     CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR = 3,
-    CB_EVENT_ACTION_REQUEST_PROCESS_DISCOVERY = 4
+    CB_EVENT_ACTION_REQUEST_PROCESS_DISCOVERY = 4,
+    CB_EVENT_ACTION_REQUEST_PATH_DISCOVERY = 5
 } CB_EVENT_ACTION_TYPE;
 
 #define CB_MAX_CMDLINE_SIZE 1024
@@ -87,6 +88,7 @@ typedef enum CB_EVENT_TYPE {
   // CB_EVENT_TYPE_DIR_CREATE          = 14,
   // CB_EVENT_TYPE_DIR_DELETE          = 15,
   CB_EVENT_TYPE_FILE_OPEN = 16,
+  CB_EVENT_TYPE_FILE_PATH = 17,
 
   CB_EVENT_TYPE_NET_CONNECT_PRE = 20,
   CB_EVENT_TYPE_NET_CONNECT_POST = 21,
@@ -109,9 +111,14 @@ typedef enum CB_EVENT_TYPE {
   CB_EVENT_TYPE_MAX
 } CB_EVENT_TYPE;
 
-typedef struct process_details {
+typedef struct path_data {
+    uint64_t          ns_id;
     uint64_t          device;
     uint64_t          inode;
+    uint64_t          fs_magic;
+    uint64_t          uid;
+} PATH_DATA;
+
     pid_t             pid;
     time_t            start_time;
 } ProcessDetails;
@@ -158,22 +165,12 @@ typedef struct _CB_EVENT_PROCESS_START {
                  // fake
 } CB_EVENT_PROCESS_START, *PCB_EVENT_PROCESS_START;
 
-typedef struct _CB_EVENT_MODULE_LOAD {
-    char *path;
-    uint16_t path_size;
-    uint16_t path_offset;
-    int64_t baseaddress;
-    uint64_t device;
-    uint64_t inode;
-} CB_EVENT_MODULE_LOAD, *PCB_EVENT_MODULE_LOAD;
-
 typedef struct _CB_EVENT_FILE_GENERIC {
     char *path;
     uint16_t path_size;
     uint16_t path_offset;
-    uint64_t device;
-    uint64_t inode;
-    uint64_t fs_magic;
+    PATH_DATA path_data;
+    int64_t  baseaddress;  // Modload events
 } CB_EVENT_FILE_GENERIC, *PCB_EVENT_FILE_GENERIC;
 
 typedef struct _CB_EVENT_HEARTBEAT {
@@ -186,17 +183,6 @@ typedef struct _CB_EVENT_HEARTBEAT {
     };
     size_t kernel_memory_peak;
 } CB_EVENT_HEARTBEAT, *PCB_EVENT_HEARTBEAT;
-
-typedef struct _CB_EVENT_FILE_GENERIC CB_EVENT_FILE_CREATE,
-    *PCB_EVENT_FILE_CREATE;
-typedef struct _CB_EVENT_FILE_GENERIC CB_EVENT_FILE_DELETE,
-    *PCB_EVENT_FILE_DELETE;
-typedef struct _CB_EVENT_FILE_GENERIC CB_EVENT_DIR_CREATE,
-    *PCB_EVENT_DIR_CREATE;
-typedef struct _CB_EVENT_FILE_GENERIC CB_EVENT_DIR_DELETE,
-    *PCB_EVENT_DIR_DELETE;
-typedef struct _CB_EVENT_FILE_GENERIC CB_EVENT_FILE_WRITE,
-    *PCB_EVENT_FILE_WRITE;
 
 typedef union _CB_SOCK_ADDR {
   struct sockaddr_storage ss_addr;
@@ -393,14 +379,8 @@ typedef struct CB_EVENT {
     union {
         CB_EVENT_GENERIC_DATA generic_data;
         CB_EVENT_PROCESS_START processStart;
-        CB_EVENT_MODULE_LOAD moduleLoad;
 
         CB_EVENT_FILE_GENERIC fileGeneric;
-        CB_EVENT_FILE_CREATE fileCreate;
-        CB_EVENT_FILE_DELETE fileDelete;
-        // CB_EVENT_FILE_WRITE     fileWrite;
-        // CB_EVENT_DIR_CREATE     dirCreate;
-        // CB_EVENT_DIR_DELETE     dirDelete;
 
         CB_EVENT_NETWORK_CONNECT netConnect;
         CB_EVENT_DNS_RESPONSE dnsResponse;

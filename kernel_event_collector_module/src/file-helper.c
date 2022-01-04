@@ -7,6 +7,7 @@
 #include "mem-alloc.h"
 #include "path-cache.h"
 #include "path-buffers.h"
+#include "event-factory.h"
 
 #include <linux/magic.h>
 #include <linux/namei.h>
@@ -163,11 +164,22 @@ PathData *ec_file_get_path_data(
             path_data = NULL;
         }
 
+        ec_file_helper_send_path_event(path_data, context);
+
         ec_mem_put(path_str);
         ec_put_path_buffer(owned_path_buffer);
     }
 
     return path_data;
+}
+
+void ec_file_helper_send_path_event(
+    PathData         *path_data,
+    ProcessContext   *context)
+{
+    CANCEL_VOID(path_data);
+
+    ec_event_send_path(path_data, context);
 }
 
 char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen)

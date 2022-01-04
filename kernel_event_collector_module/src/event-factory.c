@@ -87,12 +87,13 @@ void ec_event_send_start(
 }
 
 void ec_event_send_last_exit(PCB_EVENT        event,
-                          ProcessContext  *context)
+                             const char      *path,
+                             ProcessContext  *context)
 {
     CANCEL_VOID(event);
 
     TRACE(DL_PROCESS, "EXIT <SEND-LAST> %s of %d by %d (reported as %d:%ld by %d)",
-           SAFE_STRING(event->procInfo.path),
+           SAFE_STRING(path),
            event->procInfo.all_process_details.array[FORK].pid,
            event->procInfo.all_process_details.array[FORK_PARENT].pid,
            event->procInfo.all_process_details.array[EXEC].pid,
@@ -193,16 +194,10 @@ void ec_event_send_block(
 
 #define MSG_SIZE   200
 
-void ec_event_send_file(
-    ProcessHandle  * process_handle,
-    CB_EVENT_TYPE    event_type,
-    uint64_t         device,
-    uint64_t         inode,
-    uint64_t         fs_magic,
-    const char      *path,
+void ec_event_send_path(
+    PathData        * path_data,
     ProcessContext  *context)
 {
-    size_t path_size = 0;
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
     char *status_msgp = NULL;
@@ -213,10 +208,56 @@ void ec_event_send_file(
         snprintf(status_msgp,
              MSG_SIZE,
              " [%llu:%llu:%llx] %s by",
-             device,
-             inode,
-             fs_magic,
-             path);
+             path_data->key.device,
+             path_data->key.inode,
+             path_data->fs_magic,
+             path_data->path);
+        status_msgp[MSG_SIZE] = 0;
+    }
+
+    event = ec_factory_alloc_event(
+        NULL,
+        CB_EVENT_TYPE_FILE_PATH,
+        DL_FILE,
+        ec_event_type_to_str(CB_EVENT_TYPE_FILE_PATH),
+        status_msgp,
+        context);
+
+    CANCEL_VOID(event);
+
+    // Populate the event
+    event->fileGeneric.path_data.ns_id    = path_data->key.ns_id;
+    event->fileGeneric.path_data.device   = path_data->key.device;
+    event->fileGeneric.path_data.inode    = path_data->key.inode;
+    event->fileGeneric.path_data.uid      = path_data->uid;
+    event->fileGeneric.path_data.fs_magic = path_data->fs_magic;
+    event->fileGeneric.path               = ec_mem_get(path_data->path, context);
+    event->fileGeneric.path_size          = ec_mem_size(path_data->path);
+
+    // Queue it to be sent to usermode
+    ec_send_event(event, context);
+}
+
+void ec_event_send_file(
+    ProcessHandle  * process_handle,
+    CB_EVENT_TYPE    event_type,
+    PathData        *path_data,
+    ProcessContext  *context)
+{
+    char status_message[MSG_SIZE + 1];
+    PCB_EVENT event;
+    char *status_msgp = NULL;
+
+    if (MAY_TRACE_LEVEL(DL_FILE))
+    {
+        status_msgp = status_message;
+        snprintf(status_msgp,
+             MSG_SIZE,
+             " [%llu:%llu:%llx] %s by",
+             path_data->key.device,
+             path_data->key.inode,
+             path_data->fs_magic,
+             path_data->path);
         status_msgp[MSG_SIZE] = 0;
     }
 
@@ -231,18 +272,13 @@ void ec_event_send_file(
     CANCEL_VOID(event);
 
     // Populate the event
-    event->fileGeneric.device    = device;
-    event->fileGeneric.inode     = inode;
-    event->fileGeneric.fs_magic  = fs_magic;
-
-    if (path)
-    {
-        event->fileGeneric.path = ec_mem_strdup_x(path, &path_size, context);
-        if (event->fileGeneric.path && path_size)
-        {
-            event->fileGeneric.path_size = (uint16_t)path_size;
-        }
-    }
+    event->fileGeneric.path_data.ns_id    = path_data->key.ns_id;
+    event->fileGeneric.path_data.device   = path_data->key.device;
+    event->fileGeneric.path_data.inode    = path_data->key.inode;
+    event->fileGeneric.path_data.uid  = path_data->uid;
+    event->fileGeneric.path_data.fs_magic = path_data->fs_magic;
+    event->fileGeneric.path = ec_mem_cache_get_generic(path_data->path, context);
+    event->fileGeneric.path_size = ec_mem_cache_get_size_generic(path_data->path);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);
@@ -251,13 +287,10 @@ void ec_event_send_file(
 void ec_event_send_modload(
     ProcessHandle  * process_handle,
     CB_EVENT_TYPE    event_type,
-    uint64_t         device,
-    uint64_t         inode,
+    PathData        *path_data,
     int64_t          base_address,
-    char            *path,
     ProcessContext  *context)
 {
-    size_t path_size = 0;
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
     char *status_msgp = NULL;
@@ -278,8 +311,8 @@ void ec_event_send_modload(
         snprintf(status_msgp,
              MSG_SIZE,
              " [%llu:%llu]",
-             device,
-             inode);
+             path_data->key.device,
+             path_data->key.inode);
         status_msgp[MSG_SIZE] = 0;
     }
 
@@ -294,18 +327,14 @@ void ec_event_send_modload(
     CANCEL_VOID(event);
 
     // Populate the event
-    event->moduleLoad.device        = device;
-    event->moduleLoad.inode         = inode;
-    event->moduleLoad.baseaddress   = base_address;
-
-    if (path)
-    {
-        event->moduleLoad.path = ec_mem_strdup_x(path, &path_size, context);
-        if (event->moduleLoad.path)
-        {
-            event->moduleLoad.path_size = (uint16_t)path_size;
-        }
-    }
+    event->fileGeneric.path_data.ns_id    = path_data->key.ns_id;
+    event->fileGeneric.path_data.device   = path_data->key.device;
+    event->fileGeneric.path_data.inode    = path_data->key.inode;
+    event->fileGeneric.path_data.uid      = path_data->uid;
+    event->fileGeneric.path_data.fs_magic = path_data->fs_magic;
+    event->fileGeneric.baseaddress        = base_address;
+    event->fileGeneric.path = ec_mem_cache_get_generic(path_data->path, context);
+    event->fileGeneric.path_size = ec_mem_cache_get_size_generic(path_data->path);
 
     // Queue it to be sent to usermode
     ec_send_event(event, context);

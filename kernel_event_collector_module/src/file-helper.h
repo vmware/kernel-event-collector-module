@@ -38,3 +38,6 @@ struct path_lookup
 PathData *ec_file_get_path_data(
     struct path_lookup *path_lookup,
     ProcessContext     *context);
+void ec_file_helper_send_path_event(
+    PathData         *path_data,
+    ProcessContext   *context);

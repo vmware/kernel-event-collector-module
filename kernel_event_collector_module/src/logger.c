@@ -81,18 +81,12 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             break;
 
         case CB_EVENT_TYPE_MODULE_LOAD:
-            if (event->moduleLoad.path)
-            {
-                ec_mem_free(event->moduleLoad.path);
-                event->moduleLoad.path = NULL;
-            }
-            break;
-
         case CB_EVENT_TYPE_FILE_CREATE:
         case CB_EVENT_TYPE_FILE_DELETE:
         case CB_EVENT_TYPE_FILE_OPEN:
         case CB_EVENT_TYPE_FILE_WRITE:
         case CB_EVENT_TYPE_FILE_CLOSE:
+        case CB_EVENT_TYPE_FILE_PATH:
             if (event->fileGeneric.path)
             {
                 ec_mem_free(event->fileGeneric.path);
@@ -204,6 +198,7 @@ bool ec_logger_should_log(CB_EVENT_TYPE eventType)
     case CB_EVENT_TYPE_FILE_WRITE:
     case CB_EVENT_TYPE_FILE_CLOSE:
     case CB_EVENT_TYPE_FILE_OPEN:
+    case CB_EVENT_TYPE_FILE_PATH:
         return g_driver_config.file_mods == ENABLE;
 
     case CB_EVENT_TYPE_NET_CONNECT_PRE:

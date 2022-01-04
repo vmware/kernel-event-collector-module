@@ -12,6 +12,7 @@ void ec_event_send_start(ProcessHandle  * process_handle,
                          ProcessContext  *context);
 
 void ec_event_send_last_exit(PCB_EVENT        event,
+                             const char      *path,
                              ProcessContext  *context);
 
 void ec_event_send_exit(ProcessHandle  *process_handle,
@@ -27,19 +28,17 @@ void ec_event_send_block(ProcessHandle  *process_handle,
                          ProcessContext *context);
 
 void ec_event_send_file(ProcessHandle  *process_handle,
-                        CB_EVENT_TYPE    event_type,
-                        uint64_t         device,
-                        uint64_t         inode,
-                        uint64_t         fs_magic,
-                        const char *path,
+                        CB_EVENT_TYPE   event_type,
+                        PathData       *path_data,
+                        ProcessContext *context);
+
+void ec_event_send_path(PathData       *path_data,
                         ProcessContext *context);
 
 void ec_event_send_modload(ProcessHandle  *process_handle,
-                           CB_EVENT_TYPE    event_type,
-                           uint64_t         device,
-                           uint64_t         inode,
-                           int64_t          base_address,
-                           char *path,
+                           CB_EVENT_TYPE   event_type,
+                           PathData       *path_data,
+                           int64_t         base_address,
                            ProcessContext *context);
 #
 void ec_event_send_net(ProcessHandle  *process_handle,

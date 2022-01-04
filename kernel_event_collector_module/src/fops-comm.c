@@ -490,22 +490,12 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
         break;
 
     case CB_EVENT_TYPE_MODULE_LOAD:
-        if (msg->moduleLoad.path && msg->moduleLoad.path_size)
-        {
-            rc = copy_to_user(p, msg->moduleLoad.path, msg->moduleLoad.path_size);
-            TRY_STEP(COPY_FAIL, !rc);
-
-            p += msg->moduleLoad.path_size;
-        }
-        rc = put_user(0, &msg_user->event.moduleLoad.path);
-        TRY_STEP(COPY_FAIL, !rc);
-        break;
-
     case CB_EVENT_TYPE_FILE_CREATE:
     case CB_EVENT_TYPE_FILE_DELETE:
     case CB_EVENT_TYPE_FILE_OPEN:
     case CB_EVENT_TYPE_FILE_WRITE:
     case CB_EVENT_TYPE_FILE_CLOSE:
+    case CB_EVENT_TYPE_FILE_PATH:
         if (msg->fileGeneric.path && msg->fileGeneric.path_size)
         {
             rc = copy_to_user(p, msg->fileGeneric.path, msg->fileGeneric.path_size);
@@ -1045,6 +1035,10 @@ int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
         ec_process_tracking_send_process_discovery(context);
         break;
 
+    case CB_EVENT_ACTION_REQUEST_PATH_DISCOVERY:
+        ec_path_cache_send_path_discovery(context);
+        break;
+
     default:
         break;
     }
@@ -1370,24 +1364,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
         break;
 
     case CB_EVENT_TYPE_MODULE_LOAD:
-        if (cb_event->moduleLoad.path && cb_event->moduleLoad.path_size)
-        {
-            if (cb_event->moduleLoad.path_size > PATH_MAX)
-            {
-                TRACE(DL_WARNING, "moduleLoad.path_size: %d: %s", cb_event->moduleLoad.path_size,
-                      cb_event->moduleLoad.path);
-            }
-
-            cb_event->moduleLoad.path_offset = payload;
-            payload += cb_event->moduleLoad.path_size;
-        }
-        break;
-
     case CB_EVENT_TYPE_FILE_CREATE:
     case CB_EVENT_TYPE_FILE_DELETE:
     case CB_EVENT_TYPE_FILE_OPEN:
     case CB_EVENT_TYPE_FILE_WRITE:
     case CB_EVENT_TYPE_FILE_CLOSE:
+    case CB_EVENT_TYPE_FILE_PATH:
         if (cb_event->fileGeneric.path && cb_event->fileGeneric.path_size)
         {
             if (cb_event->fileGeneric.path_size > PATH_MAX)

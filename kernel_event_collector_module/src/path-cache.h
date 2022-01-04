@@ -16,7 +16,7 @@ typedef struct PATH_DATA {
     char               *path;
     bool                path_found;
     bool                is_special_file;
-    uint64_t            file_id;
+    uint64_t            uid;
     uint64_t            fs_magic;
 } PathData;
 
@@ -51,3 +51,4 @@ PathData *ec_path_cache_get(
 void ec_path_cache_put(
     PathData           *path_data,
     ProcessContext     *context);
+void ec_path_cache_send_path_discovery(ProcessContext *context);
