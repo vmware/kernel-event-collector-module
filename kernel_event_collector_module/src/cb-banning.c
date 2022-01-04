@@ -154,7 +154,7 @@ bool ec_banning_KillBannedProcessByInode(ProcessContext *context, uint64_t devic
     bep = (BanningEntry *) ec_hashtbl_find(&s_banning.banning_table, &key, context);
     if (!bep)
     {
-        TRACE(DL_INFO, "kill banned process failed to find [%llu:%llu]", device, ino);
+        TRACE(DL_VERBOSE, "kill banned process failed to find [%llu:%llu]", device, ino);
         goto kbpbi_exit;
     }
 

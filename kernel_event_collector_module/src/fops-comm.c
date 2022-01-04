@@ -47,7 +47,7 @@ void __ec_apply_legacy_driver_config(uint32_t eventFilter);
 void __ec_apply_driver_config(CB_DRIVER_CONFIG *config);
 char *__ec_driver_config_option_to_string(CB_CONFIG_OPTION config_option);
 void __ec_print_driver_config(char *msg, CB_DRIVER_CONFIG *config);
-void __ec_transfer_from_input_queue(struct list_head *tx_queue, struct llist_head *_tx_queue_in);
+void __ec_transfer_from_input_queue(void);
 int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *context);
 int __ec_precompute_payload(struct CB_EVENT *cb_event);
 void __ec_stats_work_task(struct work_struct *work);
@@ -159,6 +159,7 @@ static struct  fops_config_t
     struct delayed_work    stats_work;
     uint32_t               stats_work_delay;
     wait_queue_head_t      wq;
+    bool                   need_wakeup;
 } s_fops_config __read_mostly;
 
 static struct fops_data_t
@@ -221,6 +222,7 @@ bool ec_user_comm_initialize(ProcessContext *context)
     mem_kernel =      kernel_mem;
     mem_kernel_peak = kernel_mem;
 
+    s_fops_config.need_wakeup = true;
     init_waitqueue_head(&s_fops_config.wq);
 
     // Initialize a workque struct to police the hashtable
@@ -271,8 +273,6 @@ void ec_user_comm_shutdown(ProcessContext *context)
      */
     cancel_delayed_work_sync(&s_fops_config.stats_work);
 
-    // Clear the queues now so all the memory can be freed properly before the subsystems are shutdown
-    ec_user_comm_clear_queue(context);
     percpu_counter_destroy(&tx_ready);
 }
 
@@ -284,19 +284,24 @@ bool ec_user_comm_enable(ProcessContext *context)
 
 void ec_user_comm_disable(ProcessContext *context)
 {
-    // We need to disable the user comms and signal the polling process to wakeup
+    // We need to disable the user comms
     s_fops_config.enabled = false;
+
+    // Clear the queues now so all the memory can be freed properly before the subsystems are shutdown
+    ec_user_comm_clear_queue(context);
+
+    // Signal the polling process to wakeup
     ec_fops_comm_wake_up_reader(context);
 }
 
-void __ec_clear_tx_queue(struct list_head *tx_queue, struct llist_head *tx_queue_in, ProcessContext *context)
+void __ec_clear_tx_queue(ProcessContext *context)
 {
     struct list_head *eventNode;
     struct list_head *safeNode;
 
-    __ec_transfer_from_input_queue(tx_queue, tx_queue_in);
+    __ec_transfer_from_input_queue();
 
-    list_for_each_safe(eventNode, safeNode, tx_queue)
+    list_for_each_safe(eventNode, safeNode, &msg_queue)
     {
         list_del_init(eventNode);
         ec_free_event(&(container_of(eventNode, CB_EVENT_NODE, listEntry)->data), context);
@@ -311,7 +316,7 @@ void ec_user_comm_clear_queue(ProcessContext *context)
     // Clearing the queue can trigger sending an exit event which will hang when ec_send_event
     // locks this same lock. Since we're clearing the queue we don't need to send exit events.
     DISABLE_SEND_EVENTS(context);
-    __ec_clear_tx_queue(&msg_queue, &msg_queue_in, context);
+    __ec_clear_tx_queue(context);
     ENABLE_SEND_EVENTS(context);
 }
 
@@ -347,11 +352,9 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     // This should be NULL by now.
     TRY(!msg);
 
-    // If we enqueued the event and the queues were previously empty, wake up the reader task if we are allowed to
-    if (!readyCount && ALLOW_WAKE_UP(context))
-    {
-        ec_fops_comm_wake_up_reader(context);
-    }
+    // If we enqueued the event wake up the reader task if we are allowed to
+    ec_fops_comm_wake_up_reader(context);
+
     result = 0;
 
 CATCH_DEFAULT:
@@ -367,10 +370,15 @@ CATCH_DEFAULT:
 
 void ec_fops_comm_wake_up_reader(ProcessContext *context)
 {
-    // Wake up the reader task if we are allowed to
-    if (ALLOW_WAKE_UP(context))
+    // Wake up the reader task if we are allowed to. We want to avoid calling wake_up unnecessarily because it
+    // uses a lock, which slows us down in send_event, which is called by all our hooks.
+    if (s_fops_config.need_wakeup && ALLOW_WAKE_UP(context)) //
     {
         wake_up(&s_fops_config.wq);
+        TRACE(DL_COMMS, "wakeup");
+    } else
+    {
+        TRACE(DL_COMMS, "no wakeup");
     }
 }
 
@@ -395,37 +403,33 @@ CATCH_DEFAULT:
 
 int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessContext *context)
 {
-    uint64_t      qlen;
     CB_EVENT_NODE *eventNode = NULL;
     int xcode = -ENOMEM;
 
-    if (count < sizeof(struct CB_EVENT_UM))
-    {
-        return -ENOMEM;
-    }
+    TRY_MSG(count >= sizeof(struct CB_EVENT_UM),
+            DL_ERROR, "%s count too small: %zu, %zu", __func__, count, sizeof(struct CB_EVENT_UM));
 
-    qlen = percpu_counter_read_positive(&tx_ready);
-
-    TRY_DO_MSG(qlen > 0,
-               { xcode = -ENOMEM; },
-               DL_COMMS,
-               "%s: empty queue", __func__);
-
-    __ec_transfer_from_input_queue(&msg_queue, &msg_queue_in);
+    __ec_transfer_from_input_queue();
 
     eventNode = list_first_entry_or_null(&msg_queue, CB_EVENT_NODE, listEntry);
-    if (eventNode && count >= eventNode->payload &&
+
+    TRY_SET_MSG(eventNode, -EAGAIN, DL_COMMS, "%s: empty queue", __func__);
+
+    if (count >= eventNode->payload &&
         eventNode->payload >= sizeof(struct CB_EVENT_UM))
     {
         // when we know for sure we can send this event
-        list_del_init(&eventNode->listEntry);
-        percpu_counter_dec(&tx_ready);
         *cb_event = &eventNode->data;
         xcode = eventNode->payload;
+    } else
+    {
+        TRACE(DL_ERROR, "Invalid payload size: %d", eventNode->payload);
     }
 
-CATCH_DEFAULT:
+    list_del_init(&eventNode->listEntry);
+    percpu_counter_dec(&tx_ready);
 
+CATCH_DEFAULT:
     return xcode;
 }
 
@@ -434,7 +438,7 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     char __user *p;
     int rc;
     uint16_t payload;
-    int xcode = -ENOMEM;
+    int xcode = -EAGAIN;
     struct CB_EVENT *msg = NULL;
     struct CB_EVENT_UM __user *msg_user = (struct CB_EVENT_UM __user *)ubuf;
 
@@ -631,13 +635,15 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-void __ec_transfer_from_input_queue(struct list_head *tx_queue, struct llist_head *_tx_queue_in)
+void __ec_transfer_from_input_queue(void)
 {
     LIST_HEAD(tempList);
     struct llist_node *l_node = NULL;
 
     // Move the input queue into a temporary list (no lock required)
-    l_node = llist_del_all(_tx_queue_in);
+    l_node = llist_del_all(&msg_queue_in);
+
+    CANCEL_VOID(l_node);
 
     // Move the contents of the input queue into a temporary list
     //  This reverses the order because the input queue is implemented as a stack
@@ -650,7 +656,7 @@ void __ec_transfer_from_input_queue(struct list_head *tx_queue, struct llist_hea
     }
 
     // Splice the list onto the end of the real tx_queue
-    list_splice_tail(&tempList, tx_queue);
+    list_splice_tail(&tempList, &msg_queue);
 }
 
 int ec_device_open(struct inode *inode, struct file *filp)
@@ -693,24 +699,23 @@ int ec_device_release(struct inode *inode, struct file *filp)
 
 unsigned int ec_device_poll(struct file *filp, struct poll_table_struct *pts)
 {
-    int      xcode = 0;
-    uint64_t qlen  = 0;
+    int  xcode      = 0;
+    bool msg_queued = false;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    // Check if data is available and lets go
-    qlen = percpu_counter_read(&tx_ready);
-    TRY_MSG(qlen == 0, DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
+    // Check if messages are available. llist_empty is not guaranteed to be correct but that's ok,
+    // the reader will try again.
+    msg_queued = !llist_empty(&msg_queue_in) || !list_empty(&msg_queue);
+
+    TRY_MSG(!msg_queued, DL_COMMS, "%s: msg queued so not waiting", __func__);
 
     // We should call poll_wait here if we want the kernel to actually
-    // sleep when waiting for us.
+    // sleep when waiting for us. This adds us to the list of devices being waited on.
     TRACE(DL_COMMS, "%s: waiting for data", __func__);
     poll_wait(filp, &s_fops_config.wq, pts);
-
-    qlen = percpu_counter_read(&tx_ready);
-    TRACE(DL_COMMS, "%s: msg available qlen=%llu", __func__, qlen);
 
 CATCH_DEFAULT:
     // If comms have been disabled while we were waiting send POLLHUP
@@ -719,8 +724,12 @@ CATCH_DEFAULT:
         xcode = POLLHUP;
     } else
     {
+        // If messages are queued then poll will not wait, so no wakeup is needed when more messages are queued.
+        // If messages are not queued then poll will wait, so we need to wakeup when messages are queued.
+        s_fops_config.need_wakeup = !msg_queued;
+
         // Report if we have events to read
-        xcode = qlen != 0 ? (POLLIN | POLLRDNORM) : 0;
+        xcode = msg_queued ? (POLLIN | POLLRDNORM) : 0;
     }
 
     FINISH_MODULE_DISABLE_CHECK(&context);
