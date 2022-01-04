@@ -151,7 +151,7 @@ void __ec_path_cache_delete_callback(void *data, ProcessContext *context)
         PathData *value = (PathData *)data;
 
         __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
-        ec_mem_put(value->path);
+        ec_mem_disown(value->path);
         value->path = NULL;
     }
 }

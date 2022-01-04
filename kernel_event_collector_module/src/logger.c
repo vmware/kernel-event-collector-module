@@ -67,7 +67,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         //  for a process.
         ec_event_set_process_data(event, NULL, context);
 
-        ec_mem_free(event->procInfo.path);
+        ec_mem_put(event->procInfo.path);
         event->procInfo.path = NULL;
 
         switch (event->eventType)
@@ -75,7 +75,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         case CB_EVENT_TYPE_PROCESS_START:
             if (event->processStart.path)
             {
-                ec_mem_free(event->processStart.path);
+                ec_mem_put(event->processStart.path);
                 event->processStart.path = NULL;
             }
             break;

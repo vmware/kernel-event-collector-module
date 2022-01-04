@@ -55,7 +55,7 @@ void ec_process_tracking_set_cmdline(ExecHandle *exec_handle, char *cmdline, Pro
         ExecIdentity *exec_identity = ec_exec_identity(exec_handle);
 
         ec_write_lock(&exec_identity->string_lock, context);
-        ec_mem_put(exec_identity->cmdline);
+        ec_mem_disown(exec_identity->cmdline);
         exec_identity->cmdline = ec_mem_get(cmdline, context);
         ec_write_unlock(&exec_identity->string_lock, context);
 

@@ -231,6 +231,7 @@ void ec_mem_cache_disown(void *value, ProcessContext *context)
         {
             if (likely(cache_buffer->is_owned))
             {
+                cache_buffer->is_owned = false;
                 percpu_counter_inc(&cache_buffer->cache->waiting_for_dealloc);
 
                 // Release the reference we are holding
@@ -298,7 +299,6 @@ void __ec_mem_cache_kill_confirm_callback(struct percpu_ref *ref)
         cache_buffer_t *cache_buffer = container_of(ref, cache_buffer_t, refcnt);
         CB_MEM_CACHE *cache = cache_buffer->cache;
 
-        cache_buffer->is_owned = false;
         percpu_counter_dec(&cache->waiting_for_dealloc);
     }
 }

@@ -614,7 +614,7 @@ void __ec_exec_identity_delete_callback(void *value, ProcessContext *context)
 
         // Free the path and commandline
         ec_path_cache_put(exec_identity->path_data, context);
-        ec_mem_put(exec_identity->cmdline);
+        ec_mem_disown(exec_identity->cmdline);
 
         exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
 
