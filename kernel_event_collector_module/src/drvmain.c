@@ -29,21 +29,23 @@
 #endif
 
 #define HOOK_MASK_LEN 64
-static char enableHooksStr[HOOK_MASK_LEN];
+static char enableHooksStr[HOOK_MASK_LEN] __read_mostly;
 
-uint32_t g_traceLevel = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARNING | DL_ERROR);
-uint64_t g_enableHooks = HOOK_MASK;
-uid_t    g_edr_server_uid = (uid_t)-1;
-bool     g_exiting;
+uint32_t g_traceLevel __read_mostly = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARNING | DL_ERROR);
+uint64_t g_enableHooks __read_mostly = HOOK_MASK;
+uid_t    g_edr_server_uid __read_mostly = (uid_t)-1;
+bool     g_exiting __read_mostly;
 uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
 uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
 uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
-uint32_t ec_prsock_buflen;
-bool     g_run_self_tests;
-bool     g_enable_hook_tracking;
+uint32_t ec_prsock_buflen __read_mostly;
+bool     g_run_self_tests __read_mostly;
+bool     g_enable_hook_tracking __read_mostly;
 bool     g_enable_mem_cache_tracking __read_mostly;
+bool     g_process_tracking_ref_debug __read_mostly;
+bool     g_path_cache_ref_debug __read_mostly;
 
-CB_DRIVER_CONFIG g_driver_config = {
+CB_DRIVER_CONFIG g_driver_config  __read_mostly = {
     .processes =            ALL_FORKS_AND_EXITS,
     .module_loads =         ENABLE,
     .file_mods =            ENABLE,
@@ -51,16 +53,18 @@ CB_DRIVER_CONFIG g_driver_config = {
     .report_process_user =  ENABLE,
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
-module_param(g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_enable_hook_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param(g_enable_mem_cache_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(traceLevel, g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(max_queue_size_pri0, g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(max_queue_size_pri1, g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(max_queue_size_pri2, g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(ec_prsock_buflen, ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(run_self_tests, g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(enable_hook_tracking, g_enable_hook_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(enable_mem_cache_tracking, g_enable_mem_cache_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(process_tracking_ref_debug, g_process_tracking_ref_debug, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(path_cache_ref_debug, g_path_cache_ref_debug, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 // Store string param to later on convert to unsigned long long
-module_param_string(g_enableHooks, enableHooksStr, HOOK_MASK_LEN,
+module_param_string(enableHooks, enableHooksStr, HOOK_MASK_LEN,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 

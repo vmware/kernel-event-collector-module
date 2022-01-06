@@ -55,6 +55,8 @@ extern bool     g_exiting;
 extern uint32_t g_max_queue_size_pri0;
 extern uint32_t g_max_queue_size_pri1;
 extern uint32_t g_max_queue_size_pri2;
+extern bool     g_process_tracking_ref_debug;
+extern bool     g_path_cache_ref_debug;
 
 #define MSG_QUEUE_SIZE  8192
 #define DEFAULT_P0_QUEUE_SIZE  (MSG_QUEUE_SIZE * 3)

@@ -35,6 +35,7 @@ typedef void (*hashtbl_delete_cb)(void *datap, ProcessContext *context);
 typedef void *(*hashtbl_handle_cb)(void *datap, ProcessContext *context);
 
 typedef void (*hashtbl_printval_cb)(void *datap, ProcessContext *context);
+typedef bool (*hashtbl_find_verify_cb)(void *datap, void *key, ProcessContext *context);
 
 typedef struct hashbtl_bkt {
     uint64_t lock;
@@ -60,9 +61,10 @@ typedef struct hashtbl {
     int refcount_offset;// TODO: Remove
     size_t base_size;
     bool debug_logging;
-    hashtbl_delete_cb delete_callback;
-    hashtbl_handle_cb handle_callback;
-    hashtbl_printval_cb printval_callback;
+    hashtbl_delete_cb delete_callback; // Delete private data in object
+    hashtbl_handle_cb handle_callback; // Generate a private handle to the object (get ref counts, etc..)
+    hashtbl_printval_cb printval_callback; // Debug print of object
+    hashtbl_find_verify_cb find_verify_callback; // Verify found object matches extra criteria (called locked without increasing ref)
 } HashTbl;
 
 bool ec_hashtbl_startup(ProcessContext *context);
@@ -78,6 +80,8 @@ void ec_hashtbl_destroy(HashTbl *tblp, ProcessContext *context);
 void *ec_hashtbl_alloc(HashTbl *tblp, ProcessContext *context);
 void ec_hashtbl_free(HashTbl *tblp, void *datap, ProcessContext *context);
 void *ec_hashtbl_get(HashTbl *tblp, void *datap, ProcessContext *context);
+int64_t ec_hashtbl_ref_count(HashTbl *tblp, void *datap, ProcessContext *context);
+void ec_hashtbl_cache_ref_str(HashTbl *tblp, void *datap, char *buffer, size_t size, ProcessContext *context);
 
 // Decrements reference count and frees datap if reference count is 0
 void ec_hashtbl_put(HashTbl *tblp, void *datap, ProcessContext *context);

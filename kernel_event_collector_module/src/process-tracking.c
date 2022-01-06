@@ -268,9 +268,10 @@ ProcessHandle *ec_process_tracking_create_process(
                   parent,
                   ec_process_exec_identity(process_handle)->exec_details.pid,
                   ec_process_exec_identity(process_handle)->exec_parent_details.pid);
-            #ifdef _REF_DEBUGGING
-            __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, ec_process_exec_identity(process_handle), context);
-            #endif
+            if (g_process_tracking_ref_debug)
+            {
+                __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, ec_process_exec_identity(process_handle), context);
+            }
         }
     }
 
@@ -444,9 +445,10 @@ ProcessHandle *ec_process_tracking_update_process(
               exec_identity->exec_details.start_time,
               exec_identity->exec_parent_details.pid,
               exec_identity->exec_parent_details.start_time);
-        #ifdef _REF_DEBUGGING
-        __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
-        #endif
+        if (g_process_tracking_ref_debug)
+        {
+            __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
+        }
     }
 
 CATCH_DEFAULT:

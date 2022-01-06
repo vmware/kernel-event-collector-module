@@ -488,6 +488,17 @@ void *ec_hashtbl_find(HashTbl *hashTblp, void *key, ProcessContext *context)
 
     ec_hashtbl_bkt_read_lock(bucketp, context);
     nodep = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);
+    if (nodep && hashTblp->find_verify_callback)
+    {
+        if (!hashTblp->find_verify_callback(
+                __ec_get_datap(hashTblp, nodep),
+                key,
+                context))
+        {
+            // If we failed the verify then reject this node
+            nodep = NULL;
+        }
+    }
     if (nodep)
     {
         datap = ec_hashtbl_get(
@@ -523,6 +534,28 @@ void *ec_hashtbl_get(HashTbl *hashTblp, void *datap, ProcessContext *context)
     }
 
     return datap;
+}
+
+int64_t ec_hashtbl_ref_count(HashTbl *hashTblp, void *datap, ProcessContext *context)
+{
+    CANCEL(hashTblp && datap, -1);
+
+    if (hashTblp->refcount_offset != HASHTBL_DISABLE_REF_COUNT)
+    {
+        return (int64_t)atomic64_read(__ec_get_refcountp(hashTblp, datap));
+    }
+
+    return -1;
+}
+
+void ec_hashtbl_cache_ref_str(HashTbl *hashTblp, void *datap, char *buffer, size_t size, ProcessContext *context)
+{
+    CANCEL_VOID(likely(hashTblp && datap && buffer));
+
+    snprintf(buffer, size, "%s ref:%lld",
+        ec_mem_cache_is_owned(__ec_get_nodep(hashTblp, datap), context) ? "owned" : "not owned",
+        ec_mem_cache_ref_count(__ec_get_nodep(hashTblp, datap), context));
+    buffer[size] = 0;
 }
 
 int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *datap, ProcessContext *context)

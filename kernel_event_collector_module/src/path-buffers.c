@@ -27,7 +27,7 @@ void ec_path_buffers_shutdown(ProcessContext *context)
     ec_mem_cache_destroy(&s_string_pool, context);
 }
 
-// Get a string buffer from the the list, or alloc a new one.
+// Get a string buffer from the list, or alloc a new one.
 char *ec_get_path_buffer(ProcessContext *context)
 {
     struct STRING_NODE *node   = NULL;

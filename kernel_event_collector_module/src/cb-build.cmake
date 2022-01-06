@@ -76,8 +76,10 @@ function(do_post_build_kernel_module)
             #  I am only listing the ones that are giving me issues.
             #  If you get the error `need consistent spacing around "*"` then add the type here.
             NEW_TYPES           CB_FILE_TYPE
-            ProcessContext
-            CB_EVENT_DNS_RESPONSE
+                                ProcessContext
+                                CB_EVENT_DNS_RESPONSE
+                                PathQuery
+                                PathData
             SOURCE_FILES        ${SRC_FILES}
     )
 endfunction()
