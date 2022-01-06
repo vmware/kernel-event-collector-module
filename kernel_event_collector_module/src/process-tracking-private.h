@@ -13,7 +13,8 @@ typedef struct posix_identity_data {
     uint64_t      create_by_fork;
     uint64_t      create_by_exec;
 
-    HashTbl        table;
+    bool          initialized;
+    HashTbl       table;
     CB_MEM_CACHE  exec_identity_cache;
 } process_tracking_data;
 
@@ -25,12 +26,14 @@ ProcessHandle *ec_sorted_tracking_table_get_handle(void *data, ProcessContext *c
 const char *ec_process_tracking_get_proc_name(const char *path);
 
 ExecHandle *ec_process_tracking_get_temp_exec_handle(ProcessHandle *process_handle, ProcessContext *context);
+void ec_process_tracking_disown_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_posix_identity_set_exec_identity(PosixIdentity *posix_identity, ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, ExecHandle *exec_handle, ProcessContext *context);
 void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecIdentity *exec_identity, ProcessContext *context);
 ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessContext *context);
 void ec_process_exec_handle_set_exec_identity(ExecHandle *exec_handle, ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_put_path(char *path, ProcessContext *context);
+void __ec_process_tracking_print_ref(int log_level, const char *calling_func, ExecIdentity *exec_identity, ProcessContext *context);
 
 #ifdef _REF_DEBUGGING
     #define TRACE_IF_REF_DEBUGGING(...)  TRACE(__VA_ARGS__)

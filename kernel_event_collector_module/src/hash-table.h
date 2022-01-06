@@ -6,10 +6,10 @@
 
 #include <linux/hash.h>
 #include <linux/list.h>
-#include <linux/percpu_counter.h>
 
 #include "version.h"
 #include "mem-cache.h"
+#include "percpu-util.h"
 #include "plru.h"
 
 #define  ACTION_CONTINUE   0
@@ -33,6 +33,8 @@ typedef void (*hashtbl_delete_cb)(void *datap, ProcessContext *context);
 
 // Optionally get a handle pointer
 typedef void *(*hashtbl_handle_cb)(void *datap, ProcessContext *context);
+
+typedef void (*hashtbl_printval_cb)(void *datap, ProcessContext *context);
 
 typedef struct hashbtl_bkt {
     uint64_t lock;
@@ -60,6 +62,7 @@ typedef struct hashtbl {
     bool debug_logging;
     hashtbl_delete_cb delete_callback;
     hashtbl_handle_cb handle_callback;
+    hashtbl_printval_cb printval_callback;
 } HashTbl;
 
 bool ec_hashtbl_startup(ProcessContext *context);

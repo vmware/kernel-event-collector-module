@@ -358,11 +358,11 @@ int ec_disable_module(ProcessContext *context)
             TRACE(DL_INIT,  "%s Received a request to disable module", __func__);
             g_module_state_info.module_state = ModuleStateDisabling;
             g_module_state_info.module_enabled = false;
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
             udelay(100);
             break;
     }
 
-    ec_write_unlock(&g_module_state_info.module_state_lock, context);
 
     while (true)
     {
