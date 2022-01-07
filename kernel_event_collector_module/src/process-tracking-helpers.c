@@ -94,7 +94,7 @@ ExecIdentity *ec_process_tracking_get_exec_identity_ref(ExecIdentity *exec_ident
 {
     TRY(exec_identity);
 
-    ec_mem_cache_get(exec_identity, context);
+    atomic64_inc(&exec_identity->reference_count);
 
     if (g_process_tracking_ref_debug)
     {
@@ -107,6 +107,8 @@ CATCH_DEFAULT:
 
 void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
 {
+    PCB_EVENT exit_event;
+
     CANCEL_VOID(exec_identity);
 
     if (g_process_tracking_ref_debug)
@@ -114,7 +116,25 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
         __ec_process_tracking_print_ref(DL_PROC_TRACKING, __func__, exec_identity, context);
     }
 
-    ec_mem_cache_put(exec_identity, context);
+    // If the reference count reaches 0, then delete it
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->reference_count, {
+        // Free the lock
+        ec_spinlock_destroy(&exec_identity->string_lock, context);
+
+        // Free the path and commandline
+        ec_path_cache_put(exec_identity->path_data, context);
+        ec_mem_put(exec_identity->cmdline);
+
+        exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
+
+        // Send the exit
+        ec_event_send_last_exit(exit_event, context);
+
+        // TODO: Add lock here
+
+        // Free the shared data
+        ec_mem_cache_free(exec_identity, context);
+    });
 }
 
 ExecIdentity *ec_process_tracking_get_exec_identity(PosixIdentity *posix_identity, ProcessContext *context)
@@ -158,12 +178,6 @@ void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecId
         // Updating the handle does not need to be done while locked
         ec_process_exec_handle_set_exec_identity(&process_handle->exec_handle, exec_identity, context);
     }
-}
-
-void ec_process_tracking_disown_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
-{
-    // We want to disown the exec_identity. This will ensure it is deleted when the last reference count is dropped.
-    ec_mem_cache_disown(exec_identity, context);
 }
 
 ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessContext *context)
@@ -318,10 +332,7 @@ char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *
     if (exec_identity)
     {
         ec_read_lock(&exec_identity->string_lock, context);
-        if (exec_identity->path_data)
-        {
-            path = ec_mem_get(exec_identity->path_data->path, context);
-        }
+        path = ec_mem_get(exec_identity->path_data->path, context);
         ec_read_unlock(&exec_identity->string_lock, context);
     }
 
@@ -562,12 +573,11 @@ void __ec_process_tracking_print_ref(int log_level, const char *calling_func, Ex
 
     path = ec_process_tracking_get_path(exec_identity, context);
 
-    TRACE(log_level, "    %s: %s %d exec_identity (%s) (ref/active: %lld/%lld) (%p)",
+    TRACE(log_level, "    %s: %s %d exec_identity (ref/active: %lld/%lld) (%p)",
           calling_func,
           ec_process_tracking_get_proc_name(path),
           exec_identity->exec_details.pid,
-          ec_mem_cache_is_owned(exec_identity, context) ? "owned" : "not owned",
-          ec_mem_cache_ref_count(exec_identity, context),
+          (long long) atomic64_read(&exec_identity->reference_count),
           (long long) atomic64_read(&exec_identity->active_process_count),
           exec_identity);
     ec_process_tracking_put_path(path, context);

@@ -53,7 +53,7 @@ void __ec_show_process_tracking_table(void *data, void *priv, ProcessContext *co
 
     proc_name = ec_process_tracking_get_proc_name(ec_process_path(process_handle));
 
-    shared_count = ec_mem_cache_ref_count(ec_process_exec_identity(process_handle), context);
+    shared_count = atomic64_read(&ec_process_exec_identity(process_handle)->reference_count);
 
     seq_printf(seq_file, "%20s | %6llu | %12llu | %6llu | %6llu | %6llu | %10llu | %10llu | %5s |\n",
                   proc_name,
