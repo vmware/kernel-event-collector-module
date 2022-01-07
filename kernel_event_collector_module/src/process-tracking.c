@@ -587,8 +587,7 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
         exec_identity->path_data          = NULL;
         exec_identity->cmdline            = NULL;
         exec_identity->is_interpreter     = false;
-
-        // TODO: Add lock here
+        exec_identity->is_complete        = false;
     }
 }
 

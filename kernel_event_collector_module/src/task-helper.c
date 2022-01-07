@@ -509,5 +509,7 @@ void __ec_add_tracking_for_task(
 
     ec_enumerate_task_sockets(task, handle, context);
 
+    ec_process_exec_identity(handle)->is_complete = true;
+
     ec_process_tracking_put_handle(handle, context);
 }

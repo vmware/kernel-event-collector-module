@@ -71,9 +71,15 @@ char *ec_process_tracking_get_cmdline(ExecIdentity *exec_identity, ProcessContex
 
     if (exec_identity)
     {
-        ec_read_lock(&exec_identity->string_lock, context);
+        if (!exec_identity->is_complete)
+        {
+            ec_read_lock(&exec_identity->string_lock, context);
+        }
         cmdline = ec_mem_get(exec_identity->cmdline, context);
-        ec_read_unlock(&exec_identity->string_lock, context);
+        if (!exec_identity->is_complete)
+        {
+            ec_read_unlock(&exec_identity->string_lock, context);
+        }
     }
     return cmdline;
 }
@@ -331,9 +337,15 @@ char *ec_process_tracking_get_path(ExecIdentity *exec_identity, ProcessContext *
 
     if (exec_identity)
     {
-        ec_read_lock(&exec_identity->string_lock, context);
+        if (!exec_identity->is_complete)
+        {
+            ec_read_lock(&exec_identity->string_lock, context);
+        }
         path = ec_mem_get(exec_identity->path_data->path, context);
-        ec_read_unlock(&exec_identity->string_lock, context);
+        if (!exec_identity->is_complete)
+        {
+            ec_read_unlock(&exec_identity->string_lock, context);
+        }
     }
 
     return path;
@@ -345,9 +357,15 @@ PathData *__ec_process_tracking_get_path_data(ExecIdentity *exec_identity, Proce
 
     if (exec_identity)
     {
-        ec_read_lock(&exec_identity->string_lock, context);
+        if (!exec_identity->is_complete)
+        {
+            ec_read_lock(&exec_identity->string_lock, context);
+        }
         path_data = ec_path_cache_get(exec_identity->path_data, context);
-        ec_read_unlock(&exec_identity->string_lock, context);
+        if (!exec_identity->is_complete)
+        {
+            ec_read_unlock(&exec_identity->string_lock, context);
+        }
     }
 
     return path_data;
