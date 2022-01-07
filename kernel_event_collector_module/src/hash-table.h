@@ -6,10 +6,10 @@
 
 #include <linux/hash.h>
 #include <linux/list.h>
+#include <linux/percpu_counter.h>
 
 #include "version.h"
 #include "mem-cache.h"
-#include "percpu-util.h"
 #include "plru.h"
 
 #define  ACTION_CONTINUE   0
@@ -81,7 +81,6 @@ void *ec_hashtbl_alloc(HashTbl *tblp, ProcessContext *context);
 void ec_hashtbl_free(HashTbl *tblp, void *datap, ProcessContext *context);
 void *ec_hashtbl_get(HashTbl *tblp, void *datap, ProcessContext *context);
 int64_t ec_hashtbl_ref_count(HashTbl *tblp, void *datap, ProcessContext *context);
-void ec_hashtbl_cache_ref_str(HashTbl *tblp, void *datap, char *buffer, size_t size, ProcessContext *context);
 
 // Decrements reference count and frees datap if reference count is 0
 void ec_hashtbl_put(HashTbl *tblp, void *datap, ProcessContext *context);
