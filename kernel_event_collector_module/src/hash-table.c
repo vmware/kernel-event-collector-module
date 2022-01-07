@@ -548,16 +548,6 @@ int64_t ec_hashtbl_ref_count(HashTbl *hashTblp, void *datap, ProcessContext *con
     return -1;
 }
 
-void ec_hashtbl_cache_ref_str(HashTbl *hashTblp, void *datap, char *buffer, size_t size, ProcessContext *context)
-{
-    CANCEL_VOID(likely(hashTblp && datap && buffer));
-
-    snprintf(buffer, size, "%s ref:%lld",
-        ec_mem_cache_is_owned(__ec_get_nodep(hashTblp, datap), context) ? "owned" : "not owned",
-        ec_mem_cache_ref_count(__ec_get_nodep(hashTblp, datap), context));
-    buffer[size] = 0;
-}
-
 int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *datap, ProcessContext *context)
 {
     HashTableNode *nodep = __ec_get_nodep(hashTblp, datap);
