@@ -697,7 +697,7 @@ void __ec_hashtbl_free(HashTbl *hashTblp, HashTableNode *nodep, ProcessContext *
         {
             hashTblp->delete_callback(__ec_get_datap(hashTblp, nodep), context);
         }
-        ec_mem_cache_disown(nodep, context);
+        ec_mem_cache_free(nodep, context);
     }
 }
 

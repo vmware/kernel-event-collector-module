@@ -21,6 +21,7 @@
 #include <linux/security.h>
 #include <linux/socket.h>
 #include <net/ipv6.h>
+//#include <linux/sunrpc/clnt.h>
 #include <linux/mman.h>
 #include <linux/connector.h>
 #include <linux/version.h>
@@ -33,6 +34,14 @@
 #include "task-helper.h"
 #include "module_state.h"
 #include "file-helper.h"
+
+#if RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7, 1)
+#define ec_percpu_counter_init(fbc, value, gfp)  percpu_counter_init(fbc, value)
+#define ec_alloc_percpu(type, gfp)               alloc_percpu(type)
+#else
+#define ec_percpu_counter_init(fbc, value, gfp)  percpu_counter_init(fbc, value, gfp)
+#define ec_alloc_percpu(type, gfp)               alloc_percpu_gfp(type, gfp)
+#endif
 
 extern const char DRIVER_NAME[];
 
