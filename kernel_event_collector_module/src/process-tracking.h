@@ -60,6 +60,10 @@ typedef struct exec_identity {
     // when the final process exits AND all outstanding events for the process have been read by the agent.
     // It is stored as an atomic so we can replace the pointer atomically
     atomic64_t        exit_event;
+
+    // Set once all the static information about a process (path, cmdline) has been collected. This allows us not to
+    // use the string_lock when reading.
+    bool              is_complete;
 } ExecIdentity;
 
 // This handle holds reference counts to the exec_identity and some internal pointers

@@ -35,9 +35,7 @@ uint32_t g_traceLevel __read_mostly = (uint32_t)(DL_INIT | DL_SHUTDOWN | DL_WARN
 uint64_t g_enableHooks __read_mostly = HOOK_MASK;
 uid_t    g_edr_server_uid __read_mostly = (uid_t)-1;
 bool     g_exiting __read_mostly;
-uint32_t g_max_queue_size_pri0 = DEFAULT_P0_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri1 = DEFAULT_P1_QUEUE_SIZE;
-uint32_t g_max_queue_size_pri2 = DEFAULT_P2_QUEUE_SIZE;
+uint32_t g_max_queue_size = DEFAULT_QUEUE_SIZE * 3;
 uint32_t ec_prsock_buflen __read_mostly;
 bool     g_run_self_tests __read_mostly;
 bool     g_enable_hook_tracking __read_mostly;
@@ -54,9 +52,7 @@ CB_DRIVER_CONFIG g_driver_config  __read_mostly = {
 };
 // checkpatch-ignore: SYMBOLIC_PERMS
 module_param_named(traceLevel, g_traceLevel, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param_named(max_queue_size_pri0, g_max_queue_size_pri0, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param_named(max_queue_size_pri1, g_max_queue_size_pri1, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
-module_param_named(max_queue_size_pri2, g_max_queue_size_pri2, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(max_queue_size, g_max_queue_size, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(ec_prsock_buflen, ec_prsock_buflen, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(run_self_tests, g_run_self_tests, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(enable_hook_tracking, g_enable_hook_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
@@ -66,6 +62,10 @@ module_param_named(path_cache_ref_debug, g_path_cache_ref_debug, bool, S_IRUSR |
 // Store string param to later on convert to unsigned long long
 module_param_string(enableHooks, enableHooksStr, HOOK_MASK_LEN,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
+module_param_named(file_path_buckets, g_file_path_buckets, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(file_tracking_buckets, g_file_tracking_buckets, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 
 INIT_CB_RESOLVED_SYMS();

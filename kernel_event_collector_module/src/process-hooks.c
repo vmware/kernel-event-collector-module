@@ -336,6 +336,9 @@ void ec_lsm_bprm_committed_creds(struct linux_binprm *bprm)
 
         ec_process_tracking_set_proc_cmdline(process_handle, cmdline, &context);
 
+        // At this point the exec_identity's static info has all been set and will never change
+        ec_process_exec_identity(process_handle)->is_complete = true;
+
         ec_event_send_start(process_handle,
                          ec_process_tracking_should_track_user() ? uid : (uid_t)-1,
                          CB_PROCESS_START_BY_EXEC,
