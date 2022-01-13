@@ -276,6 +276,8 @@ void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, Exe
 
 void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
 {
+    PathData *path_data;
+
     TRY(process_handle && event);
 
     event->procInfo.all_process_details.array[FORK]             = ec_process_posix_identity(process_handle)->posix_details;
@@ -285,10 +287,17 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
     event->procInfo.all_process_details.array[EXEC_PARENT]      = ec_process_exec_identity(process_handle)->exec_parent_details;
     event->procInfo.all_process_details.array[EXEC_GRANDPARENT] = ec_process_exec_identity(process_handle)->exec_grandparent_details;
 
+    path_data = ec_process_path_data(process_handle);
 
-    event->procInfo.path_found      = ec_process_exec_identity(process_handle)->path_data->path_found;
-    event->procInfo.path            = ec_mem_get(ec_process_path(process_handle), context);// hold reference
-    event->procInfo.path_size       = ec_mem_size(event->procInfo.path);
+    if (path_data)
+    {
+        event->procInfo.path_found = path_data->path_found;
+        event->procInfo.path       = ec_mem_get(path_data->path, context);// hold reference
+        event->procInfo.path_size  = ec_mem_size(event->procInfo.path);
+    } else
+    {
+        event->procInfo.path_found = false;
+    }
 
     // We need to ensure that user-space does not get any exit events for a
     //  process until all events for that process are already collected.
@@ -567,6 +576,11 @@ char *ec_process_path(ProcessHandle *process_handle)
     return process_handle ? ec_exec_path(&process_handle->exec_handle) : NULL;
 }
 
+PathData *ec_process_path_data(ProcessHandle *process_handle)
+{
+    return process_handle ? ec_exec_path_data(&process_handle->exec_handle) : NULL;
+}
+
 char *ec_process_cmdline(ProcessHandle *process_handle)
 {
     return process_handle ? process_handle->exec_handle.cmdline : NULL;
@@ -580,6 +594,11 @@ ExecIdentity *ec_exec_identity(ExecHandle *exec_handle)
 char *ec_exec_path(ExecHandle *exec_handle)
 {
     return (exec_handle && exec_handle->path_data) ? exec_handle->path_data->path : NULL;
+}
+
+PathData *ec_exec_path_data(ExecHandle *exec_handle)
+{
+    return exec_handle ? exec_handle->path_data : NULL;
 }
 
 void __ec_process_tracking_print_ref(int log_level, const char *calling_func, ExecIdentity *exec_identity, ProcessContext *context)

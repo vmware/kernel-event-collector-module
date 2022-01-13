@@ -196,9 +196,11 @@ PosixIdentity *ec_process_posix_identity(ProcessHandle *process_handle);
 ExecIdentity *ec_process_exec_identity(ProcessHandle *process_handle);
 ExecHandle *ec_process_exec_handle(ProcessHandle *process_handle);
 char *ec_process_path(ProcessHandle *process_handle);
+PathData *ec_process_path_data(ProcessHandle *process_handle);
 char *ec_process_cmdline(ProcessHandle *process_handle);
 ExecIdentity *ec_exec_identity(ExecHandle *exec_handle);
 char *ec_exec_path(ExecHandle *exec_handle);
+PathData *ec_exec_path_data(ExecHandle *exec_handle);
 
 // List of interpreters. The ExecIdentity::is_interpreter flag
 // is set for any process whose path contains a name in this list.
