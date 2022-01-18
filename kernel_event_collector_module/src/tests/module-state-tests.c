@@ -3,6 +3,8 @@
 #include "cb-spinlock.h"
 #include "run-tests.h"
 
+extern bool g_enable_hook_tracking;
+
 bool __init test__begin_finish_macros(ProcessContext *context);
 bool __init test__hook_tracking_add_del(ProcessContext *context);
 
@@ -65,8 +67,11 @@ bool __init test__hook_tracking_add_del(ProcessContext *context)
 {
     bool passed = false;
     pid_t current_pid = ec_getpid(current);
+    bool orig_hook_tracking = g_enable_hook_tracking;
     // ignore the passed in context for this test
     DECLARE_NON_ATOMIC_CONTEXT(test_context, current_pid);
+
+    g_enable_hook_tracking = true;
 
     ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 0);
 
@@ -85,5 +90,7 @@ bool __init test__hook_tracking_add_del(ProcessContext *context)
     passed = true;
 
 CATCH_DEFAULT:
+    g_enable_hook_tracking = orig_hook_tracking;
+
     return passed;
 }

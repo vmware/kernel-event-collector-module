@@ -37,8 +37,8 @@ bool __init test__hash_table(ProcessContext *context);
 bool __init test__plru(ProcessContext *context);
 bool __init test__proc_tracking(ProcessContext *context);
 bool __init test__module_state(ProcessContext *context);
+bool __init test__comms(ProcessContext *context);
 
-
-
-#define ASSERT_TRY(stmt)  TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED: [%d] %s", __LINE__, #stmt)
-#define ASSERT_TEST(stmt) R_TEST(stmt, { TRACE(DL_ERROR, "ASSERT FAILED: [%d] %s", __LINE__, #stmt); }, { passed = false; } );
+#define ASSERT_TRY(stmt)  TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED: [%s:%d] %s", __FILE__, __LINE__, #stmt)
+#define ASSERT_TEST(stmt) R_TEST(stmt, { TRACE(DL_ERROR, "ASSERT FAILED: [%s:%d] %s", __FILE__, __LINE__, #stmt); }, { passed = false; } );
+#define ASSERT_TRY_MSG(stmt, msg, ...) TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED [%s:%d] -- " msg, __FILE__, __LINE__, ##__VA_ARGS__)

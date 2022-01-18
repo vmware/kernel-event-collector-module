@@ -193,7 +193,7 @@ bool __ec_get_cmdline(struct task_struct const *task,
                          unsigned long       start_addr,
                          unsigned long       end_addr,
                          int                 args,
-                         char *cmdLine,
+                         char               *cmdLine,
                          size_t              cmdLineSize)
 {
     unsigned int      cmdLinePos  = 0;
@@ -218,7 +218,7 @@ bool __ec_get_cmdline(struct task_struct const *task,
     //  that `mm->exec` is the beginning of the exec name. So we know it is safe to
     //  read in the data between those two addresses.  (This will also read in the env,
     //  which we do not need.)
-    len = min(cmdLineSize, (size_t) (end_addr - start_addr));
+    len = min(cmdLineSize - 1, (size_t) (end_addr - start_addr));
 
     // Copy the argument string.
     //  NOTE: A simple memcopy does not work because this technically runs in a different

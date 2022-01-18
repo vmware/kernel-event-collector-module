@@ -43,7 +43,7 @@ void ec_hook_tracking_add_entry(ProcessContext *context, const char *hook_name)
         // Now that we're inside the lock check this hook still has not been initialized
         if (!context->percpu_hook_tracking->hook_name)
         {
-            TRACE(DL_VERBOSE, "%s %d %p", hook_name, smp_processor_id(), context->percpu_hook_tracking);
+            TRACE(DL_INFO, "%s %d %p", hook_name, smp_processor_id(), context->percpu_hook_tracking);
 
             context->percpu_hook_tracking->hook_name = hook_name;
             INIT_LIST_HEAD(&context->percpu_hook_tracking->list);
