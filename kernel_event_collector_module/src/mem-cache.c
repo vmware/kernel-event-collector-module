@@ -358,6 +358,7 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
 {
     CB_MEM_CACHE *cache;
     int64_t size = 0;
+    int64_t simple_size = 0;
     const char *suffix;
 
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
@@ -367,7 +368,7 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
 
     ec_write_lock(&s_mem_cache.lock, &context);
     list_for_each_entry(cache, &s_mem_cache.list, node) {
-            const char *cache_name = cache->name;
+            const char *cache_name = cache->kmem_cache ? cache->kmem_cache->name : "";
             int         cache_size = cache->object_size;
             long        count      = percpu_counter_sum_positive(&cache->allocated_count);
 
@@ -380,16 +381,18 @@ int ec_mem_cache_show(struct seq_file *m, void *v)
     }
     ec_write_unlock(&s_mem_cache.lock, &context);
 
-    __ec_simplify_size(&size, &suffix);
+    simple_size = size;
+    __ec_simplify_size(&simple_size, &suffix);
 
     seq_puts(m, "\n");
-    seq_printf(m, "Allocated Cache Memory         : %lld %s\n", size, suffix);
+    seq_printf(m, "Allocated Cache Memory         : %lld %s (%lld)\n", simple_size, suffix, size);
 
     size = ec_mem_allocated_size(&context);
-    __ec_simplify_size(&size, &suffix);
+    simple_size = size;
+    __ec_simplify_size(&simple_size, &suffix);
 
-    seq_printf(m, "Allocated Generic Memory       : %lld %s\n", size, suffix);
-    seq_printf(m, "Allocated Generic Memory Count : %" PRFs64 "\n", ec_mem_allocated_count(&context));
+    seq_printf(m, "Allocated Generic Memory       : %lld %s (%lld)\n", simple_size, suffix, size);
+    seq_printf(m, "Allocated Generic Memory Count : %lld\n", ec_mem_allocated_count(&context));
 
     return 0;
 }

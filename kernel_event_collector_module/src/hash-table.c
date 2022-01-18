@@ -103,7 +103,6 @@ bool ec_hashtbl_init(
     unsigned int i;
     size_t tableSize;
     unsigned char *tbl_storage_p  = NULL;
-    size_t lruStorageSize = 0;
 
     CANCEL_MSG(hashTblp, false, DL_ERROR, "%s: HashTbl NULL", __func__);
     CANCEL_MSG(!hashTblp->initialized, false, DL_ERROR, "%s: HashTbl already initialized", __func__);
@@ -119,11 +118,7 @@ bool ec_hashtbl_init(
         TRACE(DL_ERROR, "%s: Increase bucket size to %llu", __func__, hashTblp->numberOfBuckets);
     }
 
-    if (hashTblp->lruSize > 0)
-    {
-        lruStorageSize = ec_plru_get_allocation_size(hashTblp->numberOfBuckets);
-    }
-    tableSize = ((hashTblp->numberOfBuckets * sizeof(HashTableBkt)) + lruStorageSize);
+    tableSize = hashTblp->numberOfBuckets * sizeof(HashTableBkt);
 
     //Since we're not in an atomic context this is an acceptable alternative to
     //kmalloc however, it should be noted that this is a little less efficient. The reason for this is
@@ -142,13 +137,6 @@ bool ec_hashtbl_init(
     hashTblp->tablePtr = (HashTableBkt *)tbl_storage_p;
     hashTblp->base_size   = tableSize + sizeof(HashTbl);
     ec_percpu_counter_init(&hashTblp->tableInstance, 0, GFP_MODE(context));
-
-    if (hashTblp->lruSize > 0)
-    {
-        void *plru_storage_p = tbl_storage_p + sizeof(HashTbl) + (hashTblp->numberOfBuckets * sizeof(HashTableBkt));
-
-        ec_plru_init(&hashTblp->plru, hashTblp->numberOfBuckets, plru_storage_p, context);
-    }
 
     hashTblp->hash_cache.delete_callback = __ec_hashtbl_cache_delete_cb;
     if (hashTblp->printval_callback)
@@ -222,7 +210,6 @@ void ec_hashtbl_destroy(HashTbl *hashTblp, ProcessContext *context)
 
 
     percpu_counter_destroy(&hashTblp->tableInstance);
-    ec_plru_destroy(&hashTblp->plru, context);
     ec_mem_cache_destroy(&hashTblp->hash_cache, context);
     ec_mem_free(hashTblp->tablePtr);
 }
@@ -383,33 +370,11 @@ int __ec_hashtbl_add(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessCo
     CANCEL(hashTblp && datap, -EINVAL);
     CANCEL(hashTblp->initialized, -EINVAL);
 
-    if (hashTblp->lruSize > 0 && percpu_counter_read_positive(&hashTblp->tableInstance) >= hashTblp->lruSize)
-    {
-        // Evict from the LRU
-        //  Note this happens before we enforce uniqueness, which may result in evicting an item without adding a new item.
-        bucket_indx = ec_plru_find_inactive_leaf(&hashTblp->plru, context);
-        bucketp = &(hashTblp->tablePtr[bucket_indx]);
-
-        ec_hashtbl_bkt_write_lock(bucketp, context);
-        if (!hlist_empty(&bucketp->head))
-        {
-            // If there are nodes in this bucket than evict one.
-            HashTableNode *tableNode = hlist_entry(*bucketp->head.first->pprev, HashTableNode, link);
-            void *datap = __ec_get_datap(hashTblp, tableNode);
-
-            ec_hashtbl_del_lockheld(hashTblp, bucketp, datap, context);
-        }
-        ec_hashtbl_bkt_write_unlock(bucketp, context);
-    }
-
     nodep = __ec_get_nodep(hashTblp, datap);
     key = __ec_get_key_ptr(hashTblp, datap);
     nodep->hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, nodep->hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
-
-    // Update the LRU to report this bucket as active
-    ec_plru_mark_active_path(&hashTblp->plru, bucket_indx, context);
 
     if (hashTblp->debug_logging)
     {
@@ -419,6 +384,19 @@ int __ec_hashtbl_add(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessCo
     }
 
     ec_hashtbl_bkt_write_lock(bucketp, context);
+
+    if (hashTblp->lruSize > 0 && bucketp->itemCount >= hashTblp->lruSize)
+    {
+        // Evict from the LRU
+        //  Note this happens before we enforce uniqueness, which may result in evicting an item without adding a new item.
+
+        // If there are nodes in this bucket than evict one.
+        HashTableNode *tableNode = hlist_entry(*bucketp->head.first->pprev, HashTableNode, link);
+        void          *datap     = __ec_get_datap(hashTblp, tableNode);
+
+        ec_hashtbl_del_lockheld(hashTblp, bucketp, datap, context);
+    }
+
     if (forceUnique)
     {
         HashTableNode *old_node = __ec_hashtbl_lookup(hashTblp, &bucketp->head, nodep->hash, key);
@@ -579,9 +557,6 @@ void *ec_hashtbl_del_by_key(HashTbl *hashTblp, void *key, ProcessContext *contex
     hash = ec_hashtbl_hash_key(hashTblp, key);
     bucket_indx = ec_hashtbl_bkt_index(hashTblp, hash);
     bucketp = &(hashTblp->tablePtr[bucket_indx]);
-
-    // Update the LRU to report this bucket as active
-    ec_plru_mark_active_path(&hashTblp->plru, bucket_indx, context);
 
     ec_hashtbl_bkt_write_lock(bucketp, context);
     nodep = __ec_hashtbl_lookup(hashTblp, &bucketp->head, hash, key);

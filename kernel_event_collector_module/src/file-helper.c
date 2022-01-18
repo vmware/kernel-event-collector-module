@@ -366,15 +366,10 @@ struct super_block const *ec_get_sb_from_file(struct file const *file)
     return sb;
 }
 
-bool ec_is_network_filesystem(struct super_block const *sb)
+bool ec_is_ignored_filesystem(uint64_t fs_magic)
 {
-    if (!sb)
-    {
-        return false;
-    }
-
     // Check magic numbers
-    switch (sb->s_magic)
+    switch (fs_magic)
     {
     case NFS_SUPER_MAGIC:
         return true;
@@ -382,29 +377,25 @@ bool ec_is_network_filesystem(struct super_block const *sb)
     case SMB_SUPER_MAGIC:
         return true;
 
+    case SYSFS_MAGIC:
+        return true;
+
+    case CGROUP_SUPER_MAGIC:
+        return true;
+
+#ifdef CGROUP2_SUPER_MAGIC
+    case CGROUP2_SUPER_MAGIC:
+        return true;
+#endif
+
+    case PROC_SUPER_MAGIC:
+        return true;
+
     default:
         return false;
     }
 
     return false;
-}
-
-bool ec_may_skip_unsafe_vfs_calls(struct file const *file)
-{
-    struct super_block const *sb = ec_get_sb_from_file(file);
-
-    // Since we still don't know the file system type
-    // it's safer to not perform any VFS ops on the file.
-    if (!sb)
-    {
-        return true;
-    }
-
-    // We may want to check if a file's inode lock is held
-    // before trying to do a vfs operation.
-
-    // Eventually expand to stacked file systems
-    return ec_is_network_filesystem(sb);
 }
 
 #define ENABLE_SPECIAL_FILE_SETUP(x)   {x, sizeof(x)-1, 1}
