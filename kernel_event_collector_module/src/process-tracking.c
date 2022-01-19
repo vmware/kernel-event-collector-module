@@ -17,6 +17,7 @@
 void ec_hashtbl_delete_callback(void *posix_identity, ProcessContext *context);
 void *ec_hashtbl_handle_callback(void *posix_identity, ProcessContext *context);
 void __ec_process_exec_identity_print_callback(void *data, ProcessContext *context);
+void __ec_exec_identity_delete_callback(void *value, ProcessContext *context);
 
 ExecIdentity *ec_process_tracking_alloc_exec_identity(ProcessContext *context);
 void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
@@ -34,6 +35,7 @@ process_tracking_data __read_mostly g_process_tracking_data = {
         .handle_callback = ec_hashtbl_handle_callback,
     },
     .exec_identity_cache = {
+        .delete_callback = __ec_exec_identity_delete_callback,
         .printval_callback = __ec_process_exec_identity_print_callback,
     }
 };
@@ -352,7 +354,12 @@ ProcessHandle *ec_process_tracking_update_process(
     isExecOther = ec_exec_identity(&parent_exec_handle)->exec_details.pid == pid;
 
     // The new process we are execing was an active process in its parent. So reduce the active count of the parent
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&ec_exec_identity(&parent_exec_handle)->active_process_count, { was_last_active_process = true; });
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&ec_exec_identity(&parent_exec_handle)->active_process_count, {
+        was_last_active_process = true;
+
+        // Since the last active process is exiting we want to disown the exec identity.
+        ec_process_tracking_disown_exec_identity(ec_exec_identity(&parent_exec_handle), context);
+    });
 
     // Allocate a shared data_object for the new process
     //  We get a reference to this
@@ -498,7 +505,12 @@ bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context)
 
     TRY(process_handle);
 
-    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&ec_process_exec_identity(process_handle)->active_process_count, { was_last_active_process = true; });
+    IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&ec_process_exec_identity(process_handle)->active_process_count, {
+        was_last_active_process = true;
+
+        // Since the last active process is exiting we want to disown the exec identity.
+        ec_process_tracking_disown_exec_identity(ec_process_exec_identity(process_handle), context);
+    });
 
     ec_event_send_exit(process_handle, was_last_active_process, context);
     ec_process_tracking_remove_process(process_handle, context);
@@ -580,7 +592,6 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
 {
     if (exec_identity)
     {
-        atomic64_set(&exec_identity->reference_count, 0);
         atomic64_set(&exec_identity->active_process_count, 0);
         atomic64_set(&exec_identity->exit_event, 0);
         ec_spinlock_init(&exec_identity->string_lock, context);
@@ -588,6 +599,28 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
         exec_identity->cmdline            = NULL;
         exec_identity->is_interpreter     = false;
         exec_identity->is_complete        = false;
+    }
+}
+
+void __ec_exec_identity_delete_callback(void *value, ProcessContext *context)
+{
+    ExecIdentity *exec_identity = (ExecIdentity *)value;
+
+    if (exec_identity)
+    {
+        PCB_EVENT exit_event;
+
+        // Free the lock
+        ec_spinlock_destroy(&exec_identity->string_lock, context);
+
+        // Free the path and commandline
+        ec_path_cache_put(exec_identity->path_data, context);
+        ec_mem_put(exec_identity->cmdline);
+
+        exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
+
+        // Send the exit
+        ec_event_send_last_exit(exit_event, context);
     }
 }
 
@@ -601,7 +634,20 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
 
         if (!g_process_tracking_data.initialized)
         {
+            ExecIdentity *exec_identity = posix_identity->exec_identity;
+
             __ec_process_tracking_print_ref(DL_INFO, __func__, posix_identity->exec_identity, context);
+
+            if (exec_identity)
+            {
+                // Process Tracking is shutting down, so we need to decrement the active_process_count and disown the
+                //  exec_identity when this is the last process.
+                IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->active_process_count, {
+                    ec_process_tracking_disown_exec_identity(exec_identity, context);
+                });
+            }
+
+            ec_process_tracking_put_exec_handle(&posix_identity->temp_exec_handle, context);
         }
 
         // We do not need to lock here because it is done in the delete callback (from the last reference)
