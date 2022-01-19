@@ -94,7 +94,7 @@ bool __init test__oversize_payload(ProcessContext *context)
         pathname,
         context);
 
-    ec_disconnect_reader(context->pid);
+    ec_disconnect_reader(context->pid, context);
     DISABLE_SEND_EVENTS(context);
 
     rc = ec_obtain_next_cbevent(&msg, sizeof(struct CB_EVENT_UM_BLOB), context);
@@ -171,7 +171,7 @@ bool __init test__normal_payload(ProcessContext *context)
         pathname,
         context);
 
-    ec_disconnect_reader(context->pid);
+    ec_disconnect_reader(context->pid, context);
     DISABLE_SEND_EVENTS(context);
 
     rc = ec_obtain_next_cbevent(&msg, sizeof(struct CB_EVENT_UM_BLOB), context);

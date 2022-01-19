@@ -109,8 +109,9 @@ bool ec_enable_module(ProcessContext *context);
 int ec_disable_module(ProcessContext *context);
 ModuleState ec_get_module_state(ProcessContext *context);
 bool ec_is_reader_connected(void);
-bool ec_disconnect_reader(pid_t pid);
+bool ec_disconnect_reader(pid_t pid, ProcessContext *context);
 bool ec_reader_init(ProcessContext *context);
+void ec_reader_shutdown(ProcessContext *context);
 
 // ------------------------------------------------
 // Linux Security Module Helpers

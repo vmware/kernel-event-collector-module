@@ -152,6 +152,7 @@ static struct  fops_config_t
     // Our device special major number
     dev_t                  major;
     struct cdev            device;
+    uint64_t               reader_pid_lock;
     pid_t                  reader_pid;
 
     // Flag to identify if the queue is enabled
@@ -172,33 +173,60 @@ static struct fops_data_t
 bool ec_reader_init(ProcessContext *context)
 {
     s_fops_config.reader_pid = 0;
-    return true;
+    ec_spinlock_init(&s_fops_config.reader_pid_lock, context);
+
+    return s_fops_config.reader_pid_lock != 0;
+}
+
+void ec_reader_shutdown(ProcessContext *context)
+{
+    ec_spinlock_destroy(&s_fops_config.reader_pid_lock, context);
 }
 
 bool ec_is_reader_connected(void)
 {
+    // All we care about is whether reader_pid is set, not what the value is, so don't lock and avoid contention.
     return s_fops_config.reader_pid != 0;
 }
 
 bool __ec_connect_reader(ProcessContext *context)
 {
-    if (s_fops_config.reader_pid)
+    ec_write_lock(&s_fops_config.reader_pid_lock, context);
+
+    // It seems to be possible for the device release to be called from the context of another process, maybe because
+    // this can happen asynchronously. If that happens, we reject the disconnect since it appears to be from the wrong
+    // PID. So, if the reader we believe is already connected tries to connect again, allow it.
+    if (s_fops_config.reader_pid && s_fops_config.reader_pid != context->pid)
     {
+        ec_write_unlock(&s_fops_config.reader_pid_lock, context);
+
         return false;
     }
 
     s_fops_config.reader_pid = context->pid;
+
+    ec_write_unlock(&s_fops_config.reader_pid_lock, context);
+
     return true;
 }
 
-bool ec_disconnect_reader(pid_t pid)
+bool ec_disconnect_reader(pid_t pid, ProcessContext *context)
 {
+    ec_write_lock(&s_fops_config.reader_pid_lock, context);
+
     if (s_fops_config.reader_pid != pid)
     {
+        ec_write_unlock(&s_fops_config.reader_pid_lock, context);
+
         return false;
     }
 
+    TRACE(DL_INFO, "Disconnecting from %d", s_fops_config.reader_pid);
+
     s_fops_config.reader_pid = 0;
+
+    ec_write_unlock(&s_fops_config.reader_pid_lock, context);
+
     return true;
 }
 
@@ -342,7 +370,7 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 
     eventNode->payload = (uint16_t)payload;
 
-    readyCount = percpu_counter_read(&tx_ready);
+    readyCount = percpu_counter_read_positive(&tx_ready);
 
     if (readyCount < g_max_queue_size)
     {
@@ -372,9 +400,10 @@ CATCH_DEFAULT:
 
 void ec_fops_comm_wake_up_reader(ProcessContext *context)
 {
-    // Wake up the reader task if we are allowed to. We want to avoid calling wake_up unnecessarily because it
-    // uses a lock, which slows us down in send_event, which is called by all our hooks.
-    if (s_fops_config.need_wakeup && ALLOW_WAKE_UP(context)) //
+    /* Wake up the reader task if we are allowed to. We want to avoid calling wake_up unnecessarily because it
+     * uses a lock, which slows us down in send_event, which is called by all our hooks.
+     */
+    if ((waitqueue_active(&s_fops_config.wq)) && ALLOW_WAKE_UP(context))
     {
         wake_up(&s_fops_config.wq);
         TRACE(DL_COMMS, "wakeup");
@@ -677,7 +706,7 @@ int ec_device_open(struct inode *inode, struct file *filp)
         usleep_range(10000, 11000);
         if (!__ec_connect_reader(&context))
         {
-            TRACE(DL_WARNING, "%s: refusing connection to device from pid[%d]; only one connection is allowed", __func__, context.pid);
+            TRACE(DL_WARNING, "%s: refusing connection to device from pid[%d]; already connected to pid[%d]", __func__, context.pid, s_fops_config.reader_pid);
             return -ECONNREFUSED;
         }
     }
@@ -689,10 +718,15 @@ int ec_device_open(struct inode *inode, struct file *filp)
 
 int ec_device_release(struct inode *inode, struct file *filp)
 {
+    pid_t pid = ec_getpid(current);
+
+    DECLARE_NON_ATOMIC_CONTEXT(context, pid);
+
     TRACE(DL_INFO, "%s: releasing device from pid[%d]; reader_pid[%d]", __func__, ec_getpid(current), s_fops_config.reader_pid);
 
-    if (!ec_disconnect_reader(ec_getpid(current)))
+    if (!ec_disconnect_reader(pid, &context))
     {
+        TRACE(DL_WARNING, "%s: refusing to disconnect from pid[%d]; reader_pid[%d]", __func__, ec_getpid(current), s_fops_config.reader_pid);
         return -ECONNREFUSED;
     }
 

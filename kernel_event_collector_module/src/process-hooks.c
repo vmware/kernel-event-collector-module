@@ -75,7 +75,7 @@ void ec_exit_hook(struct task_struct *task, ProcessContext *context)
 {
     pid_t pid = ec_getpid(task);
 
-    // If the `pid` and `tid` are the same than this is a fork.  If they are different this is a
+    // If the `pid` and `tid` are the same then this is a fork.  If they are different this is a
     //  thread.  We need to ignore threads.
     // In theory we should see `CLONE_THREAD` in flags, but I have often found this to be garbage data.
     CANCEL_VOID(ec_gettid(task) == pid);
@@ -83,7 +83,7 @@ void ec_exit_hook(struct task_struct *task, ProcessContext *context)
     // ec_disconnect_reader will do nothing if the pid isn't the reader process.
     // Otherwise, it will disconnect the reader which we need if it exits without
     // releasing the devnode.
-    if (ec_disconnect_reader(pid))
+    if (ec_disconnect_reader(pid, context))
     {
         TRACE(DL_INFO, "reader process has exited, and has been disconnected; pid=%d", pid);
     }
