@@ -215,6 +215,8 @@ void __ec_path_cache_print_ref(int log_level, const char *calling_func, PathData
     ref_str = ec_mem_alloc(20, context);
     CANCEL_VOID(ref_str);
 
+    ec_hashtbl_cache_ref_str(&s_path_cache, path_data, ref_str, ec_mem_size(ref_str), context);
+
     TRACE(log_level, "    %s: [%llu:%llu] %s (ref: %lld) [%s] (%p)",
           calling_func,
           path_data->key.device,
