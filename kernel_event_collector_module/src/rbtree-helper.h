@@ -5,8 +5,8 @@
 #pragma once
 
 #include <linux/rbtree.h>
-#include <linux/percpu_counter.h>
 #include "process-context.h"
+#include "percpu-util.h"
 
 typedef int (*compare_callback)(void *left, void *right);
 typedef void (*ref_callback)(void *data, ProcessContext *context);

@@ -139,7 +139,7 @@ void ec_process_tracking_put_exec_identity(ExecIdentity *exec_identity, ProcessC
         // TODO: Add lock here
 
         // Free the shared data
-        ec_mem_cache_free(exec_identity, context);
+        ec_mem_cache_disown(exec_identity, context);
     });
 }
 

@@ -6,9 +6,9 @@
 
 #include <linux/hash.h>
 #include <linux/list.h>
-#include <linux/percpu_counter.h>
 
 #include "version.h"
+#include "percpu-util.h"
 #include "mem-cache.h"
 #include "plru.h"
 

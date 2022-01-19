@@ -6,12 +6,13 @@
 
 #include <linux/list.h>
 #include <linux/seq_file.h>
-#include <linux/percpu_counter.h>
 
 #include "process-context.h"
+#include "percpu-util.h"
 
 #define CB_MEM_CACHE_NAME_LEN    43
 
+typedef void (*cache_delete_cb)(void *value, ProcessContext *context);
 typedef void (*cache_printval_cb)(void *value, ProcessContext *context);
 
 typedef struct CB_MEM_CACHE {
@@ -22,12 +23,16 @@ typedef struct CB_MEM_CACHE {
     struct kmem_cache *kmem_cache;
     uint32_t           object_size;
     uint8_t            name[CB_MEM_CACHE_NAME_LEN + 1];
+    cache_delete_cb    delete_callback;
     cache_printval_cb  printval_callback;
 } CB_MEM_CACHE;
 
+// checkpatch-ignore: COMPLEX_MACRO
 #define CB_MEM_CACHE_INIT() {  \
+    .delete_callback = NULL,   \
     .printval_callback = NULL, \
 }
+// checkpatch-no-ignore: COMPLEX_MACRO
 
 
 bool ec_mem_cache_init(ProcessContext *context);
@@ -39,5 +44,9 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
 uint64_t ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context);
 
 void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context);
-void ec_mem_cache_free(void *value, ProcessContext *context);
+void ec_mem_cache_disown(void *value, ProcessContext *context);
+bool ec_mem_cache_is_owned(void *value, ProcessContext *context);
+void ec_mem_cache_get(void *value, ProcessContext *context);
+void ec_mem_cache_put(void *value, ProcessContext *context);
+int64_t ec_mem_cache_ref_count(void *value, ProcessContext *context);
 int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context);
