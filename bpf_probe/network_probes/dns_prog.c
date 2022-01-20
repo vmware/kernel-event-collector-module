@@ -1,6 +1,8 @@
 /* Copyright 2019-2021 VMware Inc.  All rights reserved. */
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
+// 2022-01-19 IPv6 not supported
+
 
 #define KBUILD_MODNAME "ocatrine_dns_filter"
 #include <uapi/linux/bpf.h>
@@ -69,7 +71,9 @@ int dns_tracer(struct __sk_buff *ctx) {
                             void* data_ptr = (void*)packet_data.data;
 
 							// this is a trick needed because bpf_skb_load_bytes() "len"
-							// parameter must be fixed for the eBPF verifier to allow it
+							// parameter must be fixed for the eBPF verifier to allow it.
+							// doing this byte-by-byte would result in a program too large for the verifier - 
+							// hence the "telescopic" nature of this unrolled loop - looping at decrementing intervals
 
                             u8 long_count = udp_length / LONG_LENGTH;
                             u8 long_index;

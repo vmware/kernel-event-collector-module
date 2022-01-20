@@ -1,6 +1,8 @@
 /* Copyright 2019-2021 VMware Inc.  All rights reserved. */
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
+// 2022-01-20 IPv6 not supported
+
 #define KBUILD_MODNAME "tc_filter"
 #include <uapi/linux/bpf.h>
 #include <linux/in.h>
@@ -466,6 +468,7 @@ static inline int check_for_ssh_hdr(register const uint8_t *payload, register co
           ( isdigit(*p) || ('-' == *p) )
       ) {
           // figure out the ssh protocol version
+          // TODO: inspect the minor version second digit as well
           uint8_t major_ver = *(uint8_t*)(payload + off);
           uint8_t minor_ver = *(uint8_t*)(payload + off + 2);
           
