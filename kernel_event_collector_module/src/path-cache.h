@@ -18,7 +18,6 @@ typedef struct PATH_DATA {
     bool                is_special_file;
     uint64_t            file_id;
     uint64_t            fs_magic;
-    atomic64_t          reference_count;
 } PathData;
 
 typedef struct path_query

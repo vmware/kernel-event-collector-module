@@ -14,7 +14,6 @@ typedef struct table_value {
 
 typedef struct entry {
     struct table_key   key;
-    atomic64_t         reference_count;
     struct table_value value;
 } Entry;
 
@@ -27,7 +26,7 @@ typedef struct entry {
         .delete_callback = __ec_test_hashtbl_delete_callback,   \
 }
 
-static bool _delete_callback_called __initdata;
+static int _delete_callback_called __initdata;
 
 bool __init test__hashtbl_init_destroy(ProcessContext *context);
 bool __init test__hashtbl_bad_destroy(ProcessContext *context);
@@ -38,7 +37,6 @@ bool __init test__hashtbl_add_del(ProcessContext *context);
 
 bool __init test__hashtbl_add_get_del(ProcessContext *context);
 bool __init test__hashtbl_double_del(ProcessContext *context);
-bool __init test__hashtbl_refcount_double_del(ProcessContext *context);
 bool __init test__hashtbl_refcount(ProcessContext *context);
 bool __init test__hashtbl_add_duplicate(ProcessContext *context);
 bool __init test__hashtbl_lru_lookup(ProcessContext *context);
@@ -56,7 +54,6 @@ bool __init test__hash_table(ProcessContext *context)
     RUN_TEST(test__hashtbl_add_del(context));
     RUN_TEST(test__hashtbl_add_get_del(context));
     RUN_TEST(test__hashtbl_double_del(context));
-    RUN_TEST(test__hashtbl_refcount_double_del(context));
     RUN_TEST(test__hashtbl_refcount(context));
     RUN_TEST(test__hashtbl_add_duplicate(context));
     RUN_TEST(test__hashtbl_lru_lookup(context));
@@ -125,6 +122,7 @@ bool __init test__hashtbl_add_destroy(ProcessContext *context)
     ASSERT_TRY(ec_hashtbl_add(&hash_table, entry_ptr, context) == 0);
     ASSERT_TEST(ec_hashtbl_get_count(&hash_table, context) == 1);
 
+    ec_hashtbl_put(&hash_table, entry_ptr, context);
 
     passed = true;
 CATCH_DEFAULT:
@@ -152,8 +150,7 @@ bool __init test__hashtbl_add_del(ProcessContext *context)
     ec_hashtbl_del(&hash_table, entry_ptr, context);
     ASSERT_TEST(ec_hashtbl_get_count(&hash_table, context) == 0);
 
-    ec_hashtbl_free(&hash_table, entry_ptr, context);
-
+    ec_hashtbl_put(&hash_table, entry_ptr, context);
 
     passed = true;
 CATCH_DEFAULT:
@@ -197,11 +194,14 @@ bool __init test__hashtbl_add_get_del(ProcessContext *context)
             pr_alert("Add fails %d\n", i);
             goto CATCH_DEFAULT;
         }
+        ec_hashtbl_put(&hash_table, entry_ptr, context);
     }
 
     //Test ec_hashtbl_get
     for (i = 0; i < size; i++)
     {
+        int result = 0;
+
         entry_ptr = ec_hashtbl_find(&hash_table, &keys[i], context);
 
         if (!entry_ptr)
@@ -209,7 +209,10 @@ bool __init test__hashtbl_add_get_del(ProcessContext *context)
             pr_alert("ec_hashtbl_find failed %d %llu\n", i, keys[i].id);
         }
 
-        if (memcmp(&entry_ptr->value, &values[i], sizeof(struct table_key)) != 0)
+        result = memcmp(&entry_ptr->value, &values[i], sizeof(struct table_key));
+        ec_hashtbl_put(&hash_table, entry_ptr, context);
+
+        if (result != 0)
         {
             pr_alert("Get value does not match %d %llu\n", i, keys[i].id);
             goto CATCH_DEFAULT;
@@ -226,12 +229,13 @@ bool __init test__hashtbl_add_get_del(ProcessContext *context)
             goto CATCH_DEFAULT;
         }
 
-        ec_hashtbl_free(&hash_table, entry_ptr, context);
+        ec_hashtbl_put(&hash_table, entry_ptr, context);
 
         entry_ptr = ec_hashtbl_find(&hash_table, &keys[i], context);
         if (entry_ptr != NULL)
         {
             pr_alert("Delete fails %d\n", i);
+            ec_hashtbl_put(&hash_table, entry_ptr, context);
             goto CATCH_DEFAULT;
         }
     }
@@ -247,7 +251,7 @@ CATCH_DEFAULT:
 
 bool __init test__hashtbl_double_del(ProcessContext *context)
 {
-    bool passed = false;
+    bool passed = true;
     Entry *tdata   = NULL;
     HashTbl hash_table = HASH_TBL_INIT();
 
@@ -256,50 +260,14 @@ bool __init test__hashtbl_double_del(ProcessContext *context)
     tdata = (Entry *)ec_hashtbl_alloc(&hash_table, context);
     TRY_MSG(tdata, DL_ERROR, "ec_hashtbl_alloc failed");
 
-    ASSERT_TRY(ec_hashtbl_add(&hash_table, tdata, context) == 0);
+    ASSERT_TEST(ec_hashtbl_add(&hash_table, tdata, context) == 0);
 
     // delete tdata so it gets deleted again below
     ec_hashtbl_del(&hash_table, tdata, context);
-
-    passed = true;
-CATCH_DEFAULT:
-    if(tdata)
-    {
-        ec_hashtbl_del(&hash_table, tdata, context);
-        ec_hashtbl_free(&hash_table, tdata, context);
-    }
-    ec_hashtbl_destroy(&hash_table, context);
-
-    return passed;
-}
-
-bool __init test__hashtbl_refcount_double_del(ProcessContext *context)
-{
-    bool passed = false;
-    Entry *tdata = NULL;
-    HashTbl hash_table = HASH_TBL_INIT();
-
-    hash_table.refcount_offset = offsetof(Entry, reference_count);
-
-    ASSERT_TRY(ec_hashtbl_init(&hash_table, context));
-
-    tdata = (Entry *)ec_hashtbl_alloc(&hash_table, context);
-    TRY_MSG(tdata, DL_ERROR, "ec_hashtbl_alloc failed");
-
-    atomic64_set(&tdata->reference_count, 1);
-
-    TRY_MSG(ec_hashtbl_add(&hash_table, tdata, context) == 0, DL_ERROR, "ec_hashtbl_add failed");
-
-    // delete tdata so it gets deleted again below
     ec_hashtbl_del(&hash_table, tdata, context);
+    ec_hashtbl_put(&hash_table, tdata, context);
 
-    passed = true;
 CATCH_DEFAULT:
-    if (tdata)
-    {
-        ec_hashtbl_del(&hash_table, tdata, context);
-        ec_hashtbl_put(&hash_table, tdata, context);
-    }
     ec_hashtbl_destroy(&hash_table, context);
 
     return passed;
@@ -307,51 +275,48 @@ CATCH_DEFAULT:
 
 bool __init test__hashtbl_refcount(ProcessContext *context)
 {
-    bool passed = false;
-    Entry *tdata   = NULL;
+    bool passed = true;
+    Entry *tdata1   = NULL;
+    Entry *tdata2   = NULL;
     TableKey key;
     HashTbl hash_table = HASH_TBL_INIT();
 
-    hash_table.refcount_offset = offsetof(Entry, reference_count);
-
     ASSERT_TRY(ec_hashtbl_init(&hash_table, context));
 
-    tdata = (Entry *)ec_hashtbl_alloc(&hash_table, context);
-    ASSERT_TRY(tdata);
+    tdata1 = (Entry *)ec_hashtbl_alloc(&hash_table, context);
+    ASSERT_TRY(tdata1);
 
-    tdata->key.id = 1;
-    atomic64_set(&tdata->reference_count, 1);
+    tdata1->key.id = 1;
 
-    ASSERT_TRY(ec_hashtbl_add(&hash_table, tdata, context) == 0);
+    ASSERT_TEST(ec_hashtbl_add(&hash_table, tdata1, context) == 0);
     // refcount 2
 
     key.id = 1;
-    ASSERT_TRY(ec_hashtbl_find(&hash_table, &key, context) == tdata);
+    tdata2 = ec_hashtbl_find(&hash_table, &key, context);
+    ASSERT_TEST(tdata2 == tdata1);
     // refcount 3
 
-    _delete_callback_called = false;
-    ec_hashtbl_put(&hash_table, tdata, context);
+    _delete_callback_called = 0;
+    ec_hashtbl_put(&hash_table, tdata1, context);
+    tdata1 = NULL;
     // refcount 2
-    ASSERT_TRY(!_delete_callback_called);
+    msleep(50); // This can be async, so sleep to be sure
+    ASSERT_TEST(_delete_callback_called == 0);
 
     // calls put
-    ec_hashtbl_del(&hash_table, tdata, context);
+    ec_hashtbl_del(&hash_table, tdata2, context);
     // refcount 1
-    ASSERT_TRY(!_delete_callback_called);
+    msleep(50); // This can be async, so sleep to be sure
+    ASSERT_TEST(_delete_callback_called == 0);
 
     // The reference count should be 1 now and this put should result in a free
-    ec_hashtbl_put(&hash_table, tdata, context);
+    ec_hashtbl_put(&hash_table, tdata2, context);
     // refcount 0 should have been freed
-    ASSERT_TRY(_delete_callback_called);
-    tdata = NULL;
-    passed = true;
+    msleep(50); // This can be async, so sleep to be sure
+    ASSERT_TEST(_delete_callback_called == 1);
+    tdata2 = NULL;
 
 CATCH_DEFAULT:
-    if(tdata)
-    {
-        ec_hashtbl_del(&hash_table, tdata, context);
-        ec_hashtbl_put(&hash_table, tdata, context);
-    }
     ec_hashtbl_destroy(&hash_table, context);
 
     return passed;
@@ -382,12 +347,10 @@ bool __init test__hashtbl_add_duplicate(ProcessContext *context)
 CATCH_DEFAULT:
     if(tdata)
     {
-        ec_hashtbl_del(&hash_table, tdata, context);
-        ec_hashtbl_free(&hash_table, tdata, context);
+        ec_hashtbl_put(&hash_table, tdata, context);
     }
     if(tdata2)
     {
-        ec_hashtbl_del_by_key(&hash_table, &tdata2->key, context);
         ec_hashtbl_free(&hash_table, tdata2, context);
     }
     ec_hashtbl_destroy(&hash_table, context);
@@ -406,6 +369,7 @@ bool __init __test__hashtbl_lru_lookup(
     uint64_t *data;
     int data_size = 1024;
     uint64_t count;
+    uint64_t total_over;
     uint64_t overage;
     HashTbl hash_table = HASH_TBL_INIT();
 
@@ -433,14 +397,18 @@ bool __init __test__hashtbl_lru_lookup(
         if (ec_hashtbl_add_safe(&hash_table, tdata, context) != 0)
         {
             ec_hashtbl_free(&hash_table, tdata, context);
+            tdata = NULL;
         }
+        ec_hashtbl_put(&hash_table, tdata, context);
+        tdata = NULL;
     }
     ec_mem_free(data);
 
     count = ec_hashtbl_get_count(&hash_table, context);
-    overage = (count - lru_size) * 100 / lru_size;
+    total_over = count > lru_size ? count - lru_size : 0;
+    overage = total_over > 0 ? (count - lru_size) * 100 / lru_size : 0;
     TRACE(DL_INFO, "hashtbl lru test: lru_size=%llu, bucket_size=%llu, insertions=%llu, total_over=%lld (%llu percent)",
-        lru_size, bucket_size, insertion_count, count - lru_size, overage);
+        lru_size, bucket_size, insertion_count, total_over, overage);
     ec_hastable_bkt_show(&hash_table, (hastable_print_func)__vprintk, NULL, context);
 
 
@@ -483,7 +451,7 @@ bool __init test__hashtbl_lru_lookup(ProcessContext *context)
 
 static void __init __ec_test_hashtbl_delete_callback(void *data, ProcessContext *context)
 {
-    _delete_callback_called = true;
+    ++_delete_callback_called;
 }
 
 static void __init __vprintk(void *m, const char *f, ...)
