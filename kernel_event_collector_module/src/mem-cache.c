@@ -21,6 +21,10 @@ typedef struct cache_buffer {
     uint32_t  magic;
     struct list_head  list;
     CB_MEM_CACHE *cache;
+
+    // This tracks the owners of this object
+    atomic64_t refcnt;
+    bool is_owned;
 } cache_buffer_t;
 
 #define CACHE_BUFFER_MAGIC   0xDEADBEEF
@@ -31,6 +35,15 @@ static const size_t CACHE_BUFFER_SZ = sizeof(cache_buffer_t);
 
     void __ec_mem_cache_generic_report_leaks(void);
 #endif
+
+static inline void *__ec_get_valuep(const cache_buffer_t *cache_buffer)
+{
+    return (void *)((char *)cache_buffer + CACHE_BUFFER_SZ);
+}
+static inline cache_buffer_t *__ec_get_bufferp(const void *value)
+{
+    return (cache_buffer_t *)((char *)value - CACHE_BUFFER_SZ);
+}
 
 // Get the size of this string, and subtract the `\0`
 #define MEM_CACHE_PREFIX_LEN   (sizeof(MEM_CACHE_PREFIX) - 1)
@@ -69,7 +82,6 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
             SLAB_HWCACHE_ALIGN,
             NULL);
         ec_percpu_counter_init(&cache->allocated_count, 0, GFP_MODE(context));
-        cache->object_size = size;
 
 
         if (likely(cache->kmem_cache))
@@ -88,8 +100,6 @@ bool ec_mem_cache_create(CB_MEM_CACHE *cache, const char *name, size_t size, Pro
 uint64_t ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context)
 {
     uint64_t allocated_count = 0;
-    void *value = NULL;
-    struct cache_buffer *cb = NULL;
 
     if (likely(cache && cache->kmem_cache))
     {
@@ -102,18 +112,28 @@ uint64_t ec_mem_cache_destroy(CB_MEM_CACHE *cache, ProcessContext *context)
         allocated_count = percpu_counter_sum_positive(&cache->allocated_count);
         if (allocated_count > 0)
         {
-            TRACE(DL_ERROR, "Destroying Memory Cache (%s) with %" PRFu64 " allocated items.",
+            TRACE(DL_ERROR, "Destroying Memory Cache (%s) with %lld allocated items.",
                    cache->name, (unsigned long long)allocated_count);
 
-            if (g_enable_mem_cache_tracking && cache->printval_callback)
+            if (g_enable_mem_cache_tracking)
             {
+                struct cache_buffer *cache_buffer = NULL;
+                void *value = NULL;
+
                 ec_write_lock(&cache->lock, context);
-                list_for_each_entry(cb, &cache->allocation_list, list)
+                list_for_each_entry(cache_buffer, &cache->allocation_list, list)
                 {
-                    if (cb)
+                    if (likely(cache_buffer))
                     {
-                        value = (char *)cb + CACHE_BUFFER_SZ;
-                        cache->printval_callback(value, context);
+                        TRACE(DL_ERROR, "    CACHE %s (ref: %ld) (%p)",
+                            cache->name,
+                            atomic64_read(&cache_buffer->refcnt),
+                            cache_buffer);
+                        if (cache->printval_callback)
+                        {
+                            value = __ec_get_valuep(cache_buffer);
+                            cache->printval_callback(value, context);
+                        }
                     }
                 }
                 ec_write_unlock(&cache->lock, context);
@@ -157,6 +177,10 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
             cache_buffer_t *cache_buffer = (cache_buffer_t *)value;
 
             cache_buffer->magic = CACHE_BUFFER_MAGIC;
+            cache_buffer->is_owned = true;
+
+            // Init the refcount and take an initial reference
+            atomic64_set(&cache_buffer->refcnt, 1);
 
             cache_buffer->cache = cache;
             percpu_counter_inc(&cache->allocated_count);
@@ -167,45 +191,130 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
                 ec_write_unlock(&cache->lock, context);
             }
 
-            value = (char *)cache_buffer + CACHE_BUFFER_SZ;
+            value = __ec_get_valuep(cache_buffer);
         }
     }
 
     return value;
 }
 
-void ec_mem_cache_free(void *value, ProcessContext *context)
+void ec_mem_cache_disown(void *value, ProcessContext *context)
 {
     if (value)
     {
-        cache_buffer_t *cache_buffer = (cache_buffer_t *)((char *)value - CACHE_BUFFER_SZ);
-
-        CANCEL_VOID_DO(likely(cache_buffer->cache->kmem_cache), {
-                TRACE(DL_ERROR, "Cache %s already destroyed.  Failed to free memory: %p",
-                        cache_buffer->cache->name, value);
-                dump_stack();
-        });
+        cache_buffer_t *cache_buffer = __ec_get_bufferp(value);
 
         if (likely(cache_buffer->magic == CACHE_BUFFER_MAGIC))
         {
-            if (g_enable_mem_cache_tracking)
-            {
-                ec_write_lock(&cache_buffer->cache->lock, context);
-                list_del(&cache_buffer->list);
-                ec_write_unlock(&cache_buffer->cache->lock, context);
-            }
-
-            kmem_cache_free(cache_buffer->cache->kmem_cache, (void *)cache_buffer);
-            percpu_counter_dec(&cache_buffer->cache->allocated_count);
+            cache_buffer->is_owned = false;
+            ec_mem_cache_put(value, context);
         } else
         {
-            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to free memory: %p", value);
+            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to disown memory: %p", value);
             dump_stack();
         }
     }
 }
 
+bool ec_mem_cache_is_owned(void *value, ProcessContext *context)
+{
+    if (value)
+    {
+        cache_buffer_t *cache_buffer = __ec_get_bufferp(value);
 
+        return cache_buffer->is_owned;
+    }
+    return false;
+}
+
+void __ec_mem_cache_release(cache_buffer_t *cache_buffer, ProcessContext *context)
+{
+    if (likely(cache_buffer && cache_buffer->cache))
+    {
+        CB_MEM_CACHE *cache = cache_buffer->cache;
+
+        if (likely(cache_buffer->magic == CACHE_BUFFER_MAGIC))
+        {
+            if (cache->delete_callback)
+            {
+                void *value = __ec_get_valuep(cache_buffer);
+
+                cache->delete_callback(value, context);
+            }
+
+            if (g_enable_mem_cache_tracking)
+            {
+                ec_write_lock(&cache->lock, context);
+                list_del_init(&cache_buffer->list);
+                ec_write_unlock(&cache->lock, context);
+            }
+
+            if (likely(cache_buffer->cache->kmem_cache))
+            {
+                kmem_cache_free(cache->kmem_cache, (void *)cache_buffer);
+            } else
+            {
+                    TRACE(DL_ERROR, "Cache %s already destroyed.  Failed to free memory: %p",
+                            cache_buffer->cache->name, cache_buffer);
+                    dump_stack();
+            }
+
+            percpu_counter_dec(&cache->allocated_count);
+        } else
+        {
+            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to free memory: %p", cache_buffer);
+            dump_stack();
+        }
+    }
+}
+
+void ec_mem_cache_get(void *value, ProcessContext *context)
+{
+    if (value)
+    {
+        cache_buffer_t *cache_buffer = __ec_get_bufferp(value);
+
+        if (likely(cache_buffer->magic == CACHE_BUFFER_MAGIC))
+        {
+            atomic64_inc(&cache_buffer->refcnt);
+        } else
+        {
+            TRACE(DL_ERROR, "%s: Cache entry magic does not match.  Failed to free memory: %p", __func__, value);
+            dump_stack();
+        }
+    }
+}
+
+void ec_mem_cache_put(void *value, ProcessContext *context)
+{
+    if (value)
+    {
+        cache_buffer_t *cache_buffer = __ec_get_bufferp(value);
+
+        if (likely(cache_buffer->magic == CACHE_BUFFER_MAGIC))
+        {
+            IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&cache_buffer->refcnt, {
+                __ec_mem_cache_release(cache_buffer, context);
+            });
+        } else
+        {
+            TRACE(DL_ERROR, "%s: Cache entry magic does not match.  Failed to free memory: %p", __func__, value);
+            dump_stack();
+        }
+    }
+}
+
+int64_t ec_mem_cache_ref_count(void *value, ProcessContext *context)
+{
+    if (value)
+    {
+        cache_buffer_t *cache_buffer = __ec_get_bufferp(value);
+
+        return atomic64_read(&cache_buffer->refcnt);
+    }
+
+    return 0;
+}
 
 int64_t ec_mem_cache_get_allocated_count(CB_MEM_CACHE *cache, ProcessContext *context)
 {

@@ -131,7 +131,7 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             break;
         }
 
-        ec_mem_cache_free(node, context);
+        ec_mem_cache_disown(node, context);
     }
 }
 

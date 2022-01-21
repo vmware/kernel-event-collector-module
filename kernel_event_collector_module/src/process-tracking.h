@@ -49,9 +49,6 @@ typedef struct exec_identity {
     //  by a mutex
     void            *tracked_files;
 
-    // This tracks the owners of this struct (can be more than the number of active processes)
-    atomic64_t        reference_count;
-
     // This tracks the number of active processes so that we can identify the last running process for an exec identity
     //  when sending an exit event.
     atomic64_t        active_process_count;

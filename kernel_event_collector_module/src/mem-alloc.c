@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright 2021 VMware Inc.  All rights reserved.
 
-#include <linux/percpu_counter.h>
+#include <linux/slab.h>
 
 #include "mem-alloc.h"
-#include "priv.h"
+#include "percpu-util.h"
+#include "cb-test.h"
 
 static struct
 {
@@ -34,7 +35,7 @@ void ec_mem_shutdown(ProcessContext *context)
 
     if (generic_buffer_count != 0)
     {
-        TRACE(DL_ERROR, "Exiting with %" PRFs64 " allocated objects (total size: %" PRFs64 ")",
+        TRACE(DL_ERROR, "Exiting with %lld allocated objects (total size: %lld)",
             (long long)generic_buffer_count, ec_mem_allocated_size(context));
     }
 
