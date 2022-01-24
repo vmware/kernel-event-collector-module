@@ -4,6 +4,7 @@ Linux agent.
   * [kernel_event_collector_module](kernel_event_collector_module/README.md): Kernel-based collection module
 for use on RHEL 6/7/8 distributions
   * [bpf_probe](bpf_probe/README.md): eBPF-based collector for Linux 4.4+ kernels that support BPF
+  * [app_control_event_kernel_module](app_control_event_kernel_module/README.md): Access controls via userspace and event collection
 
 ## Contributing
 The kernel-event-collector-module project team welcomes contributions from the community. Before you start working with kernel-event-collector-module, please
