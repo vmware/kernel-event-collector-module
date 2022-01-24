@@ -38,7 +38,7 @@ bool     g_exiting __read_mostly;
 uint32_t g_max_queue_size = DEFAULT_QUEUE_SIZE * 3;
 uint32_t ec_prsock_buflen __read_mostly;
 bool     g_run_self_tests __read_mostly;
-bool     g_enable_hook_tracking __read_mostly = true;
+bool     g_enable_hook_tracking __read_mostly;
 bool     g_enable_mem_cache_tracking __read_mostly;
 bool     g_process_tracking_ref_debug __read_mostly;
 bool     g_path_cache_ref_debug __read_mostly;
@@ -204,7 +204,7 @@ static struct subsystem_init s_module_init[] = {
     SUBSYSTEM_INIT(ec_mem_init,                     ec_mem_shutdown),
     SUBSYSTEM_INIT(ec_mem_cache_init,               ec_mem_cache_shutdown),
     SUBSYSTEM_INIT(ec_hashtbl_startup,              ec_hashtbl_shutdown),
-    SUBSYSTEM_INIT(ec_reader_init,                  NULL),
+    SUBSYSTEM_INIT(ec_reader_init,                  ec_reader_shutdown),
     SUBSYSTEM_INIT(ec_module_state_info_initialize, ec_module_state_info_shutdown),
     SUBSYSTEM_INIT(ec_do_lsm_initialize,            ec_do_lsm_shutdown),
     SUBSYSTEM_INIT(ec_do_sys_initialize,            ec_do_sys_shutdown),
