@@ -280,7 +280,12 @@ void __exit ec_cleanup(void)
             l_module_inuse += per_cpu(module_inuse, cpu);
         }
 
-        if (!l_module_inuse)
+        if (l_module_inuse < 0)
+        {
+            TRACE(DL_SHUTDOWN, "Module reports <0 active hooks (%lld)", l_module_inuse);
+        }
+
+        if (l_module_inuse <= 0)
         {
             break;
         }
