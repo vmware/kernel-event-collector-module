@@ -161,12 +161,8 @@ int ec_path_cache_show(struct seq_file *m, void *v)
 {
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
-    IF_MODULE_DISABLED_GOTO(&context, CATCH_DISABLED);
-
     ec_hashtbl_read_for_each(&s_path_cache, __ec_path_cache_print, m, &context);
 
-CATCH_DISABLED:
-    MODULE_PUT_AND_FINISH_MODULE_DISABLE_CHECK(&context);
     return 0;
 }
 
