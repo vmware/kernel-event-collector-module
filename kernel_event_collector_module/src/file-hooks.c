@@ -52,6 +52,7 @@ PathData *__ec_get_path_data(
     const char __user *filename,
     ProcessContext    *context)
 {
+    PathData *path_data;
     struct path path = {};
     struct path_lookup path_lookup = {
         .path = &path,
@@ -61,7 +62,10 @@ PathData *__ec_get_path_data(
 
     CANCEL(!user_path_at(dfd, filename, LOOKUP_FOLLOW, &path), NULL);
 
-    return ec_file_get_path_data(&path_lookup, context);
+    path_data = ec_file_get_path_data(&path_lookup, context);
+
+    path_put(&path);
+    return path_data;
 }
 
 void __ec_do_generic_file_event(
