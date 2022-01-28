@@ -8,7 +8,7 @@
 #include "mem-alloc.h"
 
 typedef struct hash_table_node {
-    struct hlist_node link;
+    struct list_head link;
     u32 hash;
     u32 activity;
     HashTbl *hashTblp;
@@ -153,7 +153,7 @@ bool ec_hashtbl_init(
     for (i = 0; i < hashTblp->numberOfBuckets; i++)
     {
         ec_spinlock_init(&hashTblp->tablePtr[i].lock, context);
-        INIT_HLIST_HEAD(&hashTblp->tablePtr[i].head);
+        INIT_LIST_HEAD(&hashTblp->tablePtr[i].head);
     }
 
     INIT_LIST_HEAD(&hashTblp->genTables);
@@ -250,8 +250,7 @@ void __ec_hashtbl_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void
     for (i = 0; i < numberOfBuckets; ++i)
     {
         HashTableBkt *bucketp = &ec_hashtbl_tbl[i];
-        HashTableNode *nodep = 0;
-        struct hlist_node *tmp;
+        HashTableNode *nodep = 0, *next = 0;
 
         if (haveWriteLock)
         {
@@ -261,15 +260,9 @@ void __ec_hashtbl_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void
             ec_hashtbl_bkt_read_lock(bucketp, context);
         }
 
-        if (!hlist_empty(&bucketp->head))
+        if (!list_empty(&bucketp->head))
         {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-            hlist_for_each_entry_safe(nodep, tmp, &bucketp->head, link)
-#else
-            struct hlist_node *_nodep;
-
-            hlist_for_each_entry_safe(nodep, _nodep, tmp, &bucketp->head, link)
-#endif
+            list_for_each_entry_safe(nodep, next, &bucketp->head, link)
             {
 
                 switch ((*callback)(hashTblp, __ec_get_datap(hashTblp, nodep), priv, context))
@@ -277,7 +270,7 @@ void __ec_hashtbl_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void
                 case ACTION_DELETE:
                     // This should never be called with only a read lock
                     BUG_ON(!haveWriteLock);
-                    hlist_del_init(&nodep->link);
+                    list_del_init(&nodep->link);
                     --bucketp->itemCount;
                     percpu_counter_dec(&hashTblp->tableInstance);
                     ec_mem_cache_disown(nodep, context);
@@ -291,6 +284,9 @@ void __ec_hashtbl_for_each(HashTbl *hashTblp, hashtbl_for_each_cb callback, void
                         ec_hashtbl_bkt_read_unlock(bucketp, context);
                     }
                     goto Exit;
+                    break;
+                case ACTION_PRINT:
+                    TRACE(DL_INFO, "bucket: %u, active: %u", i, nodep->activity);
                     break;
                 case ACTION_CONTINUE:
                 default:
@@ -316,18 +312,13 @@ Exit:
 
 #define LRU_REORDERLIMIT 10
 
-HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u32 hash, const void *key)
+HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct list_head *head, u32 hash, const void *key)
 {
     HashTableNode *tableNode = NULL;
+    HashTableNode *nextNode = NULL;
     HashTableNode *prevNode = NULL;
-    struct hlist_node *hlistTmp = NULL;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
-    struct hlist_node *hlistNode = NULL;
 
-    hlist_for_each_entry_safe(tableNode, hlistNode, hlistTmp, head, link)
-#else
-    hlist_for_each_entry_safe(tableNode, hlistTmp, head, link)
-#endif
+    list_for_each_entry_safe(tableNode, nextNode, head, link)
     {
         if (hash == tableNode->hash &&
             memcmp(key, __ec_get_key_ptr(hashTblp, __ec_get_datap(hashTblp, tableNode)), hashTblp->key_len) == 0)
@@ -346,8 +337,8 @@ HashTableNode *__ec_hashtbl_lookup(HashTbl *hashTblp, struct hlist_head *head, u
                 if (tableNode->activity > prevNode->activity &&
                     tableNode->activity - prevNode->activity > LRU_REORDERLIMIT)
                 {
-                    hlist_del_init(&tableNode->link);
-                    hlist_add_before(&tableNode->link, &prevNode->link);
+                    list_del_init(&tableNode->link);
+                    list_add_tail(&tableNode->link, &prevNode->link);
                 }
             }
             return tableNode;
@@ -390,8 +381,8 @@ int __ec_hashtbl_add(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessCo
         // Evict from the LRU
         //  Note this happens before we enforce uniqueness, which may result in evicting an item without adding a new item.
 
-        // If there are nodes in this bucket than evict one.
-        HashTableNode *tableNode = hlist_entry(*bucketp->head.first->pprev, HashTableNode, link);
+        // If there are nodes in this bucket then evict one.
+        HashTableNode *tableNode = list_last_entry(&bucketp->head, HashTableNode, link);
         void          *datap     = __ec_get_datap(hashTblp, tableNode);
 
         ec_hashtbl_del_lockheld(hashTblp, bucketp, datap, context);
@@ -404,7 +395,7 @@ int __ec_hashtbl_add(HashTbl *hashTblp, void *datap, bool forceUnique, ProcessCo
         TRY_DO(!old_node, { ret = -EEXIST; });
     }
 
-    hlist_add_head(&nodep->link, &bucketp->head);
+    list_add(&nodep->link, &bucketp->head);
     ++bucketp->itemCount;
     percpu_counter_inc(&hashTblp->tableInstance);
     ec_mem_cache_get(nodep, context);
@@ -521,9 +512,9 @@ int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *data
     HashTableNode *nodep = __ec_get_nodep(hashTblp, datap);
 
     // This protects against ec_hashtbl_del being called twice for the same datap
-    if ((&nodep->link)->pprev != NULL)
+    if (!list_empty(&nodep->link))
     {
-        hlist_del_init(&nodep->link);
+        list_del_init(&nodep->link);
         --bucketp->itemCount;
         percpu_counter_dec(&hashTblp->tableInstance);
 
@@ -532,8 +523,9 @@ int ec_hashtbl_del_lockheld(HashTbl *hashTblp, HashTableBkt *bucketp, void *data
         return 0;
     } else
     {
-        pr_err("Attempt to delete a NULL object from the hash table");
-        dump_stack();
+        // This can happen if an entry is evicted from the hashtbl while the datap is held by another thread
+        // which then deletes it.
+        TRACE(DL_INFO, "Attempt to delete a removed object from the hash table");
     }
 
     return -1;
@@ -614,7 +606,7 @@ void *ec_hashtbl_alloc(HashTbl *hashTblp, ProcessContext *context)
     nodep->activity = 0;
     nodep->hash = 0;
     nodep->hashTblp = hashTblp;
-    INIT_HLIST_NODE(&nodep->link);
+    INIT_LIST_HEAD(&nodep->link);
     return __ec_get_datap(hashTblp, nodep);
 }
 

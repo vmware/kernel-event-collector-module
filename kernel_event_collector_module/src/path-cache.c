@@ -10,7 +10,8 @@
 #include "priv.h"
 #include "mem-alloc.h"
 
-uint32_t g_file_path_buckets = 65536*2;
+uint32_t g_file_path_buckets = 65536;
+bool g_enable_path_cache;
 
 void __ec_path_cache_delete_callback(void *data, ProcessContext *context);
 int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
@@ -26,11 +27,21 @@ static HashTbl __read_mostly s_path_cache = {
     .delete_callback = __ec_path_cache_delete_callback,
     .printval_callback = __ec_path_cache_print_callback,
     .find_verify_callback = __ec_path_cache_verify_callback,
+    .lruSize = 8,
 };
 
 bool ec_path_cache_init(ProcessContext *context)
 {
-    s_path_cache.numberOfBuckets = g_file_path_buckets;
+    if (!g_enable_path_cache)
+    {
+        // When disabled the hashtbl is just a pass-through to ec_mem_cache
+        s_path_cache.numberOfBuckets = 1;
+    } else
+    {
+        s_path_cache.numberOfBuckets = g_file_path_buckets;
+        TRACE(DL_INIT, "Path cache is enabled");
+    }
+
     return ec_hashtbl_init(&s_path_cache, context);
 }
 
@@ -43,7 +54,9 @@ PathData *ec_path_cache_find(
     PathQuery          *query,
     ProcessContext     *context)
 {
+    CANCEL(g_enable_path_cache, NULL);
     CANCEL(likely(query), NULL);
+
     return ec_hashtbl_find(&s_path_cache, &query->key, context);
 }
 
@@ -105,22 +118,25 @@ PathData *ec_path_cache_add(
             value->key.inode,
             value->path);
 
-        if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
+        if (g_enable_path_cache)
         {
-            PathQuery query = {
-                .key = {
-                    .inode = inode,
-                    .device = device,
-                    .ns_id = ns_id
-                },
-            };
+            if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
+            {
+                PathQuery query = {
+                    .key = {
+                        .inode = inode,
+                        .device = device,
+                        .ns_id = ns_id
+                    },
+                };
 
-            // If the insert failed we free the local reference and get the existing value for the return
+                // If the insert failed we free the local reference and get the existing value for the return
+                __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
+                ec_hashtbl_free(&s_path_cache, value, context);
+                value = ec_path_cache_find(&query, context);
+            }
             __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
-            ec_hashtbl_free(&s_path_cache, value, context);
-            value = ec_path_cache_find(&query, context);
         }
-        __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
     }
 
     return value;
@@ -130,6 +146,7 @@ void ec_path_cache_delete(
     PathData           *value,
     ProcessContext     *context)
 {
+    CANCEL_VOID(g_enable_path_cache);
     CANCEL_VOID(value);
 
     __ec_path_cache_print_ref(DL_FILE, __func__, value, context);

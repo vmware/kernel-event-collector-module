@@ -36,8 +36,8 @@ void __ec_net_tracking_set_key(NET_TBL_KEY    *key,
 int __ec_print_net_tracking(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
 
 //TODO pick appropriate size
-#define NET_TBL_SIZE     1024
-#define NET_LRU_SIZE     4  // (4 * bucket size)
+#define NET_TBL_SIZE     2048
+#define NET_LRU_SIZE     4
 
 static HashTbl __read_mostly s_net_hash_table = {
     .numberOfBuckets = NET_TBL_SIZE,

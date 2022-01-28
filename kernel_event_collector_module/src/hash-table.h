@@ -13,11 +13,12 @@
 
 #define  ACTION_CONTINUE   0
 #define  ACTION_STOP       1
+#define  ACTION_PRINT      2
 #define  ACTION_DELETE     4
 
 // hash-table-generic provides interfaces for hash tables. It supports arbitary
 // key length. In order to use this hash table, you need to create a struct that
-// contains a struct hlist_node called 'link'. Then you can add one, or more
+// contains a struct list_node called 'link'. Then you can add one, or more
 // fields as the key. Last, add fields as value. The order does matter here,
 // because the implementation will use the address of link plus the offset to
 // get the key. So you need to make sure 'link' is before the key, and the key
@@ -32,9 +33,11 @@ typedef void *(*hashtbl_handle_cb)(void *datap, ProcessContext *context);
 typedef void (*hashtbl_printval_cb)(void *datap, ProcessContext *context);
 typedef bool (*hashtbl_find_verify_cb)(void *datap, void *key, ProcessContext *context);
 
+// We need a pointer to the end of the bucket list for the LRU, so use list here instead of hlist
+// since hlist does not provide a pointer to the end (see list.h)
 typedef struct hashbtl_bkt {
     uint64_t lock;
-    struct hlist_head head;
+    struct list_head head;
     uint64_t itemCount;
 } HashTableBkt;
 

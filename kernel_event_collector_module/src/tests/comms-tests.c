@@ -88,10 +88,7 @@ bool __init test__oversize_payload(ProcessContext *context)
     ec_event_send_file(
         proch,
         CB_EVENT_TYPE_FILE_WRITE,
-        device,
-        inode,
-        fs_magic,
-        pathname,
+        path_data,
         context);
 
     ec_disconnect_reader(context->pid, context);
@@ -165,10 +162,7 @@ bool __init test__normal_payload(ProcessContext *context)
     ec_event_send_file(
         proch,
         CB_EVENT_TYPE_FILE_WRITE,
-        device,
-        inode,
-        fs_magic,
-        pathname,
+        path_data,
         context);
 
     ec_disconnect_reader(context->pid, context);

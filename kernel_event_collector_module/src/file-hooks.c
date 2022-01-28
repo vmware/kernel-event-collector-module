@@ -104,10 +104,7 @@ void __ec_do_generic_file_event(
     ec_event_send_file(
         process_handle,
         eventType,
-        path_data->key.device,
-        path_data->key.inode,
-        path_data->fs_magic,
-        path_data->path,
+        path_data,
         context);
 
 CATCH_DEFAULT:
@@ -219,11 +216,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                 ec_event_send_file(
                     process_handle,
                     eventType,
-
-                    fileProcess->path_data->key.device,// TODO: pass path_data directly
-                    fileProcess->path_data->key.inode,
-                    fileProcess->path_data->fs_magic,
-                    fileProcess->path_data->path,
+                    fileProcess->path_data,
                     context);
             }
         } else if (fileProcess->path_data->path[0] == '[' && eventType == CB_EVENT_TYPE_FILE_WRITE)
@@ -234,10 +227,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             ec_event_send_file(
                 process_handle,
                 eventType,
-                fileProcess->path_data->key.device,
-                fileProcess->path_data->key.inode,
-                fileProcess->path_data->fs_magic,
-                fileProcess->path_data->path,
+                fileProcess->path_data,
                 context);
         } else
         {
