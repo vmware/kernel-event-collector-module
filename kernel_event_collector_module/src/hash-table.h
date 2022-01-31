@@ -10,14 +10,10 @@
 #include "version.h"
 #include "percpu-util.h"
 #include "mem-cache.h"
-#include "plru.h"
 
 #define  ACTION_CONTINUE   0
 #define  ACTION_STOP       1
 #define  ACTION_DELETE     4
-
-#define  HASHTBL_DISABLE_LRU        0
-
 
 // hash-table-generic provides interfaces for hash tables. It supports arbitary
 // key length. In order to use this hash table, you need to create a struct that
@@ -44,7 +40,6 @@ typedef struct hashbtl_bkt {
 
 typedef struct hashtbl {
     HashTableBkt *tablePtr;
-    PLruTree plru;
     struct list_head   genTables;
     const char *name;
     uint64_t   numberOfBuckets;

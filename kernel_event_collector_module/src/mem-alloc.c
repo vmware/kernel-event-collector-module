@@ -166,7 +166,7 @@ void __ec_mem_free(void *value, const char *fn, uint32_t line)
             IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&generic_buffer->ref_count,
             {
                 percpu_counter_dec(&s_mem_alloc.generic_buffer_count);
-                this_cpu_add(*s_mem_alloc.generic_buffer_size, generic_buffer->size);
+                this_cpu_sub(*s_mem_alloc.generic_buffer_size, generic_buffer->size);
                 MEM_DEBUG_DEL_ENTRY(generic_buffer, fn, line);
                 if (!generic_buffer->isVirtual)
                 {

@@ -369,8 +369,6 @@ bool __init __test__hashtbl_lru_lookup(
     uint64_t *data;
     int data_size = 1024;
     uint64_t count;
-    uint64_t total_over;
-    uint64_t overage;
     HashTbl hash_table = HASH_TBL_INIT();
 
     hash_table.numberOfBuckets = bucket_size;
@@ -405,10 +403,8 @@ bool __init __test__hashtbl_lru_lookup(
     ec_mem_free(data);
 
     count = ec_hashtbl_get_count(&hash_table, context);
-    total_over = count > lru_size ? count - lru_size : 0;
-    overage = total_over > 0 ? (count - lru_size) * 100 / lru_size : 0;
-    TRACE(DL_INFO, "hashtbl lru test: lru_size=%llu, bucket_size=%llu, insertions=%llu, total_over=%lld (%llu percent)",
-        lru_size, bucket_size, insertion_count, total_over, overage);
+    TRACE(DL_INFO, "hashtbl lru test: lru_size=%llu, bucket_size=%llu, insertions=%llu",
+        lru_size, bucket_size, insertion_count);
     ec_hastable_bkt_show(&hash_table, (hastable_print_func)__vprintk, NULL, context);
 
 
@@ -425,23 +421,23 @@ bool __init test__hashtbl_lru_lookup(ProcessContext *context)
     bool passed = true;
     uint64_t data[][3] = {
         // LRU Size, Bucket Size, Insertion Count
-        { 2048, 16, 4 },  // 0% over
-        { 2048, 8, 4 },   // 4% over
-        { 2048, 4, 4 },   // 13% over
-        { 2048, 2, 4 },   // 30% over
-        { 2048, 1, 4 },   // 60% over
-        { 262144, 16, 4 },// 0% over
-        { 262144, 8, 4 }, // 4% over
-        { 262144, 4, 4 }, // 13% over
-        { 262144, 2, 4 }, // 30% over
-        { 262144, 1, 4 }, // 60% over
+        { 16, 128, 8192 },  // 0% over
+        { 8, 256, 8192 },   // 4% over
+        { 4, 512, 8192 },   // 13% over
+        { 2, 1024, 8192 },   // 30% over
+        { 1, 2048, 8192 },   // 60% over
+        { 16, 16384, 1048576},// 0% over
+        { 8, 16384 * 2, 1048576}, // 4% over
+        { 4, 16384 * 4, 1048576 }, // 13% over
+        { 2, 16384 * 8, 1048576 }, // 30% over
+        { 1, 16384 * 16, 1048576 }, // 60% over
         { 0 }
     };
     for (i = 0; data[i][0] != 0; ++i)
     {
         uint64_t lru_size = data[i][0];
-        uint64_t bucket_size = lru_size / data[i][1];
-        uint64_t insertion_count = lru_size * data[i][2];
+        uint64_t bucket_size = data[i][1];
+        uint64_t insertion_count = data[i][2];
 
         passed &= __test__hashtbl_lru_lookup(lru_size, bucket_size, insertion_count, context);
     }

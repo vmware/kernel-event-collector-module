@@ -324,8 +324,6 @@ CB_RESOLV_VARIABLE(const struct sched_class, fair_sched_class) \
 CB_RESOLV_VARIABLE(const struct sched_class, rt_sched_class) \
 CB_RESOLV_FUNCTION(u64, nsec_to_clock_t, u64 x) \
 CB_RESOLV_FUNCTION(struct task_struct *, find_task_by_vpid, pid_t) \
-CB_RESOLV_FUNCTION(struct filename *, getname, const char __user *) \
-CB_RESOLV_FUNCTION(void, putname, struct filename *) \
 
 // Here we declare the typedefs for the symbol pointer we will eventually look up.  "p_" will be prepended to the
 //  symbol name.

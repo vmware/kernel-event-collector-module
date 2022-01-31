@@ -112,13 +112,11 @@ set(SOURCE_FILES drvmain.c
         event-factory.c
         cb-module-state-export.c
         dns-parser.c
-        plru.c
         tests/run-tests.c
         tests/mem-cache-tests.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c
         tests/module-state-tests.c
-        tests/plru-tests.c
         tests/comms-tests.c)
 
 file(GLOB HEADER_FILES *.h ../include/*.h tests/*.h)

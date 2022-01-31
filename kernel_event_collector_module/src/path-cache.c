@@ -74,6 +74,8 @@ PathData *ec_path_cache_get(
     return path_data;
 }
 
+extern bool ec_is_ignored_filesystem(uint64_t fs_magic);
+
 PathData *ec_path_cache_add(
     uint64_t            ns_id,
     uint64_t            device,
@@ -84,7 +86,7 @@ PathData *ec_path_cache_add(
 {
     PathData *value = NULL;
 
-    if (path)
+    if (path && !ec_is_ignored_filesystem(fs_magic))
     {
         value = ec_hashtbl_alloc(&s_path_cache, context);
         CANCEL(value, NULL);
@@ -106,7 +108,11 @@ PathData *ec_path_cache_add(
         if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
         {
             PathQuery query = {
-                .key = { ns_id, device, inode },
+                .key = {
+                    .inode = inode,
+                    .device = device,
+                    .ns_id = ns_id
+                },
             };
 
             // If the insert failed we free the local reference and get the existing value for the return
@@ -117,7 +123,6 @@ PathData *ec_path_cache_add(
         __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
     }
 
-    // Return the reference
     return value;
 }
 
@@ -171,11 +176,12 @@ int __ec_path_cache_print(HashTbl *hashTblp, void *datap, void *priv, ProcessCon
     PathData *path_data = (PathData *)datap;
     struct seq_file *m = priv;
 
-    if (datap)
+    if (m && path_data)
     {
-        seq_printf(m, "PATH-CACHE [%llu:%llu] %s\n",
+        seq_printf(m, "PATH-CACHE [%llu:%llu:%llu] %s\n",
                    path_data->key.device,
                    path_data->key.inode,
+                   path_data->fs_magic,
                    path_data->path);
     }
 
