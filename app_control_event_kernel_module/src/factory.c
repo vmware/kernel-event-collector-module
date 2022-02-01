@@ -1065,20 +1065,14 @@ static int prep_send_new_fd(struct dynsec_file_event *file,
     // struct copy
     path = file->open_path;
 
-    // Prevents mulitple path_put calls
-    file->open_path.mnt = NULL;
-    file->open_path.dentry = NULL;
-
     if (path.mnt || path.dentry) {
         if (unlikely(!send_open_file_enabled())) {
-            path_put(&path);
             return -EINVAL;
         }
 
         fd = get_unused_fd_flags(OPEN_FILE_MASK);
 
         if (fd < 0) {
-            path_put(&path);
             return fd;
         }
         // Alternatively we could dentry_open in the same cred
@@ -1092,7 +1086,6 @@ static int prep_send_new_fd(struct dynsec_file_event *file,
 #endif
         if (IS_ERR(new_file)) {
             put_unused_fd(fd);
-            path_put(&path);
             return PTR_ERR(new_file);;
         }
         *filep = new_file;
