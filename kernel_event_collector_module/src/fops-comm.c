@@ -350,6 +350,8 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     // Should not happen but it can
     TRY(payload >= sizeof(struct CB_EVENT_UM));
 
+    TRY_MSG(payload <= sizeof(struct CB_EVENT_UM_BLOB), DL_ERROR, "Payload size %d exceeds max %zu", payload, sizeof(struct CB_EVENT_UM_BLOB));
+
     eventNode->payload = (uint16_t)payload;
 
     switch (msg->eventType)
@@ -525,6 +527,7 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
 
     if (count < sizeof(struct CB_EVENT_UM))
     {
+        TRACE(DL_ERROR, "%s count too small: %zu, %zu", __func__, count, sizeof(struct CB_EVENT_UM));
         return -ENOMEM;
     }
 
@@ -558,16 +561,23 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
         eventNode->payload >= sizeof(struct CB_EVENT_UM))
     {
         // when we know for sure we can send this event
+        *cb_event = &eventNode->data;
+        xcode = eventNode->payload;
+    } else if (eventNode)
+    {
+        TRACE(DL_ERROR, "Event has invalid payload size: %d", eventNode->payload);
+    }
+
+    if (eventNode)
+    {
         __ec_decrease_holdoff_counter(tx_ready);
         list_del_init(&eventNode->listEntry);
         atomic64_dec(tx_ready);
-        *cb_event = &eventNode->data;
-        xcode = eventNode->payload;
     }
+
     ec_write_unlock(&dev_spinlock, context);
 
 CATCH_DEFAULT:
-
     return xcode;
 }
 
@@ -1498,6 +1508,11 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
 
     if (cb_event->procInfo.path && cb_event->procInfo.path_size)
     {
+        if (cb_event->procInfo.path_size > PATH_MAX)
+        {
+            TRACE(DL_WARNING, "procInfo.path_size: %d, %s", cb_event->procInfo.path_size, cb_event->procInfo.path);
+        }
+
         cb_event->procInfo.path_offset = payload;
         payload += cb_event->procInfo.path_size;
     }
@@ -1507,6 +1522,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_PROCESS_START:
         if (cb_event->processStart.path && cb_event->processStart.path_size)
         {
+            if (cb_event->processStart.path_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "processStart.path_size: %d, %s", cb_event->processStart.path_size,
+                      cb_event->processStart.path);
+            }
+
             cb_event->processStart.path_offset = payload;
             payload += cb_event->processStart.path_size;
         }
@@ -1519,6 +1540,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_MODULE_LOAD:
         if (cb_event->moduleLoad.path && cb_event->moduleLoad.path_size)
         {
+            if (cb_event->moduleLoad.path_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "moduleLoad.path_size: %d: %s", cb_event->moduleLoad.path_size,
+                      cb_event->moduleLoad.path);
+            }
+
             cb_event->moduleLoad.path_offset = payload;
             payload += cb_event->moduleLoad.path_size;
         }
@@ -1531,6 +1558,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_FILE_CLOSE:
         if (cb_event->fileGeneric.path && cb_event->fileGeneric.path_size)
         {
+            if (cb_event->fileGeneric.path_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "fileGeneric.path_size: %d, %s", cb_event->fileGeneric.path_size,
+                      cb_event->fileGeneric.path);
+            }
+
             cb_event->fileGeneric.path_offset = payload;
             payload += cb_event->fileGeneric.path_size;
         }
@@ -1542,6 +1575,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_WEB_PROXY:
         if (cb_event->netConnect.actual_server && cb_event->netConnect.server_size)
         {
+            if (cb_event->netConnect.server_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "netConnect.server_size: %d, %s", cb_event->netConnect.server_size,
+                      cb_event->netConnect.actual_server);
+            }
+
             cb_event->netConnect.server_offset = payload;
             payload += cb_event->netConnect.server_size;
         }
@@ -1550,6 +1589,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_DNS_RESPONSE:
         if (cb_event->dnsResponse.records && cb_event->dnsResponse.record_count)
         {
+            if (cb_event->dnsResponse.record_count * sizeof(CB_DNS_RECORD) > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "dnsResponse.record_count: %d, %zu", cb_event->dnsResponse.record_count,
+                      cb_event->dnsResponse.record_count * sizeof(CB_DNS_RECORD));
+            }
+
             cb_event->dnsResponse.record_offset = payload;
             payload += cb_event->dnsResponse.record_count * sizeof(CB_DNS_RECORD);
         }
@@ -1559,6 +1604,12 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
         if (cb_event->blockResponse.path && cb_event->blockResponse.path_size)
         {
+            if (cb_event->blockResponse.path_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "blockResponse.path_size: %d, %s", cb_event->blockResponse.path_size,
+                      cb_event->blockResponse.path);
+            }
+
             cb_event->blockResponse.path_offset = payload;
             payload += cb_event->blockResponse.path_size;
         }

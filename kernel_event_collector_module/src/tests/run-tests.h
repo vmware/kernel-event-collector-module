@@ -43,4 +43,10 @@ bool test__kthread_may_stall(void) __init;
 bool test__insmod_may_stall(void) __init;
 bool test__stall_event_abort(ProcessContext *context) __init;
 
+bool test__oversize_payload(ProcessContext *context) __init;
+bool test__normal_payload(ProcessContext *context) __init;
+bool test__parse_dns(ProcessContext *context) __init;
+
 #define ASSERT_TRY(stmt) TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED %s:%d -- %s", __FILE__, __LINE__, #stmt)
+#define ASSERT_TRY_MSG(stmt, msg, ...) TRY_MSG(stmt, DL_ERROR, "ASSERT FAILED %s:%d -- " msg, __FILE__, __LINE__, ##__VA_ARGS__)
+#define ASSERT_EQUAL(A, B) TRY_MSG(A == B, DL_ERROR, "ASSERT NOT EQUAL %s:%d -- %d != %d", __FILE__, __LINE__, A, B)
