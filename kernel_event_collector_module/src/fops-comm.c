@@ -69,8 +69,8 @@ static LLIST_HEAD(msg_queue_in);
 
 static const uint64_t MAX_VALID_INTERVALS =   60;
 #define  MAX_INTERVALS           62
-#define  NUM_STATS               15
-#define  EVENT_STATS             10
+#define  NUM_STATS               16
+#define  EVENT_STATS             11
 #define  MEM_START               EVENT_STATS
 #define  MEM_STATS               (EVENT_STATS + 4)
 
@@ -81,6 +81,7 @@ typedef struct CB_EVENT_STATS {
     //  number of elements between them to yield the average.
     //  tx_queued_t;
     //  tx_dropped;
+    //  tx_pdropped;
     //  tx_total;
     //  tx_other
     //  tx_process
@@ -112,6 +113,7 @@ const static struct {
 } STAT_STRINGS[] = {
     { "Total Queued",   " %12s ||", " %12d ||" },
     { "Dropped",        " %7s |", " %7d |" },
+    { "PDropped",       " %8s |", " %8d |" },
     { "All",            " %7s |", " %7d |" },
     { "Process",        " %7s |", " %7d |" },
     { "Modload",        " %7s |", " %7d |" },
@@ -132,20 +134,21 @@ const static struct {
 #define tx_ready            (s_fops_data.event_stats.tx_ready)
 #define tx_queued_t         (s_fops_data.event_stats.stats[current_stat][0])
 #define tx_dropped          (s_fops_data.event_stats.stats[current_stat][1])
-#define tx_total            (s_fops_data.event_stats.stats[current_stat][2])
-#define tx_process          (s_fops_data.event_stats.stats[current_stat][3])
-#define tx_modload          (s_fops_data.event_stats.stats[current_stat][4])
-#define tx_file             (s_fops_data.event_stats.stats[current_stat][5])
-#define tx_net              (s_fops_data.event_stats.stats[current_stat][6])
-#define tx_dns              (s_fops_data.event_stats.stats[current_stat][7])
-#define tx_proxy            (s_fops_data.event_stats.stats[current_stat][8])
-#define tx_block            (s_fops_data.event_stats.stats[current_stat][9])
-#define tx_other            (s_fops_data.event_stats.stats[current_stat][10])
+#define tx_pdropped         (s_fops_data.event_stats.stats[current_stat][2])
+#define tx_total            (s_fops_data.event_stats.stats[current_stat][3])
+#define tx_process          (s_fops_data.event_stats.stats[current_stat][4])
+#define tx_modload          (s_fops_data.event_stats.stats[current_stat][5])
+#define tx_file             (s_fops_data.event_stats.stats[current_stat][6])
+#define tx_net              (s_fops_data.event_stats.stats[current_stat][7])
+#define tx_dns              (s_fops_data.event_stats.stats[current_stat][8])
+#define tx_proxy            (s_fops_data.event_stats.stats[current_stat][9])
+#define tx_block            (s_fops_data.event_stats.stats[current_stat][10])
+#define tx_other            (s_fops_data.event_stats.stats[current_stat][11])
 
-#define mem_user            (s_fops_data.event_stats.stats[current_stat][11])
-#define mem_user_peak       (s_fops_data.event_stats.stats[current_stat][12])
-#define mem_kernel          (s_fops_data.event_stats.stats[current_stat][13])
-#define mem_kernel_peak     (s_fops_data.event_stats.stats[current_stat][14])
+#define mem_user            (s_fops_data.event_stats.stats[current_stat][12])
+#define mem_user_peak       (s_fops_data.event_stats.stats[current_stat][13])
+#define mem_kernel          (s_fops_data.event_stats.stats[current_stat][14])
+#define mem_kernel_peak     (s_fops_data.event_stats.stats[current_stat][15])
 
 static struct  fops_config_t
 {
@@ -161,6 +164,7 @@ static struct  fops_config_t
     uint32_t               stats_work_delay;
     wait_queue_head_t      wq;
     bool                   need_wakeup;
+    uint32_t               high_queue_size;
 } s_fops_config __read_mostly;
 
 static struct fops_data_t
@@ -257,6 +261,9 @@ bool ec_user_comm_initialize(ProcessContext *context)
     s_fops_config.stats_work_delay = msecs_to_jiffies(STAT_INTERVAL * 1000);
     INIT_DELAYED_WORK(&s_fops_config.stats_work, __ec_stats_work_task);
     schedule_delayed_work(&s_fops_config.stats_work, s_fops_config.stats_work_delay);
+
+    // high water mark is 75% of queue size
+    s_fops_config.high_queue_size = g_max_queue_size * .75;
 
     return true;
 }
@@ -374,9 +381,14 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 
     if (readyCount < g_max_queue_size)
     {
-        llist_add(&(eventNode->llistEntry), &msg_queue_in);
-        percpu_counter_inc(&tx_ready);
-        msg = NULL;
+        if (readyCount < s_fops_config.high_queue_size
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_START
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT)
+        {
+            llist_add(&(eventNode->llistEntry), &msg_queue_in);
+            percpu_counter_inc(&tx_ready);
+            msg = NULL;
+        }
     }
 
     // This should be NULL by now.
@@ -392,6 +404,13 @@ CATCH_DEFAULT:
     {
         // If we still have an event at this point free it now
         ++tx_dropped;
+
+        if (msg->eventType == CB_EVENT_TYPE_PROCESS_START
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT)
+        {
+            ++tx_pdropped;
+        }
+
         ec_free_event(msg, context);
     }
 
