@@ -36,4 +36,4 @@ void __ec_mem_free(void *value, const char *fn, uint32_t line);
 void *ec_mem_get(void *value, ProcessContext *context);
 size_t ec_mem_size(const void *value);
 char *ec_mem_strdup(const char *src, ProcessContext *context);
-char *ec_mem_strdup_x(const char *src, size_t *len, ProcessContext *context);
+char *ec_mem_memdup(const char *src, size_t size, ProcessContext *context);

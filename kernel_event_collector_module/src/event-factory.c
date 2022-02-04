@@ -160,7 +160,6 @@ void ec_event_send_block(
     char           *cmdline,
     ProcessContext *context)
 {
-    size_t path_size = 0;
     PCB_EVENT event = ec_factory_alloc_event(
         process_handle,
         CB_EVENT_TYPE_PROCESS_BLOCKED,
@@ -179,11 +178,8 @@ void ec_event_send_block(
 
     if (cmdline)
     {
-        event->blockResponse.path = ec_mem_strdup_x(cmdline, &path_size, context);
-        if (event->blockResponse.path && path_size)
-        {
-            event->blockResponse.path_size = (uint16_t)path_size;
-        }
+        event->blockResponse.path = ec_mem_strdup(cmdline, context);
+        event->blockResponse.path_size = ec_mem_size(event->blockResponse.path);
     }
 
 
@@ -236,7 +232,7 @@ void ec_event_send_file(
     if (path_data->path_found)
     {
         event->fileGeneric.path = ec_mem_get(path_data->path, context);
-        event->fileGeneric.path_size = (uint16_t)ec_mem_size(path_data->path);
+        event->fileGeneric.path_size = ec_mem_size(path_data->path);
     }
 
     // Queue it to be sent to usermode
@@ -252,7 +248,6 @@ void ec_event_send_modload(
     char            *path,
     ProcessContext  *context)
 {
-    size_t path_size = 0;
     char status_message[MSG_SIZE + 1];
     PCB_EVENT event;
     char *status_msgp = NULL;
@@ -295,11 +290,8 @@ void ec_event_send_modload(
 
     if (path)
     {
-        event->moduleLoad.path = ec_mem_strdup_x(path, &path_size, context);
-        if (event->moduleLoad.path)
-        {
-            event->moduleLoad.path_size = (uint16_t)path_size;
-        }
+        event->moduleLoad.path = ec_mem_strdup(path, context);
+        event->moduleLoad.path_size = ec_mem_size(event->moduleLoad.path);
     }
 
     // Queue it to be sent to usermode
@@ -342,13 +334,8 @@ void ec_event_send_net_proxy(
 
     if (actual_server)
     {
-        size_t size = 0;
-
-        event->netConnect.actual_server = ec_mem_strdup_x(actual_server, &size, context);
-        if (event->netConnect.actual_server && size)
-        {
-            event->netConnect.server_size = (uint16_t)size;
-        }
+        event->netConnect.actual_server = ec_mem_strdup(actual_server, context);
+        event->netConnect.server_size = ec_mem_size(event->netConnect.actual_server);
     }
 
     // Queue it to be sent to usermode
