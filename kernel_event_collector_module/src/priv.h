@@ -378,7 +378,10 @@ typedef struct _CB_RESOLVED_SYMS {
 
     CB_RESOLV_SYMBOLS
 } CB_RESOLVED_SYMS;
+
+#undef _C
 // checkpatch-no-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON
+
 
 // Create a node to hold the event
 typedef struct _CB_EVENT_NODE {
@@ -424,4 +427,8 @@ extern uint64_t g_enableHooks;
 #define PRFu64 "llu"  /* unsigned 64-bit decimal */
 #define PRFx64 "llx"  /* unsigned 64-bit hex     */
 
-#undef _C
+// Missing in some kernel versions
+#ifndef list_last_entry
+    #define list_last_entry(ptr, type, member) \
+        list_entry((ptr)->prev, type, member)
+#endif

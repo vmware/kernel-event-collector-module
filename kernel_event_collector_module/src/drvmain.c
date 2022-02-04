@@ -65,6 +65,7 @@ module_param_string(enableHooks, enableHooksStr, HOOK_MASK_LEN,
 
 module_param_named(file_path_buckets, g_file_path_buckets, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(file_tracking_buckets, g_file_tracking_buckets, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(enable_path_cache, g_enable_path_cache, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 
 // checkpatch-no-ignore: SYMBOLIC_PERMS
 

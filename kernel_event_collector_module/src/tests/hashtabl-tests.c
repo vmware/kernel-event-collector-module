@@ -40,6 +40,10 @@ bool __init test__hashtbl_double_del(ProcessContext *context);
 bool __init test__hashtbl_refcount(ProcessContext *context);
 bool __init test__hashtbl_add_duplicate(ProcessContext *context);
 bool __init test__hashtbl_lru_lookup(ProcessContext *context);
+bool __init test__hashtbl_lru_one_bucket(ProcessContext *context);
+bool __init test__hashtbl_lru_many_buckets(ProcessContext *context);
+bool __init test__hashtbl_lru_one_bucket_activity(ProcessContext *context);
+
 static void __init __vprintk(void *, const char *, ...);
 static void __init __ec_test_hashtbl_delete_callback(void *data, ProcessContext *context);
 
@@ -57,7 +61,9 @@ bool __init test__hash_table(ProcessContext *context)
     RUN_TEST(test__hashtbl_refcount(context));
     RUN_TEST(test__hashtbl_add_duplicate(context));
     RUN_TEST(test__hashtbl_lru_lookup(context));
-
+    RUN_TEST(test__hashtbl_lru_one_bucket(context));
+    RUN_TEST(test__hashtbl_lru_many_buckets(context));
+    RUN_TEST(test__hashtbl_lru_one_bucket_activity(context));
     RETURN_RESULT();
 }
 
@@ -357,6 +363,9 @@ CATCH_DEFAULT:
     return passed;
 }
 
+
+
+// how often do we evict a more recent entry?
 bool __init __test__hashtbl_lru_lookup(
     uint64_t lru_size,
     uint64_t bucket_size,
@@ -407,7 +416,6 @@ bool __init __test__hashtbl_lru_lookup(
         lru_size, bucket_size, insertion_count);
     ec_hastable_bkt_show(&hash_table, (hastable_print_func)__vprintk, NULL, context);
 
-
     passed = true;
 
 CATCH_DEFAULT:
@@ -421,16 +429,16 @@ bool __init test__hashtbl_lru_lookup(ProcessContext *context)
     bool passed = true;
     uint64_t data[][3] = {
         // LRU Size, Bucket Size, Insertion Count
-        { 16, 128, 8192 },  // 0% over
-        { 8, 256, 8192 },   // 4% over
-        { 4, 512, 8192 },   // 13% over
-        { 2, 1024, 8192 },   // 30% over
-        { 1, 2048, 8192 },   // 60% over
-        { 16, 16384, 1048576},// 0% over
-        { 8, 16384 * 2, 1048576}, // 4% over
-        { 4, 16384 * 4, 1048576 }, // 13% over
-        { 2, 16384 * 8, 1048576 }, // 30% over
-        { 1, 16384 * 16, 1048576 }, // 60% over
+        { 16, 128, 8192 },
+        { 8, 256, 8192 },
+        { 4, 512, 8192 },
+        { 2, 1024, 8192 },
+        { 1, 2048, 8192 },
+        { 16, 16384, 1048576},
+        { 8, 16384 * 2, 1048576},
+        { 4, 16384 * 4, 1048576 },
+        { 2, 16384 * 8, 1048576 },
+        { 1, 16384 * 16, 1048576 },
         { 0 }
     };
     for (i = 0; data[i][0] != 0; ++i)
@@ -442,6 +450,195 @@ bool __init test__hashtbl_lru_lookup(ProcessContext *context)
         passed &= __test__hashtbl_lru_lookup(lru_size, bucket_size, insertion_count, context);
     }
 
+    return passed;
+}
+
+bool __add_entry(int key, HashTbl *hash_table, ProcessContext *context)
+{
+    Entry *tdata   = NULL;
+
+    tdata = (Entry *)ec_hashtbl_alloc(hash_table, context);
+    tdata->key.id = key;
+
+    if (ec_hashtbl_add_safe(hash_table, tdata, context) != 0)
+    {
+        TRACE(DL_ERROR, "Failed to add entry %d", key);
+        return false;
+    }
+
+    ec_hashtbl_put(hash_table, tdata, context);
+    return true;
+}
+
+bool __check_entry_exists(HashTbl *hash_table, int key, ProcessContext *context)
+{
+    Entry *tdata   = NULL;
+    TableKey tkey = {.id = key};
+
+    tdata = ec_hashtbl_find(hash_table, &tkey, context);
+
+    ec_hashtbl_put(hash_table, tdata, context);
+
+    return tdata;
+}
+
+
+int __hashtbl_print_cb(HashTbl *tblp, void *data, void *priv, ProcessContext *context)
+{
+    Entry *tdata = (Entry *)data;
+
+    if (tdata)
+    {
+        TRACE(DL_INFO, "-- key: %llu", tdata->key.id);
+    }
+
+    return ACTION_PRINT;
+}
+
+void __hashtbl_delete_callback(void *data, ProcessContext *context)
+{
+    Entry *tdata = (Entry *)data;
+
+    if (tdata)
+    {
+        TRACE(DL_INFO, "%s key: %llu", __func__, tdata->key.id);
+    } else
+    {
+        TRACE(DL_INFO, "%s NULL", __func__);
+    }
+}
+
+bool __init test__hashtbl_lru_one_bucket(ProcessContext *context)
+{
+    bool passed = false;
+    HashTbl hash_table = HASH_TBL_INIT();
+    int count;
+
+    hash_table.numberOfBuckets = 1;
+    hash_table.lruSize = 3;
+    hash_table.delete_callback = __hashtbl_delete_callback;
+
+    ASSERT_TRY(ec_hashtbl_init(&hash_table, context));
+
+    // this should fill all available buckets
+    ASSERT_TRY(__add_entry(1, &hash_table, context));
+    ASSERT_TRY(__add_entry(2, &hash_table, context));
+    ASSERT_TRY(__add_entry(3, &hash_table, context));
+
+    TRACE(DL_INFO, "hashtbl contents:");
+    ec_hashtbl_read_for_each(&hash_table, __hashtbl_print_cb, NULL, context);
+
+    count = ec_hashtbl_get_count(&hash_table, context);
+    ASSERT_TRY_MSG(count == 3, "count: %d", count);
+
+    ASSERT_TRY(__add_entry(4, &hash_table, context));
+
+    count = ec_hashtbl_get_count(&hash_table, context);
+    ASSERT_TRY_MSG(count == 3, "count: %d", count);
+
+    // The last items added should still be there
+    ASSERT_TRY(__check_entry_exists(&hash_table, 4, context));
+
+    ASSERT_TRY(__check_entry_exists(&hash_table, 3, context));
+
+    ASSERT_TRY(__check_entry_exists(&hash_table, 2, context));
+
+    // The first item added should not be there
+    ASSERT_TRY(!__check_entry_exists(&hash_table, 1, context));
+
+    passed = true;
+
+CATCH_DEFAULT:
+    ec_hashtbl_destroy(&hash_table, context);
+    return passed;
+}
+
+bool __init test__hashtbl_lru_one_bucket_activity(ProcessContext *context)
+{
+    bool passed = false;
+    HashTbl hash_table = HASH_TBL_INIT();
+    int i, count;
+
+    hash_table.numberOfBuckets = 1;
+    hash_table.lruSize = 3;
+    hash_table.delete_callback = __hashtbl_delete_callback;
+
+    ASSERT_TRY(ec_hashtbl_init(&hash_table, context));
+
+    // this should fill all available buckets
+    ASSERT_TRY(__add_entry(1, &hash_table, context));
+    ASSERT_TRY(__add_entry(2, &hash_table, context));
+    ASSERT_TRY(__add_entry(3, &hash_table, context));
+
+    TRACE(DL_INFO, "hashtbl contents:");
+    ec_hashtbl_read_for_each(&hash_table, __hashtbl_print_cb, NULL, context);
+
+    count = ec_hashtbl_get_count(&hash_table, context);
+    ASSERT_TRY_MSG(count == 3, "count: %d", count);
+
+    // Increase the activity count for item 1
+    for (i=0; i < 20; i++)
+    {
+        ASSERT_TRY(__check_entry_exists(&hash_table, 1, context));
+    }
+
+    TRACE(DL_INFO, "hashtbl contents after activity:");
+    ec_hashtbl_read_for_each(&hash_table, __hashtbl_print_cb, NULL, context);
+
+    // Add a new entry
+    ASSERT_TRY(__add_entry(4, &hash_table, context));
+
+    // Item 1 should have been moved to the top of the list and should not have been evicted
+    ASSERT_TRY(__check_entry_exists(&hash_table, 1, context));
+
+    passed = true;
+
+CATCH_DEFAULT:
+    ec_hashtbl_destroy(&hash_table, context);
+    return passed;
+}
+
+bool __init test__hashtbl_lru_many_buckets(ProcessContext *context)
+{
+    bool passed = false;
+    HashTbl hash_table = HASH_TBL_INIT();
+    int i, count;
+    int key = 0;
+
+    hash_table.numberOfBuckets = 2;
+    hash_table.lruSize = 3;
+    hash_table.delete_callback = __hashtbl_delete_callback;
+
+    ASSERT_TRY(ec_hashtbl_init(&hash_table, context));
+
+    // fill all available buckets
+    for (i=0; i < hash_table.numberOfBuckets * hash_table.lruSize; i++)
+    {
+        ASSERT_TRY(__add_entry(key++, &hash_table, context));
+    }
+
+    TRACE(DL_INFO, "hashtbl contents:");
+    ec_hashtbl_read_for_each(&hash_table, __hashtbl_print_cb, NULL, context);
+
+    ASSERT_TRY(__add_entry(100, &hash_table, context));
+
+    count = ec_hashtbl_get_count(&hash_table, context);
+    ASSERT_TRY_MSG(count <= hash_table.numberOfBuckets * hash_table.lruSize, "count: %d", count);
+
+    // The last item added should not have been replaced
+    ASSERT_TRY(__check_entry_exists(&hash_table, key - 1, context));
+
+    for (i=1; i < hash_table.numberOfBuckets * hash_table.lruSize; i++)
+    {
+        ASSERT_TRY(__add_entry(100 + i, &hash_table, context));
+    }
+
+    TRACE(DL_INFO, "Done with second additions");
+
+    passed = true;
+
+CATCH_DEFAULT:
+    ec_hashtbl_destroy(&hash_table, context);
     return passed;
 }
 

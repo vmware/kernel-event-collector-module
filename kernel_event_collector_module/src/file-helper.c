@@ -131,7 +131,7 @@ PathData *ec_file_get_path_data(
             // We have a file, so use the path from that
             path_lookup->path = &path_lookup->file->f_path;
         }
-        // ec_file_get_path() uses dpath which builds the path efficently
+        // ec_file_get_path() uses dpath which builds the path efficiently
         //  by walking back to the root. It starts with a string terminator
         //  in the last byte of the target buffer.
         //

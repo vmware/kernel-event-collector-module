@@ -28,6 +28,7 @@ typedef struct path_query
 } PathQuery;
 
 extern uint32_t g_file_path_buckets;
+extern bool g_enable_path_cache;
 
 bool ec_path_cache_init(ProcessContext *context);
 void ec_path_cache_shutdown(ProcessContext *context);
