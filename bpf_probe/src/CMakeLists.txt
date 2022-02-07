@@ -56,6 +56,7 @@ if (NOT ${LOCAL_BUILD})
             CONAN_PKG::llvm
             CONAN_LIB::elfutils_elf
             -Wl,--no-whole-archive
+            CONAN_PKG::Boost
 
             z rt dl pthread m
             )
@@ -67,6 +68,7 @@ else()
         dl
         pthread
         m
+        boost
     )
 endif()
 

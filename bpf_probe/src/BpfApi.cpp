@@ -17,9 +17,11 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <chrono>
+#include <boost/filesystem.hpp>
 
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
+namespace fs = boost::filesystem;
 
 #define DEBUG_ORDER(BLOCK)
 //#define DEBUG_ORDER(BLOCK) BLOCK while(0)
@@ -48,7 +50,7 @@ void BpfApi::CleanBuildDir()
 {
     // delete the contents of the directory /var/tmp/bcc
     // resolves DSEN-13711
-    IGNORE_UNUSED_RETURN_VALUE(system("rm -rf /var/tmp/bcc"));
+    IGNORE_UNUSED_RETURN_VALUE(fs::remove_all("/var/tmp/bcc"));
 }
 
 bool BpfApi::Init(const std::string & bpf_program)
