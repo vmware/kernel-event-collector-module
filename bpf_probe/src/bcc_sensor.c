@@ -103,7 +103,9 @@ static long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr)
 #define CACHE_UDP
 
 struct mnt_namespace {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 	atomic_t count;
+#endif
 	struct ns_common ns;
 };
 
