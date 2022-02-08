@@ -379,9 +379,13 @@ typedef struct _CB_RESOLVED_SYMS {
     CB_RESOLV_SYMBOLS
 } CB_RESOLVED_SYMS;
 
-#undef _C
 // checkpatch-no-ignore: COMPLEX_MACRO,MULTISTATEMENT_MACRO_USE_DO_WHILE,TRAILING_SEMICOLON
 
+// Define the actual storage varaible
+extern CB_RESOLVED_SYMS g_resolvedSymbols;
+#define INIT_CB_RESOLVED_SYMS()   CB_RESOLVED_SYMS g_resolvedSymbols = {0}
+
+#undef _C
 
 // Create a node to hold the event
 typedef struct _CB_EVENT_NODE {
@@ -391,10 +395,6 @@ typedef struct _CB_EVENT_NODE {
     uint16_t           payload; // precomputed size of event data to be sent to userspace
     void              *process_data;
 } CB_EVENT_NODE;
-
-// Define the actual storage varaible
-extern CB_RESOLVED_SYMS g_resolvedSymbols;
-#define INIT_CB_RESOLVED_SYMS()   CB_RESOLVED_SYMS g_resolvedSymbols = {0}
 
 // Helpers
 
