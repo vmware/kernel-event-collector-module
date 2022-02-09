@@ -117,7 +117,7 @@ PathData *ec_task_get_path_data(struct task_struct const *task, char *path_buffe
     if (path_data && !path_data->path_found)
     {
         // If we did not find a path, set in now.
-        path_data->path = ec_mem_strdup(task->comm, context);
+        path_data->path = ec_mem_memdup(task->comm, TASK_COMM_LEN, context);
     }
 
     return path_data;

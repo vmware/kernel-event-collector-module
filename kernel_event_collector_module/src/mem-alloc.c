@@ -7,6 +7,8 @@
 #include "percpu-util.h"
 #include "cb-test.h"
 
+char *__ec_mem_strdup(const char *src, size_t size_in, ProcessContext *context);
+
 static struct
 {
     struct percpu_counter generic_buffer_count;
@@ -225,27 +227,39 @@ size_t ec_mem_size(const void *value)
 
 char *ec_mem_strdup(const char *src, ProcessContext *context)
 {
-    return ec_mem_strdup_x(src, NULL, context);
+    return __ec_mem_strdup(src, 0, context);
 }
 
-char *ec_mem_strdup_x(const char *src, size_t *size, ProcessContext *context)
+char *ec_mem_memdup(const char *src, size_t size, ProcessContext *context)
+{
+    return __ec_mem_strdup(src, size, context);
+}
+
+char *__ec_mem_strdup(const char *src, size_t size_in, ProcessContext *context)
 {
     char *dest = NULL;
+    size_t len = size_in;
 
     if (src)
     {
-        size_t len = strlen(src);
+        if (size_in == 0)
+        {
+            // If we were not provided a size_in, calculate the string length
+            len = strlen(src);
+        }
 
+        // Allocate memory to hold the data we want to copy and add an extra character for a NULL termination.
         dest = ec_mem_alloc(len + 1, context);
         if (dest)
         {
-            dest[0] = 0;
-            strncat(dest, src, len);
-
-            if (size)
-            {
-                *size = len + 1;
-            }
+            // This covers two possible cases for us.
+            //  1. The is a NULL terminated string that we are duplicating.  In this case we calculated 'len' from the
+            //     string length.
+            //  2. We were provided a size at input which may not be null terminated.
+            //
+            //  For both cases we set the last character to NULL to be safe.
+            memcpy(dest, src, len);
+            dest[len] = 0;
         }
     }
     return dest;
