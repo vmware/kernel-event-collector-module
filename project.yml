@@ -2,15 +2,11 @@
 # Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
 # Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
-source-version: ${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}
+source-version: ${SHARED_COMPONENT_VERSION}
 builder: centos6
 builders:
     - gcc73-relwithdebinfo
 service-env:
-    MAJOR_VERSION: 2
-    MINOR_VERSION: 4
-    PATCH_VERSION: ${BUILD_VERSION}
-
     PROJECT_VERSION:     ${SOURCE_VERSION}
     UTIL_DIR:            /src/util
     JOBS:                1
