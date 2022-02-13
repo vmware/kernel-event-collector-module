@@ -73,19 +73,19 @@ bool __init test__hook_tracking_add_del(ProcessContext *context)
 
     g_enable_hook_tracking = true;
 
-    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 0);
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking.count) == 0);
 
     ec_hook_tracking_add_entry(&test_context, __func__);
 
-    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 1);
-    ASSERT_TRY(test_context.percpu_hook_tracking->last_pid == current_pid);
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking.count) == 1);
+    ASSERT_TRY(test_context.hook_tracking.last_pid == current_pid);
 
     // This is here to exercise this code since there's no easy way to force it to run.
     ec_hook_tracking_print_active(&test_context);
 
     ec_hook_tracking_del_entry(&test_context);
 
-    ASSERT_TRY(atomic64_read(&test_context.percpu_hook_tracking->count) == 0);
+    ASSERT_TRY(atomic64_read(&test_context.hook_tracking.count) == 0);
 
     passed = true;
 
