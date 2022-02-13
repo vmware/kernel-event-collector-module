@@ -56,7 +56,7 @@ typedef struct process_context {
     bool             allow_send_events;
     struct list_head list;
     bool             decr_active_call_count_on_exit;
-    HookTracking     *percpu_hook_tracking;
+    HookTracking     hook_tracking;
 } ProcessContext;
 
 #define __CONTEXT_INITIALIZER(NAME, MODE, PID) {                               \
@@ -66,13 +66,11 @@ typedef struct process_context {
     .allow_wake_up         = true,                                             \
     .allow_send_events     = true,                                             \
     .decr_active_call_count_on_exit = false,                                   \
-    .percpu_hook_tracking = _safe_percpu_ptr(&hook_tracking)                   \
 }
 
 #define CB_ATOMIC        (GFP_ATOMIC | GFP_NOWAIT)
 
 #define DECLARE_CONTEXT(name, mode, pid)                               \
-    static DEFINE_PER_CPU(HookTracking, hook_tracking);                \
     ProcessContext name = __CONTEXT_INITIALIZER(name, mode, pid)
 
 #define DECLARE_ATOMIC_CONTEXT(name, pid) DECLARE_CONTEXT(name, CB_ATOMIC, pid)
