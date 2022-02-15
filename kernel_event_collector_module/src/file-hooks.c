@@ -113,9 +113,10 @@ CATCH_DEFAULT:
 
 void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYPE eventType)
 {
-    FILE_PROCESS_VALUE *fileProcess    = NULL;
-    pid_t               pid            = ec_getpid(current);
-    bool                doClose        = false;
+    FILE_PROCESS_VALUE *fileProcess = NULL;
+    pid_t              pid          = ec_getpid(current);
+    bool               doClose      = false;
+    PathData           *path_data   = NULL;
 
     CANCEL_VOID(file);
     CANCEL_VOID(!ec_banning_IgnoreProcess(context, pid));
@@ -147,15 +148,18 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             //  ec_file_process_status_close until later.
             doClose = true;
         }
+
+        path_data = ec_path_cache_get(fileProcess->path_data, context);
     } else //status == CLOSED
     {
-        PathData *path_data = NULL;
         struct path_lookup path_lookup = {
             .file = file,
             .ignore_spcial = true,
         };
 
-        TRY(eventType == CB_EVENT_TYPE_FILE_WRITE || eventType == CB_EVENT_TYPE_FILE_CREATE);
+        TRY(eventType == CB_EVENT_TYPE_FILE_WRITE
+            || eventType == CB_EVENT_TYPE_FILE_CREATE
+            || eventType == CB_EVENT_TYPE_FILE_OPEN);
 
         // If this file is deleted already, then just skip it
         TRY(!d_unlinked(file->f_path.dentry));
@@ -163,12 +167,15 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
         path_data = ec_file_get_path_data(&path_lookup, context);
         TRY(path_data);
 
-        fileProcess = ec_file_process_status_open(
-            file,
-            pid,
-            path_data,
-            context);
-        ec_path_cache_put(path_data, context);
+        // Do not track if this is an open/read, otherwise a last-write will be issued when we see the close event
+        if (eventType != CB_EVENT_TYPE_FILE_OPEN)
+        {
+            fileProcess = ec_file_process_status_open(
+                file,
+                pid,
+                path_data,
+                context);
+        }
 
         if (fileProcess)
         {
@@ -198,28 +205,29 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
         }
     }
 
-    TRY(fileProcess);
-    if (fileProcess->path_data->path)
+    TRY(path_data);
+    if (path_data->path)
     {
         // Check to see if the process is tracked already
         ProcessHandle *process_handle = ec_process_tracking_get_handle(pid, context);
 
         TRY(process_handle);
 
-        if (fileProcess->path_data->path[0] == '/')
+        if (path_data->path[0] == '/')
         {
             //
             // Log it
             //
-            if (!fileProcess->path_data->is_special_file)
+            if (!path_data->is_special_file
+                && (eventType != CB_EVENT_TYPE_FILE_OPEN || ec_process_exec_identity(process_handle)->is_interpreter))
             {
                 ec_event_send_file(
                     process_handle,
                     eventType,
-                    fileProcess->path_data,
+                    path_data,
                     context);
             }
-        } else if (fileProcess->path_data->path[0] == '[' && eventType == CB_EVENT_TYPE_FILE_WRITE)
+        } else if (path_data->path[0] == '[' && eventType == CB_EVENT_TYPE_FILE_WRITE)
         {
             // CEL This is a noop as we can see [eventfd] on a write and we don't care about it
         } else if (eventType == CB_EVENT_TYPE_FILE_CLOSE)
@@ -227,7 +235,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
             ec_event_send_file(
                 process_handle,
                 eventType,
-                fileProcess->path_data,
+                path_data,
                 context);
         } else
         {
@@ -237,6 +245,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
     }
 
 CATCH_DEFAULT:
+    ec_path_cache_put(path_data, context);
     ec_file_process_put_ref(fileProcess, context);
     if (doClose)
     {
