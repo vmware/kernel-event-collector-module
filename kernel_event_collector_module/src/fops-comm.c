@@ -745,7 +745,7 @@ int ec_device_release(struct inode *inode, struct file *filp)
 
     if (!ec_disconnect_reader(pid, &context))
     {
-        TRACE(DL_WARNING, "%s: refusing to disconnect from pid[%d]; reader_pid[%d]", __func__, ec_getpid(current), s_fops_config.reader_pid);
+        TRACE(DL_INFO, "%s: refusing to disconnect from pid[%d]; reader_pid[%d]", __func__, ec_getpid(current), s_fops_config.reader_pid);
         return -ECONNREFUSED;
     }
 
