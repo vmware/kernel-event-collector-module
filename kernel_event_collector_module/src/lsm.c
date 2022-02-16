@@ -158,7 +158,7 @@ void ec_do_lsm_shutdown(ProcessContext *context)
         g_lsmRegistered = false;
     } else
     {
-        TRACE(DL_WARNING, "ec_LSM not registered so not unregistering");
+        TRACE(DL_INFO, "ec_LSM not registered so not unregistering");
     }
 }
 
