@@ -467,7 +467,7 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
     CB_EVENT_NODE *eventNode = NULL;
     int xcode = -ENOMEM;
 
-    TRY_MSG(count >= sizeof(struct CB_EVENT_UM),
+    TRY_STEP_MSG(UNLOCKED, count >= sizeof(struct CB_EVENT_UM),
             DL_ERROR, "%s count too small: %zu, %zu", __func__, count, sizeof(struct CB_EVENT_UM));
 
     // We need to lock here to protect access between the event reader thread and user action to clear the queue
@@ -496,6 +496,8 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
 
 CATCH_DEFAULT:
     ec_write_unlock(&s_fops_data.lock, context);
+
+CATCH_UNLOCKED:
     return xcode;
 }
 
