@@ -169,6 +169,7 @@ static struct  fops_config_t
 
 static struct fops_data_t
 {
+    uint64_t               lock;
     CB_EVENT_STATS         event_stats;
 } s_fops_data;
 
@@ -243,6 +244,8 @@ bool ec_user_comm_initialize(ProcessContext *context)
 {
     size_t kernel_mem;
 
+    ec_spinlock_init(&s_fops_data.lock, context);
+
     current_stat = 0;
     valid_stats  = 0;
     ec_percpu_counter_init(&tx_ready, 0, GFP_MODE(context));
@@ -309,6 +312,7 @@ void ec_user_comm_shutdown(ProcessContext *context)
     cancel_delayed_work_sync(&s_fops_config.stats_work);
 
     percpu_counter_destroy(&tx_ready);
+    ec_spinlock_destroy(&s_fops_data.lock, context);
 }
 
 bool ec_user_comm_enable(ProcessContext *context)
@@ -351,7 +355,14 @@ void ec_user_comm_clear_queue(ProcessContext *context)
     // Clearing the queue can trigger sending an exit event which will hang when ec_send_event
     // locks this same lock. Since we're clearing the queue we don't need to send exit events.
     DISABLE_SEND_EVENTS(context);
+
+    // We need to lock here to protect access between the event reader thread and user action to clear the queue
+    //  1) Events are inserted into the a lockless list, so they are not affected by this lock.
+    //  2) If we do not lock, the two threads can race to access the same list of events
+    ec_write_lock(&s_fops_data.lock, context);
     __ec_clear_tx_queue(context);
+
+    ec_write_unlock(&s_fops_data.lock, context);
     ENABLE_SEND_EVENTS(context);
 }
 
@@ -459,6 +470,10 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
     TRY_MSG(count >= sizeof(struct CB_EVENT_UM),
             DL_ERROR, "%s count too small: %zu, %zu", __func__, count, sizeof(struct CB_EVENT_UM));
 
+    // We need to lock here to protect access between the event reader thread and user action to clear the queue
+    //  1) Events are inserted into the a lockless list, so they are not affected by this lock.
+    //  2) If we do not lock, the two threads can race to access the same list of events
+    ec_write_lock(&s_fops_data.lock, context);
     __ec_transfer_from_input_queue();
 
     eventNode = list_first_entry_or_null(&msg_queue, CB_EVENT_NODE, listEntry);
@@ -480,6 +495,7 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
     percpu_counter_dec(&tx_ready);
 
 CATCH_DEFAULT:
+    ec_write_unlock(&s_fops_data.lock, context);
     return xcode;
 }
 
