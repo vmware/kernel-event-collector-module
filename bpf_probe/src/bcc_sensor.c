@@ -591,7 +591,7 @@ out:
 #endif
 
 #ifndef MAX_PATH_ITER
-#define MAX_PATH_ITER 24
+#define MAX_PATH_ITER 100
 #endif
 static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 				 struct vfsmount *mnt, struct path_data *data)
