@@ -1,5 +1,4 @@
 name: BpfProbe
-builder: centos7
 packagers:
     - cmake
 file-replacements:
