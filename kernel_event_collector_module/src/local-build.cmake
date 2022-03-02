@@ -21,7 +21,15 @@ endif()
 
 function(do_build_kernel_module)
     set(KERNEL_VERSION "${KERNEL_NAME}")
-    set(KERNEL_BUILD_DIR "/lib/modules/${KERNEL_NAME}/build")
+
+    # KERNEL_HEADER_PATH defines whether the build uses a custom path to find the
+    # kernel and its headers
+    if(NOT KERNEL_HEADER_PATH)
+        set(KERNEL_BUILD_DIR "/lib/modules/${KERNEL_NAME}/build")
+    else() 
+        set(KERNEL_BUILD_DIR "${KERNEL_HEADER_PATH}/build")
+    endif() 
+
     message(MODULE_NAME=${MODULE_NAME}, KERNEL_NAME=${KERNEL_NAME})
     message(KERNEL_VERSION=${KERNEL_VERSION})
     message(KERNEL_BUILD_PATH=${KERNEL_BUILD_PATH})
