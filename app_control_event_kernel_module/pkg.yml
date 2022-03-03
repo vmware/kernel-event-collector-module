@@ -1,4 +1,5 @@
 name: DynSec
+builder: centos6
 allow-sub-docker-builds:
 file-replacements:
     CONAN_UTIL_VERSION:
