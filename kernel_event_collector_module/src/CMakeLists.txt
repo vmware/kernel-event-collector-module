@@ -117,7 +117,8 @@ set(SOURCE_FILES drvmain.c
         tests/hashtabl-tests.c
         tests/process-tracking-tests.c
         tests/module-state-tests.c
-        tests/comms-tests.c)
+        tests/comms-tests.c
+        tests/path-tests.c)
 
 file(GLOB HEADER_FILES *.h ../include/*.h tests/*.h)
 

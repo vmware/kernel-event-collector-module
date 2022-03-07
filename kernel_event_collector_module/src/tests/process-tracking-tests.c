@@ -4,6 +4,7 @@
 #include "run-tests.h"
 
 bool __init test__proc_track_report_double_exit(ProcessContext *context);
+bool __init test__sys_clone_missing_parent(ProcessContext *context);
 
 bool __init test__proc_tracking(ProcessContext *context)
 {
@@ -11,6 +12,7 @@ bool __init test__proc_tracking(ProcessContext *context)
 
     // This test is causing a crash after refactoring.  I believe it is not setting something up correctly on the fake path
     //RUN_TEST(test__proc_track_report_double_exit(context));
+    RUN_TEST(test__sys_clone_missing_parent(context));
 
     RETURN_RESULT();
 }
@@ -55,6 +57,36 @@ CATCH_DEFAULT:
         ec_process_tracking_remove_process(handle, context);
         ec_process_tracking_put_handle(handle, context);
     }
+
+    return passed;
+}
+
+bool __init test__sys_clone_missing_parent(ProcessContext *context)
+{
+    bool passed = false;
+    struct task_struct *task = current;
+    pid_t pid = ec_getpid(task);
+    pid_t ppid = ec_getppid(task);
+
+    ASSERT_TRY(!ec_is_process_tracked(pid, context));
+    ASSERT_TRY(!ec_is_process_tracked(ppid, context));
+
+    DISABLE_WAKE_UP(context);
+
+    // This simulates ec_sys_clone being called during a fork with a missing parent process and verifies the process
+    // and parent get tracked.
+    // We had a problem where, since the fork hook disables wakeup we would fail to allocate a PathData, then fail
+    // to track the process.
+    ec_sys_clone(context, current);
+
+    ENABLE_WAKE_UP(context);
+
+    ASSERT_TRY(ec_is_process_tracked(pid, context));
+    ASSERT_TRY(ec_is_process_tracked(ppid, context));
+
+    passed = true;
+
+CATCH_DEFAULT:
 
     return passed;
 }
