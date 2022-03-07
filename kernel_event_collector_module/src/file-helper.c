@@ -111,10 +111,7 @@ PathData *ec_file_get_path_data(
 
     path_data = ec_path_cache_find(&query, context);
 
-    // PSCLNX-5220
-    //  If we are in the clone hook it is possible for the ec_task_get_path functon
-    //  to schedule. (Softlock!)  Do not lookup the path in this case.
-    TRY(ALLOW_WAKE_UP(context) && !path_data && !query.path_ignored);
+    TRY(!path_data);
 
     if (!path_lookup->path_buffer)
     {
@@ -122,7 +119,10 @@ PathData *ec_file_get_path_data(
         owned_path_buffer = path_lookup->path_buffer = ec_get_path_buffer(context);
     }
 
-    if (path_lookup->path_buffer)
+    // PSCLNX-5220
+    //  If we are in the clone hook it is possible for the ec_task_get_path functon
+    //  to schedule. (Softlock!)  Do not lookup the path in this case.
+    if (ALLOW_WAKE_UP(context) && !query.path_ignored && path_lookup->path_buffer)
     {
         bool path_found = false;
 

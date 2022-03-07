@@ -99,7 +99,7 @@ PathData *ec_path_cache_add(
 {
     PathData *value = NULL;
 
-    if (path && !ec_is_ignored_filesystem(fs_magic))
+    if (!ec_is_ignored_filesystem(fs_magic))
     {
         value = ec_hashtbl_alloc(&s_path_cache, context);
         CANCEL(value, NULL);
