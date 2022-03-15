@@ -18,6 +18,7 @@
 #include "symbols.h"
 #include "config.h"
 #include "fs_utils.h"
+#include "protect.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {
@@ -632,6 +633,9 @@ static inline bool may_report_file(const struct file *file)
             if (!S_ISREG(umode)) {
                 return false;
             }
+        } else {
+            // Cannot report a file if there is no inode
+            return false;
         }
 
         if (file->f_path.dentry && file->f_path.dentry->d_sb) {
@@ -830,6 +834,12 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
+    if (dynsec_may_protect_ptrace(parent, current)) {
+        report_flags |= DYNSEC_REPORT_DENIED;
+        report_flags |= DYNSEC_REPORT_HI_PRI;
+        ret = -EPERM;
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_PTRACE, DYNSEC_HOOK_TYPE_PTRACE,
                                report_flags, GFP_ATOMIC);
     if (!fill_in_ptrace(event, parent, current)) {
@@ -867,6 +877,14 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
+
+    // For now skip sending the event when we block ptrace events.
+    // This is more for safety long term, than event reporting.
+    if (dynsec_may_protect_ptrace(current, child)) {
+        ret = -EPERM;
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else if (task_in_connected_tgid(child)) {
@@ -924,6 +942,11 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
     }
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
+    }
+    if (dynsec_may_protect_kill(p, sig)) {
+        report_flags |= DYNSEC_REPORT_DENIED;
+        report_flags |= DYNSEC_REPORT_HI_PRI;
+        ret = -EPERM;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SIGNAL, DYNSEC_HOOK_TYPE_SIGNAL,

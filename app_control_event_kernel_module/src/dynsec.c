@@ -18,6 +18,7 @@
 #include "task_cache.h"
 #include "preaction_hooks.h"
 #include "config.h"
+#include "protect.h"
 
 // Current contains most of possibly enabled LSM hooks
 // except for file CLOSE.
@@ -47,11 +48,15 @@
 static uint32_t process_hooks = DYNSEC_PROCESS_HOOKS;
 
 static char lsm_hooks_str[64];
+
+bool protect_on_connect = false;
+
 // Hooks to only allow for kmod instance. Superset.
 module_param_string(lsm_hooks, lsm_hooks_str,
                     sizeof(lsm_hooks_str), 0644);
 
 module_param(process_hooks, uint, 0644);
+module_param(protect_on_connect, bool, 0644);
 
 // Special Globals
 DEFINE_MUTEX(global_config_lock);
@@ -71,6 +76,7 @@ static void print_config(struct dynsec_config *dynsec_config)
             dynsec_config->lazy_notifier, dynsec_config->queue_threshold,
             dynsec_config->notify_threshold);
     pr_info("dynsec_config: send_files %#x\n", dynsec_config->send_files);
+    pr_info("dynsec_config: protect_mode: %#x\n", dynsec_config->protect_mode);
     pr_info("dynsec_config: lsm_hooks:%#llx process_hooks:%#llx preaction_hooks:%#llx\n",
             dynsec_config->lsm_hooks, dynsec_config->process_hooks,
             dynsec_config->preaction_hooks);
@@ -104,6 +110,9 @@ static int __init dynsec_init(void)
 {
     DS_LOG(DS_INFO, "Initializing Dynamic Security Module Brand(%s)",
            CB_APP_MODULE_NAME);
+
+    // Explicitly enable protection on connect
+    (void)dynsec_protect_init();
 
     setup_lsm_hooks();
 
@@ -144,8 +153,11 @@ static int __init dynsec_init(void)
 
     pr_info("Loaded: %s\n", CB_APP_MODULE_NAME);
     print_config(&global_config);
+
+    lock_config();
     // struct copy the inital copy of the config data
     preserved_config = global_config;
+    unlock_config();
 
     return 0;
 }
@@ -154,6 +166,8 @@ static void __exit dynsec_exit(void)
 {
     DS_LOG(DS_INFO, "Exiting: %s",
            CB_APP_MODULE_NAME);
+
+    dynsec_protect_shutdown();
 
     dynsec_chrdev_shutdown();
 

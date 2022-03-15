@@ -24,6 +24,7 @@
 #include "task_cache.h"
 #include "hooks.h"
 #include "config.h"
+#include "protect.h"
 
 static dev_t g_maj_t;
 static int maj_no;
@@ -102,8 +103,15 @@ static int dynsec_stall_open(struct inode *inode, struct file *file)
         return -EPERM;
     }
 
+    lock_config();
+    // Reset back to default settings but locked
+    global_config = preserved_config;
+
+    (void)handle_protect_on_open(current);
+
     // Add tgid to exceptions ??
     stall_tbl_enable(stall_tbl);
+    unlock_config();
 
     ret = nonseekable_open(inode, file);
 
@@ -225,6 +233,7 @@ static int dynsec_stall_release(struct inode *inode, struct file *file)
     stall_tbl_disable(stall_tbl);
     task_cache_clear();
     inode_cache_clear();
+    dynsec_protect_shutdown();
 
     // Reset back to default settings
     global_config = preserved_config;
@@ -423,6 +432,7 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
             stall_tbl_disable(stall_tbl);
             task_cache_disable();
             inode_cache_disable();
+            dynsec_disable_protect();
         } else {
             stall_tbl_enable(stall_tbl);
             task_cache_enable();
@@ -544,6 +554,14 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         }
         unlock_config();
         break;
+
+    case DYNSEC_IOC_PROTECT: {
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+        ret = handle_protect_ioc(arg);
+        break;
+    }
 
     default:
         break;

@@ -29,6 +29,7 @@ extern struct dynsec_config preserved_config __read_mostly;
     .queue_threshold = DEFAULT_QUEUE_WATERMARK, \
     .notify_threshold = DEFAULT_NOTIFY_WATERMARK, \
     .send_files = DEFAULT_DISABLED, \
+    .protect_mode = DEFAULT_DISABLED, \
     .lsm_hooks = DYNSEC_LSM_HOOKS, \
     .process_hooks = DYNSEC_PROCESS_HOOKS, \
     .preaction_hooks = 0, \
@@ -51,3 +52,4 @@ extern struct dynsec_config preserved_config __read_mostly;
 #define get_notify_threshold() (global_config.notify_threshold)
 #define get_queue_threshold() (global_config.queue_threshold)
 #define get_wait_timeout() (global_config.stall_timeout)
+#define protect_mode_enabled() (global_config.protect_mode != DEFAULT_DISABLED)
