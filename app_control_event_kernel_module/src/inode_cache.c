@@ -43,7 +43,7 @@ struct inode_cache {
 
 static struct inode_cache *inode_cache = NULL;
 
-int debug_inode_cache = 1;
+int debug_inode_cache = 0;
 
 static inline u32 inode_hash(struct inode_key *key, u32 secret)
 {

@@ -4,6 +4,14 @@
 #pragma once
 #include <linux/ioctl.h>
 
+#ifndef PATH_MAX
+#ifdef __KERNEL__
+#include <linux/limits.h>
+#else
+#include <limits.h>
+#endif
+#endif /* ! PATH_MAX */
+
 #define DYNSEC_HOOK_TYPE_EXEC       0x00000001
 #define DYNSEC_HOOK_TYPE_RENAME     0x00000002
 #define DYNSEC_HOOK_TYPE_UNLINK     0x00000004
@@ -36,8 +44,8 @@
 #define DYNSEC_REPORT_AUDIT         0x0004
 // Event did not stall due to a cache option
 #define DYNSEC_REPORT_CACHED        0x0008
-// Unused
-#define DYNSEC_REPORT_TP            0x0010
+// Event Denied. Decision made within kernel module.
+#define DYNSEC_REPORT_DENIED        0x0010
 // Event came from a the client
 #define DYNSEC_REPORT_SELF          0x0020
 // Used to determine importance on queue and wake_up usage
@@ -413,6 +421,10 @@ struct dynsec_task_dump_umsg {
 #define DYNSEC_IO_STALL_TIMEOUT_MS _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 8)
 // Set options for sending files on open events
 #define DYNSEC_IOC_SEND_FILE       _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 9)
+// Operation to request
+#define DYNSEC_IOC_PROTECT         _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 10)
+
+
 // May want a request to print out what kernel objects
 // that are blocking a clean rmmod.
 
@@ -424,12 +436,12 @@ struct dynsec_task_dump_hdr {
     // size - payload of userspace buffer and itself. And
     //      assumes offset to userspace buffer is after header.
     uint16_t size;
-    pid_t pid;
 
 // Optionally request the next matching thread or process
 #define DUMP_NEXT_THREAD 0x0001
 #define DUMP_NEXT_TGID   0x0002
     uint16_t opts;
+    pid_t pid;
 };
 
 // Base Payload for DYNSEC_IOC_TASK_DUMP
@@ -453,6 +465,31 @@ struct dynsec_task_dump_all {
     struct dynsec_task_dump_hdr hdr;
 };
 
+struct dynsec_match {
+#define DYNSEC_MATCHING_PATH_EQ             0x00000001
+#define DYNSEC_MATCHING_PATH_CONTAINS       0x00000002
+#define DYNSEC_MATCHING_PATH_STARTS_WITH    0x00000004
+#define DYNSEC_MATCHING_PATH_ENDS_WITH      0x00000008
+#define DYNSEC_MATCHING_MAY_SIGNAL_CLIENT   0x00010000
+    uint64_t match_flags;
+
+    union {
+        char path[PATH_MAX];
+    };
+};
+
+struct dynsec_protect_ioc_hdr {
+    uint16_t size;
+#define DYNSEC_PROTECT_DISABLE  0x0001
+// CLEAR only valid if DISABLE bit set or protect mode already disabled.
+#define DYNSEC_PROTECT_CLEAR    0x0002
+// When ADD set, size must be:
+//     sizeof(struct dynsec_protect_ioc_hdr) + sizeof(struct dynsec_match).
+#define DYNSEC_PROTECT_ADD      0x0004
+#define DYNSEC_PROTECT_ENABLE   0x0008
+    uint16_t protect_flags;
+};
+
 // Eventually will contain mix of global
 // and per-client settings and state of kmod.
 struct dynsec_config {
@@ -472,6 +509,9 @@ struct dynsec_config {
 
     // Option to send files to client reading events.
     uint32_t send_files;
+
+    // Protect a connected client and secondary applications.
+    uint32_t protect_mode;
 
     // Available hooks. Currently Immutable.
     uint64_t lsm_hooks;

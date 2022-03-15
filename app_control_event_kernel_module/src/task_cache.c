@@ -56,7 +56,7 @@ struct task_cache {
 
 static struct task_cache *task_cache = NULL;
 
-int debug_task_cache = 1;
+int debug_task_cache = 0;
 
 static inline u32 task_hash(struct task_key *key, u32 secret)
 {

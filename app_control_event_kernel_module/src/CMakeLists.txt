@@ -150,6 +150,8 @@ set(SOURCE_FILES
     stall_reqs.h
     stall_tbl.c
     stall_tbl.h
+    protect.c
+    protect.h
     path_utils.c
     path_utils.h
     task_utils.c
