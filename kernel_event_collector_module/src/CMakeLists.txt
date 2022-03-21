@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+# Copyright (c) 2019-2022 VMware, Inc. All rights reserved.
 # Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 cmake_minimum_required(VERSION 3.12)
@@ -13,6 +13,10 @@ if(NOT DEFINED LOCAL_BUILD)
     include(cb-build.cmake)
 else()
     include(local-build.cmake)
+endif()
+
+if(NOT DEFINED KERNEL_HEADER_PATH)
+    set(KERNEL_HEADER_PATH no)
 endif()
 
 include(constants.cmake)
