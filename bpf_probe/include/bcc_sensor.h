@@ -129,4 +129,26 @@ namespace bpf_probe {
         uint64_t old_inode, new_inode;
         uint32_t old_device, new_device;
     };
+
+    // UDP Hashtable Fields
+    struct ip_key {
+        uint32_t pid;
+        uint16_t remote_port;
+        uint16_t local_port;
+        uint32_t remote_addr;
+        uint32_t local_addr;
+    };
+    struct ip6_key {
+        uint32_t pid;
+        uint16_t remote_port;
+        uint16_t local_port;
+        uint32_t remote_addr6[4];
+        uint32_t local_addr6[4];
+    };
+
+    static const uint8_t FLOW_TX = 0x01;
+    static const uint8_t FLOW_RX = 0x02;
+    struct ip_entry {
+        uint8_t flow;
+    };
 }}

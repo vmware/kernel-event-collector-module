@@ -78,6 +78,13 @@ namespace tdd_mock {
         {
         }
 
+        bool IsLRUCapable() const override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
         bool AttachProbe(const char * name,
                                       const char * callback,
                                       ProbeType    type) override
@@ -99,6 +106,51 @@ namespace tdd_mock {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
             return ::mock(BPF_API_SCOPE).intReturnValue();
+        }
+
+        bool ClearUDPCache4() override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool ClearUDPCache6() override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool InsertUDPCache4(const bpf_probe::ip_key &key,
+                             const bpf_probe::ip_entry &value) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
+                                  bpf_probe::ip_entry &value) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool GetEntryUDPCache4(const uint32_t &pid,
+                               bpf_probe::ip_key &value) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
     };
 }
