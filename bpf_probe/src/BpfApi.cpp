@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0
 
 #include "BpfApi.h"
+#include "bcc_sensor.h"
 
 /* Building directly with cmake will expect these libraries in the default
  * locations associated with bcc, but building with the internal CB build
@@ -17,6 +18,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <chrono>
+#include <exception>
 #include <boost/filesystem.hpp>
 
 using namespace cb_endpoint::bpf_probe;
@@ -39,6 +41,7 @@ BpfApi::BpfApi()
     , m_timestamp_last(0)
     , m_event_count(0)
     , m_did_leave_events(false)
+    , m_has_lru_hash(false)
 {
 }
 
@@ -75,6 +78,22 @@ bool BpfApi::Init(const std::string & bpf_program)
         m_ErrorMessage = result.msg();
     }
 
+    if (result.ok())
+    {
+        // A compile time BPF program will create map "has_lru".
+        // Should throw invalid_argument if not found or wrong map type.
+        try
+        {
+            m_BPF->get_array_table<uint32_t>("has_lru");
+
+            m_has_lru_hash = true;
+        }
+        catch (std::invalid_argument &ia)
+        {
+            m_has_lru_hash = false;
+        }
+    }
+
     return result.ok();
 }
 
@@ -88,6 +107,17 @@ void BpfApi::Reset()
     }
 }
 
+// Used for telling us how we mapped keys and value pairs
+// for hashtables used like caches.
+bool BpfApi::IsLRUCapable() const
+{
+    if (!m_BPF)
+    {
+        return false;
+    }
+
+    return m_has_lru_hash;
+}
 
 // When we need to lower kptr_restrict we only have to do it once.
 // Alternatively we could manually guess what the name of the syscall prefix
@@ -422,4 +452,196 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
         memcpy(data, orig_data, data_size);
         bpfApi->OnEvent(static_cast<bpf_probe::data *>(data));
     }
+}
+
+
+bool BpfApi::ClearUDPCache4()
+{
+    bool okay = false;
+
+    if (!m_BPF)
+    {
+        return false;
+    }
+
+    if (IsLRUCapable())
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
+                                                  bpf_probe::ip_entry>("ip_cache");
+            auto result = udp_cache.clear_table_non_atomic();
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+    else
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<uint32_t,
+                                                   bpf_probe::ip_key>("ip_cache");
+            auto result = udp_cache.clear_table_non_atomic();
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+
+    return okay;
+}
+
+bool BpfApi::ClearUDPCache6()
+{
+    bool okay = false;
+
+    if (!m_BPF)
+    {
+        return false;
+    }
+
+    if (IsLRUCapable())
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip6_key,
+                                                   bpf_probe::ip_entry>("ip6_cache");
+            auto result = udp_cache.clear_table_non_atomic();
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+    else
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<uint32_t,
+                                                   bpf_probe::ip6_key>("ip6_cache");
+            auto result = udp_cache.clear_table_non_atomic();
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+
+    return okay;
+}
+
+bool BpfApi::InsertUDPCache4(const bpf_probe::ip_key &key,
+                             const bpf_probe::ip_entry &value)
+{
+    bool okay = false;
+
+    if (IsLRUCapable())
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
+                                                   bpf_probe::ip_entry>("ip_cache");
+            auto result = udp_cache.update_value(key, value);
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+    else
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<uint32_t,
+                                                   bpf_probe::ip_key>("ip_cache");
+            auto result = udp_cache.update_value(key.pid, key);
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+
+    return okay;
+}
+
+bool BpfApi::RemoveEntryUDPCache4(const bpf_probe::ip_key &key)
+{
+    bool okay = false;
+
+    if (IsLRUCapable())
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
+                                                   bpf_probe::ip_entry>("ip_cache");
+            auto result = udp_cache.remove_value(key);
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+    else
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<uint32_t,
+                                                   bpf_probe::ip_key>("ip_cache");
+            auto result = udp_cache.remove_value(key.pid);
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+
+    return okay;
+}
+
+bool BpfApi::GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
+                                  bpf_probe::ip_entry &value)
+{
+    bool okay = false;
+
+    if (IsLRUCapable())
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
+                                                   bpf_probe::ip_entry>("ip_cache");
+            auto result = udp_cache.get_value(key, value);
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+
+    return okay;
+}
+
+bool BpfApi::GetEntryUDPCache4(const uint32_t &pid,
+                               bpf_probe::ip_key &value)
+{
+    bool okay = false;
+
+    if (!IsLRUCapable())
+    {
+        try
+        {
+            auto udp_cache = m_BPF->get_hash_table<uint32_t,
+                                                   bpf_probe::ip_key>("ip_cache");
+            auto result = udp_cache.get_value(pid, value);
+            okay = result.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+        }
+    }
+
+    return okay;
 }

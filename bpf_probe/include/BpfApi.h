@@ -74,6 +74,8 @@ namespace bpf_probe {
 
         virtual void Reset() = 0;
 
+        virtual bool IsLRUCapable() const = 0;
+
         virtual bool AttachProbe(
             const char * name,
             const char * callback,
@@ -87,6 +89,21 @@ namespace bpf_probe {
         {
             return m_ErrorMessage;
         }
+
+        virtual bool ClearUDPCache4() = 0;
+
+        virtual bool ClearUDPCache6() = 0;
+
+        virtual bool InsertUDPCache4(const bpf_probe::ip_key &key,
+                                     const bpf_probe::ip_entry &value) = 0;
+
+        virtual bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) = 0;
+
+        virtual bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
+                                          bpf_probe::ip_entry &value) = 0;
+
+        virtual bool GetEntryUDPCache4(const uint32_t &pid,
+                                       bpf_probe::ip_key &value) = 0;
 
         static const char *TypeToString(uint8_t type)
         {
@@ -147,6 +164,7 @@ namespace bpf_probe {
 
         bool Init(const std::string & bpf_program) override;
         void Reset() override;
+        bool IsLRUCapable() const override;
 
         bool AttachProbe(
             const char * name,
@@ -161,6 +179,21 @@ namespace bpf_probe {
         {
             return m_ErrorMessage;
         }
+
+        bool ClearUDPCache4() override;
+
+        bool ClearUDPCache6() override;
+
+        bool InsertUDPCache4(const bpf_probe::ip_key &key,
+                             const bpf_probe::ip_entry &value) override;
+
+        bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override;
+
+        bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
+                                  bpf_probe::ip_entry &value) override;
+
+        bool GetEntryUDPCache4(const uint32_t &pid,
+                               bpf_probe::ip_key &value) override;
 
     private:
 
@@ -193,6 +226,7 @@ namespace bpf_probe {
         uint64_t                    m_timestamp_last;
         uint64_t                    m_event_count;
         bool                        m_did_leave_events;
+        bool                        m_has_lru_hash;
     };
 }
 }

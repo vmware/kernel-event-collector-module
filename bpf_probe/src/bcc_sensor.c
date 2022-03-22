@@ -94,7 +94,9 @@ static long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr)
 #define cb_bpf_probe_read_str bpf_probe_read_str
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
+// Existence of map tells userspace if kernel is LRU map capable
+BPF_ARRAY(has_lru, uint32_t, 1);
 #define FALLBACK_FIELD_TYPE(A, B) A
 #else
 #define FALLBACK_FIELD_TYPE(A, B) B
@@ -786,7 +788,7 @@ static inline void __track_write_entry(
 
 	void *cachep = file_write_cache.lookup(&file_cache_key);
 	if (cachep) {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 		struct file_data_cache cache_data = *((struct file_data_cache *)cachep);
 		pid_t pid = cache_data.pid;
 		cache_data.pid = data->header.pid;
@@ -804,7 +806,7 @@ static inline void __track_write_entry(
 
 		file_write_cache.update(&file_cache_key, &cache_data);
 	} else {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 		struct file_data_cache cache_data = {
 			.pid = data->header.pid,
 			.device = data->device,
@@ -830,7 +832,7 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 		DECLARE_FILE_EVENT(data);
 		__init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 		FILE_DATA(&data)->device = ((struct file_data_cache *)cachep)->device;
 		FILE_DATA(&data)->inode = ((struct file_data_cache *)cachep)->inode;
 #else
@@ -1106,7 +1108,7 @@ BPF_LRU(ip6_cache, FALLBACK_FIELD_TYPE(struct ip6_key, u32),
 
 static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 	struct ip_key *ip_entry = ip_cache.lookup(&ip_key->pid);
 	if (ip_entry) {
 		if (ip_entry->remote_port == ip_key->remote_port &&
@@ -1140,7 +1142,7 @@ static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
 
 static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 	struct ip6_key *ip_entry = ip6_cache.lookup(&ip6_key->pid);
 	if (ip_entry) {
 		if (ip_entry->remote_port == ip6_key->remote_port &&
@@ -1197,6 +1199,8 @@ int on_do_exit(struct pt_regs *ctx, long code)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 	last_parent.delete(&data.header.pid);
+#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 #ifdef CACHE_UDP
 	// Remove burst cache entries
 	//  We only need to do this for older kernels that do not have an LRU
