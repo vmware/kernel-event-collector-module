@@ -69,7 +69,8 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
 
     BPF_RETURN_HOOK("inet_csk_accept", "trace_accept_return"),
 
-    BPF_ENTRY_HOOK ("tcp_sendmsg", "trace_tcp_sendmsg"),
+    // TODO: The collector is not currently handling the proxy event, so dont't bother collecting
+    //BPF_ENTRY_HOOK ("tcp_sendmsg", "trace_tcp_sendmsg"),
 
     BPF_ENTRY_HOOK ("udp_recvmsg", "trace_udp_recvmsg"),
     BPF_RETURN_HOOK("udp_recvmsg", "trace_udp_recvmsg_return"),
@@ -82,6 +83,10 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
 
     BPF_ENTRY_HOOK ("udpv6_sendmsg", "trace_udp_sendmsg"),
     BPF_RETURN_HOOK("udpv6_sendmsg", "trace_udp_sendmsg_return"),
+
+    // Network Event Hooks (only for udp recv event)
+    BPF_OPTIONAL_RETURN_HOOK("__skb_recv_udp",                         "trace_skb_recv_udp"),
+    BPF_ALTERNATE_RETURN_HOOK("__skb_recv_udp", "__skb_recv_datagram", "trace_skb_recv_udp"),
 
     BPF_ENTRY_HOOK("security_inode_rename", "on_security_inode_rename"),
     BPF_ENTRY_HOOK("security_inode_unlink", "on_security_inode_unlink"),
@@ -104,10 +109,6 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
 
     // Container Hooks
     BPF_ENTRY_HOOK("cgroup_attach_task", "on_cgroup_attach_task"),
-
-    // Network Event Hooks (only for udp recv event)
-    BPF_OPTIONAL_RETURN_HOOK("__skb_recv_udp",                         "trace_skb_recv_udp"),
-    BPF_ALTERNATE_RETURN_HOOK("__skb_recv_udp", "__skb_recv_datagram", "trace_skb_recv_udp"),
 
     BPF_ENTRY_HOOK(nullptr,nullptr)
 };
