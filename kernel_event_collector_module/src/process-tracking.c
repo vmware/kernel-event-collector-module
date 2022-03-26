@@ -315,7 +315,7 @@ ProcessHandle *ec_process_tracking_update_process(
             {
                 // if the task has not exited and it is a userspace task then it should
                 // be tracked
-                TRACE(DL_WARNING, "taking fake event path for non-kernel task %d", parent);
+                TRACE(DL_PROC_TRACKING, "taking fake event path for non-kernel task %d", parent);
             } else if (parent)
             {
                 // the fake event path for an exited or kernel thread pretends that the
