@@ -99,44 +99,41 @@ PathData *ec_path_cache_add(
 {
     PathData *value = NULL;
 
-    if (!ec_is_ignored_filesystem(fs_magic))
+    value = ec_hashtbl_alloc(&s_path_cache, context);
+    CANCEL(value, NULL);
+
+    value->key.ns_id = ns_id;
+    value->key.device = device;
+    value->key.inode = inode;
+    value->path = ec_mem_get(path, context);
+    value->path_found = !!path; // It is possible that the path will be NULL now but set later
+    value->file_id = ec_get_current_time(); // Use this as a unique ID
+    value->is_special_file = ec_is_special_file(value->path, ec_mem_size(value->path));
+    value->fs_magic = fs_magic;
+
+    TRACE(DL_FILE, "[%llu:%llu] %s was added to path cache.",
+        value->key.device,
+        value->key.inode,
+        value->path);
+
+    if (g_enable_path_cache && !ec_is_ignored_filesystem(fs_magic))
     {
-        value = ec_hashtbl_alloc(&s_path_cache, context);
-        CANCEL(value, NULL);
-
-        value->key.ns_id = ns_id;
-        value->key.device = device;
-        value->key.inode = inode;
-        value->path = ec_mem_get(path, context);
-        value->path_found = !!path; // It is possible that the path will be NULL now but set later
-        value->file_id = ec_get_current_time(); // Use this as a unique ID
-        value->is_special_file = ec_is_special_file(value->path, ec_mem_size(value->path));
-        value->fs_magic = fs_magic;
-
-        TRACE(DL_FILE, "[%llu:%llu] %s was added to path cache.",
-            value->key.device,
-            value->key.inode,
-            value->path);
-
-        if (g_enable_path_cache)
+        if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
         {
-            if (ec_hashtbl_add_safe(&s_path_cache, value, context) < 0)
-            {
-                PathQuery query = {
-                    .key = {
-                        .inode = inode,
-                        .device = device,
-                        .ns_id = ns_id
-                    },
-                };
+            PathQuery query = {
+                .key = {
+                    .inode = inode,
+                    .device = device,
+                    .ns_id = ns_id
+                },
+            };
 
-                // If the insert failed we free the local reference and get the existing value for the return
-                __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
-                ec_hashtbl_free(&s_path_cache, value, context);
-                value = ec_path_cache_find(&query, context);
-            }
+            // If the insert failed we free the local reference and get the existing value for the return
             __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
+            ec_hashtbl_free(&s_path_cache, value, context);
+            value = ec_path_cache_find(&query, context);
         }
+        __ec_path_cache_print_ref(DL_FILE, __func__, value, context);
     }
 
     return value;
