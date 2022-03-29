@@ -19,29 +19,29 @@ service-env:
     KERNEL_API_VERSION: CB_EVENT_API_2_1
 
     # Imported from cb-vendor
-    CPPUTEST_VERSION: CppUTest/3.8+1048@${DEFAULT_CHANNEL}
-    BOOST_VERSION: Boost/1.74.0+1048@${DEFAULT_CHANNEL}
-    ELFUTILS_VERSION: elfutils/0.174+1048@${DEFAULT_CHANNEL}
-    BCC_VERSION: bcc/0.20.0+1113@${DEFAULT_CHANNEL}
-    LLVM_VERSION: llvm/9.0.1+1048@${DEFAULT_CHANNEL}
+    CPPUTEST_VERSION: CppUTest/3.8+1343@${DEFAULT_CHANNEL}
+    BOOST_VERSION: Boost/1.74.0+1343@${DEFAULT_CHANNEL}
+    ELFUTILS_VERSION: elfutils/0.174+1343@${DEFAULT_CHANNEL}
+    BCC_VERSION: bcc/0.20.0+1343@${DEFAULT_CHANNEL}
+    LLVM_VERSION: llvm/9.0.1+1343@${DEFAULT_CHANNEL}
 
     KERNEL_HEADERS_VERSION: # Note, this is needed here for proper dependency tracking
-    KERNEL_RHEL_7_0_VERSION: Kernel_3.10.0-123.el7.x86_64/cb-1228@re/develop  # 7.0
-    KERNEL_RHEL_7_1_VERSION: Kernel_3.10.0-229.el7.x86_64/cb-1228@re/develop  # 7.1
-    KERNEL_RHEL_7_2_VERSION: Kernel_3.10.0-327.el7.x86_64/cb-1228@re/develop  # 7.2
-    KERNEL_RHEL_7_3_VERSION: Kernel_3.10.0-514.el7.x86_64/cb-1228@re/develop  # 7.3
-    KERNEL_RHEL_7_4_VERSION: Kernel_3.10.0-693.el7.x86_64/cb-1228@re/develop  # 7.4
-    KERNEL_RHEL_7_5_VERSION: Kernel_3.10.0-862.el7.x86_64/cb-1228@re/develop  # 7.5
-    KERNEL_RHEL_7_6_VERSION: Kernel_3.10.0-957.el7.x86_64/cb-1228@re/develop  # 7.6
-    KERNEL_RHEL_7_7_VERSION: Kernel_3.10.0-1062.el7.x86_64/cb-1228@re/develop # 7.7
-    KERNEL_RHEL_7_8_VERSION: Kernel_3.10.0-1127.el7.x86_64/cb-1228@re/develop # 7.8
-    KERNEL_RHEL_7_9_VERSION: Kernel_3.10.0-1160.el7.x86_64/cb-1228@re/develop # 7.9
-    KERNEL_RHEL_8_0_VERSION: Kernel_4.18.0-80.el8.x86_64/cb-1228@re/develop  # 8.0
-    KERNEL_RHEL_8_1_VERSION: Kernel_4.18.0-147.el8.x86_64/cb-1228@re/develop  # 8.1
-    KERNEL_RHEL_8_2_VERSION: Kernel_4.18.0-193.el8.x86_64/cb-1228@re/develop  # 8.2
-    KERNEL_RHEL_8_3_VERSION: Kernel_4.18.0-240.el8.x86_64/cb-1228@re/develop  # 8.3
-    KERNEL_RHEL_8_4_VERSION: Kernel_4.18.0-305.19.1.el8_4.x86_64/cb-1228@re/develop  # 8.4
-    KERNEL_RHEL_8_5_VERSION: Kernel_4.18.0-348.7.1.el8_5.x86_64/cb-1228@re/develop  # 8.5
+    KERNEL_RHEL_7_0_VERSION: Kernel_3.10.0-123.el7.x86_64/cb-1343@re/develop  # 7.0
+    KERNEL_RHEL_7_1_VERSION: Kernel_3.10.0-229.el7.x86_64/cb-1343@re/develop  # 7.1
+    KERNEL_RHEL_7_2_VERSION: Kernel_3.10.0-327.el7.x86_64/cb-1343@re/develop  # 7.2
+    KERNEL_RHEL_7_3_VERSION: Kernel_3.10.0-514.el7.x86_64/cb-1343@re/develop  # 7.3
+    KERNEL_RHEL_7_4_VERSION: Kernel_3.10.0-693.el7.x86_64/cb-1343@re/develop  # 7.4
+    KERNEL_RHEL_7_5_VERSION: Kernel_3.10.0-862.el7.x86_64/cb-1343@re/develop  # 7.5
+    KERNEL_RHEL_7_6_VERSION: Kernel_3.10.0-957.el7.x86_64/cb-1343@re/develop  # 7.6
+    KERNEL_RHEL_7_7_VERSION: Kernel_3.10.0-1062.el7.x86_64/cb-1343@re/develop # 7.7
+    KERNEL_RHEL_7_8_VERSION: Kernel_3.10.0-1127.el7.x86_64/cb-1343@re/develop # 7.8
+    KERNEL_RHEL_7_9_VERSION: Kernel_3.10.0-1160.el7.x86_64/cb-1343@re/develop # 7.9
+    KERNEL_RHEL_8_0_VERSION: Kernel_4.18.0-80.el8.x86_64/cb-1343@re/develop  # 8.0
+    KERNEL_RHEL_8_1_VERSION: Kernel_4.18.0-147.el8.x86_64/cb-1343@re/develop  # 8.1
+    KERNEL_RHEL_8_2_VERSION: Kernel_4.18.0-193.el8.x86_64/cb-1343@re/develop  # 8.2
+    KERNEL_RHEL_8_3_VERSION: Kernel_4.18.0-240.el8.x86_64/cb-1343@re/develop  # 8.3
+    KERNEL_RHEL_8_4_VERSION: Kernel_4.18.0-305.19.1.el8_4.x86_64/cb-1343@re/develop  # 8.4
+    KERNEL_RHEL_8_5_VERSION: Kernel_4.18.0-348.7.1.el8_5.x86_64/cb-1343@re/develop  # 8.5
     # Override the kernel versions
     #  This should be a comma seperated list of kernel versions to match.  (This
     #  is a simple match in the string.)

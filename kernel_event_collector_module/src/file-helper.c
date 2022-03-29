@@ -92,10 +92,10 @@ PathData *ec_file_get_path_data(
     char *owned_path_buffer = NULL;
     char *path_str = NULL;
 
-    CANCEL(likely(path_lookup), NULL);
+    TRY(likely(path_lookup));
 
-    CANCEL(path_lookup->file || path_lookup->path, NULL);    // We need at least one of file or path
-    CANCEL(!(path_lookup->file && path_lookup->path), NULL); // But not both
+    TRY(path_lookup->file || path_lookup->path);    // We need at least one of file or path
+    TRY(!(path_lookup->file && path_lookup->path)); // But not both
 
     query.ignore_special = path_lookup->ignore_spcial;
 
@@ -172,6 +172,13 @@ PathData *ec_file_get_path_data(
 CATCH_DEFAULT:
     ec_mem_put(path_str);
     ec_put_path_buffer(owned_path_buffer);
+
+    if (!path_data)
+    {
+        // No path was created so return a "not found" path_data
+        path_data = ec_path_cache_add(0, 0, 0, NULL, 0, context);
+    }
+
     return path_data;
 }
 
@@ -266,6 +273,7 @@ struct inode const *ec_get_inode_from_file(struct file const *file)
 
 struct super_block const *ec_get_sb_from_dentry(struct dentry const *dentry);  // forward
 
+// Why doesn't this return bool?
 void ec_get_devinfo_from_path(struct path const *path, uint64_t *device, uint64_t *inode, uint64_t *fs_magic)
 {
     const struct super_block *sb = NULL;
