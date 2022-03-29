@@ -61,7 +61,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -129,7 +129,7 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -191,7 +191,7 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -257,7 +257,7 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -369,7 +369,7 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -421,7 +421,7 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -475,7 +475,7 @@ int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -524,7 +524,7 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -573,7 +573,7 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -761,7 +761,7 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;
@@ -1156,7 +1156,7 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
 
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
-        int rc = dynsec_wait_event_timeout(event, &response, 1000, GFP_KERNEL);
+        int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
 
         if (!rc) {
             ret = response;

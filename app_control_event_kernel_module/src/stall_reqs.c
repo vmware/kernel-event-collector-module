@@ -40,7 +40,7 @@ bool task_in_connected_tgid(const struct task_struct *task)
 }
 
 int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
-                              unsigned int ms, gfp_t mode)
+                              gfp_t mode)
 {
     int ret;
     struct stall_entry *entry;
