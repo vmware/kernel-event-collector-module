@@ -11,7 +11,6 @@
 typedef struct table_key {
     uint32_t        pid;
     uint16_t        proto;
-    uint16_t        conn_dir;
     CB_SOCK_ADDR    laddr;
     CB_SOCK_ADDR    raddr;
 } NET_TBL_KEY;
@@ -19,6 +18,7 @@ typedef struct table_key {
 typedef struct table_value {
     struct timespec  last_seen;
     uint64_t         count;
+    uint16_t         conn_dir;
 } NET_TBL_VALUE;
 
 typedef struct table_node {
@@ -26,7 +26,7 @@ typedef struct table_node {
     NET_TBL_VALUE     value;
 } NET_TBL_NODE;
 
-void __ec_net_tracking_print_message(const char *message, NET_TBL_KEY *key);
+void __ec_net_tracking_print_message(const char *message, NET_TBL_NODE *node);
 void __ec_net_tracking_set_key(NET_TBL_KEY    *key,
                       pid_t           pid,
                       CB_SOCK_ADDR   *localAddr,
@@ -34,6 +34,13 @@ void __ec_net_tracking_set_key(NET_TBL_KEY    *key,
                       uint16_t        proto,
                       CONN_DIRECTION  conn_dir);
 int __ec_print_net_tracking(HashTbl *hashTblp, void *datap, void *priv, ProcessContext *context);
+bool __ec_net_tracking_check_cache(
+    ProcessContext *context,
+    pid_t           pid,
+    CB_SOCK_ADDR   *localAddr,
+    CB_SOCK_ADDR   *remoteAddr,
+    uint16_t        proto,
+    CONN_DIRECTION  conn_dir);
 
 //TODO pick appropriate size
 #define NET_TBL_SIZE     2048
@@ -70,6 +77,35 @@ bool ec_net_tracking_check_cache(
     uint16_t        proto,
     CONN_DIRECTION  conn_dir)
 {
+    bool added_entry = __ec_net_tracking_check_cache(context, pid, localAddr, remoteAddr, proto, conn_dir);
+
+    // If this is UDP we need to do a little extra work
+    if (added_entry && proto == IPPROTO_UDP)
+    {
+        // If we added an entry it means that this connection was not already tracked,
+        //  which would normally cause an event to be generated.
+        //  For UDP we hook the data path, and it is impossible to know the real direction of the connection.
+        //  We want to check to make sure we are not tracking the opposite direction for this connection.
+        added_entry = __ec_net_tracking_check_cache(
+            context,
+            pid,
+            localAddr,
+            remoteAddr,
+            proto,
+            conn_dir == CONN_IN ? CONN_OUT : CONN_IN);
+    }
+
+    return added_entry;
+}
+
+bool __ec_net_tracking_check_cache(
+    ProcessContext *context,
+    pid_t           pid,
+    CB_SOCK_ADDR   *localAddr,
+    CB_SOCK_ADDR   *remoteAddr,
+    uint16_t        proto,
+    CONN_DIRECTION  conn_dir)
+{
     bool xcode = false;
     NET_TBL_KEY key;
     NET_TBL_NODE *node;
@@ -88,8 +124,9 @@ bool ec_net_tracking_check_cache(
 
         memcpy(&node->key, &key, sizeof(NET_TBL_KEY));
         node->value.count = 0;
+        node->value.conn_dir = conn_dir;
 
-        __ec_net_tracking_print_message("ADD", &key);
+        __ec_net_tracking_print_message("ADD", node);
 
         TRY_DO_MSG(!ec_hashtbl_add(&s_net_hash_table, node, context),
                    { ec_hashtbl_free(&s_net_hash_table, node, context); },
@@ -106,20 +143,20 @@ CATCH_DEFAULT:
     return xcode;
 }
 
-void __ec_net_tracking_print_message(const char *message, NET_TBL_KEY *key)
+void __ec_net_tracking_print_message(const char *message, NET_TBL_NODE *node)
 {
     uint16_t  rport                         = 0;
     uint16_t  lport                         = 0;
     char      raddr_str[INET6_ADDRSTRLEN*2] = {0};
     char      laddr_str[INET6_ADDRSTRLEN*2] = {0};
 
-    ec_ntop(&key->raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
-    ec_ntop(&key->laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
+    ec_ntop(&node->key.raddr.sa_addr, raddr_str, sizeof(raddr_str), &rport);
+    ec_ntop(&node->key.laddr.sa_addr, laddr_str, sizeof(laddr_str), &lport);
     TRACE(DL_NET_TRACKING, "NET-TRACK <%s> %u %s-%s laddr=%s:%u raddr=%s:%u",
           message,
-          key->pid,
-          PROTOCOL_STR(key->proto),
-          (key->conn_dir == CONN_IN ? "in" : (key->conn_dir == CONN_OUT ? "out" : "??")),
+          node->key.pid,
+          PROTOCOL_STR(node->key.proto),
+          (node->value.conn_dir == CONN_IN ? "in" : (node->value.conn_dir == CONN_OUT ? "out" : "??")),
           laddr_str, ntohs(lport), raddr_str, ntohs(rport));
 }
 
@@ -166,7 +203,7 @@ int __ec_print_net_tracking(HashTbl *hashTblp, void *datap, void *priv, ProcessC
         seq_printf(m, "NET-TRACK %d %s-%s %s:%u -> %s:%u (%d)\n",
                    net_data->key.pid,
                    PROTOCOL_STR(net_data->key.proto),
-                   (net_data->key.conn_dir == CONN_IN ? "in" : (net_data->key.conn_dir == CONN_OUT ? "out" : "??")),
+                   (net_data->value.conn_dir == CONN_IN ? "in" : (net_data->value.conn_dir == CONN_OUT ? "out" : "??")),
                    laddr_str, ntohs(lport), raddr_str, ntohs(rport),
                    (int)net_data->value.last_seen.tv_sec);
     }
@@ -205,5 +242,4 @@ void __ec_net_tracking_set_key(NET_TBL_KEY    *key,
 
     key->pid      = pid;
     key->proto    = proto;
-    key->conn_dir = conn_dir;
 }
