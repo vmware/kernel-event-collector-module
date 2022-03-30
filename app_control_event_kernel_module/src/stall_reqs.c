@@ -52,6 +52,13 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
         return -EINVAL;
     }
 
+    // Not the cleanest place to check
+    if ((dynsec_event->report_flags & DYNSEC_REPORT_IGNORE) &&
+        ignore_mode_enabled()) {
+        free_dynsec_event(dynsec_event);
+        return -ECHILD;
+    }
+
     entry = stall_tbl_insert(stall_tbl, dynsec_event, mode);
     if (IS_ERR(entry)) {
         free_dynsec_event(dynsec_event);
@@ -303,13 +310,14 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
     ret = stall_tbl_resume(stall_tbl, &key, response.response,
                            response.inode_cache_flags);
     if (ret == 0) {
-        if (response.cache_flags) {
+        if (response.cache_flags || response.task_label_flags) {
             (void)task_cache_handle_response(&response);
         }
         ret = sizeof(response);
     } else if (ret == -ENOENT) {
         // Only accept disable cache opts here
-        if (response.cache_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE)) {
+        if ((response.task_label_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE)) ||
+            (response.cache_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE))) {
             (void)task_cache_handle_response(&response);
         }
     }
@@ -560,6 +568,41 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
             return -EPERM;
         }
         ret = handle_protect_ioc(arg);
+        break;
+    }
+
+    case DYNSEC_IOC_IGNORE_MODE: {
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+
+        ret = 0;
+
+        // Ignore mode does nothing if stalling disabled
+        lock_config();
+        if (arg) {
+            global_config.send_files = 1;
+        } else {
+            global_config.send_files = 0;
+        }
+        unlock_config();
+
+        break;
+    }
+
+    case DYNSEC_IOC_LABEL_TASK: {
+        struct dynsec_label_task_hdr hdr;
+
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+
+        if (copy_from_user(&hdr, (void *)arg, sizeof(hdr))) {
+            ret = -EFAULT;
+            break;
+        }
+
+        ret = handle_task_label_ioc(&hdr);
         break;
     }
 

@@ -353,6 +353,7 @@ struct dynsec_event *alloc_dynsec_event(enum dynsec_event_type event_type,
 }
 
 // Set the last event for task_cache for PreActions
+// TODO: Call this on failure or deny flows for LSM hooks?
 void prepare_non_report_event(enum dynsec_event_type event_type, gfp_t mode)
 {
     struct event_track dummy_track  = {
@@ -361,25 +362,52 @@ void prepare_non_report_event(enum dynsec_event_type event_type, gfp_t mode)
         .report_flags = 0,
         .req_id = 0,
     };
+    bool is_thread;
 
-    if (event_type < DYNSEC_EVENT_TYPE_TASK_DUMP) {
-        (void)task_cache_set_last_event(current->pid, &dummy_track, NULL, mode);
+    if (event_type >= DYNSEC_EVENT_TYPE_TASK_DUMP) {
+        return;
+    }
+
+    if (current->pid == current->tgid) {
+        is_thread = false;
+        (void)task_cache_set_last_event(current->pid,
+                                        current->real_parent ? current->real_parent->tgid : 0,
+                                        is_thread, &dummy_track, NULL, mode);
+    } else {
+        is_thread = true;
+        (void)task_cache_set_last_event(current->pid, current->tgid,
+                                        is_thread, &dummy_track, NULL, mode);
     }
 }
 
+// TODO: Migrate this away from requiring an allocated dynsec_event object.
+// This would be to allow short circuiting events on ignore faster.
 void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
 {
     struct event_track event;
     struct event_track prev_event;
+    int err;
+    bool is_thread;
 
     if (!dynsec_event) {
         return;
     }
 
     // Disable stalling auto-magically
-    if ((dynsec_event->report_flags & DYNSEC_REPORT_STALL) &&
-        unlikely(!stall_mode_enabled())) {
+    if ((dynsec_event->report_flags & DYNSEC_REPORT_STALL) && !stall_mode_enabled()) {
         dynsec_event->report_flags &= ~(DYNSEC_REPORT_STALL);
+        goto skip_task_cache;
+    }
+
+    // Find the last event. If it's a PreAction aka DYNSEC_REPORT_INTENT
+    // and it was meant to be reportable then adjust req_id or tell us
+    if (dynsec_event->event_type >= DYNSEC_EVENT_TYPE_TASK_DUMP) {
+        goto skip_task_cache;
+    }
+
+    // // Do not set last event if we're already dead
+    if (!current->nsproxy) {
+        goto skip_task_cache;
     }
 
     event.track_flags = (TRACK_EVENT_REQ_ID_VALID | TRACK_EVENT_REPORTABLE);
@@ -388,31 +416,32 @@ void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
     event.event_type = dynsec_event->event_type;
     memset(&prev_event, 0, sizeof(prev_event));
 
-    // Find the last event. If it's an PreAction aka DYNSEC_REPORT_INTENT
-    // and it was meant to be reportable then adjust req_id or tell us
-    if (dynsec_event->event_type >= DYNSEC_EVENT_TYPE_HEALTH) {
-        return;
+    if (current->pid == current->tgid) {
+        is_thread = false;
+        err = task_cache_set_last_event(current->pid,
+                                        current->real_parent ? current->real_parent->tgid : 0,
+                                        is_thread, &event, &prev_event, mode);
+    } else {
+        is_thread = true;
+        err = task_cache_set_last_event(current->pid, current->tgid, is_thread,
+                                        &event, &prev_event, mode);
     }
 
-    if (event.report_flags & DYNSEC_REPORT_INTENT) {
-        (void)task_cache_set_last_event(dynsec_event->tid, &event,
-                                        NULL, mode);
-    } else {
-        int error = task_cache_set_last_event(dynsec_event->tid, &event,
-                                              &prev_event, mode);
-        // Copy over modified report flags due to cache opts
-        if (!error) {
+    if (!err || err == -ENOENT) {
+        // Tell us what our new report flags are
+        if (event.track_flags & TRACK_EVENT_REPORT_FLAGS_CHG) {
             dynsec_event->report_flags = event.report_flags;
         }
 
-        if (!error && (prev_event.report_flags & DYNSEC_REPORT_INTENT) &&
-                (prev_event.track_flags & TRACK_EVENT_REPORTABLE) &&
+        if ((prev_event.report_flags & DYNSEC_REPORT_INTENT) &&
+            !(event.report_flags & DYNSEC_REPORT_INTENT) &&
                 prev_event.event_type == event.event_type) {
-            dynsec_event->intent_req_id = prev_event.req_id;
-            dynsec_event->report_flags |= DYNSEC_REPORT_INTENT_FOUND;
+             dynsec_event->intent_req_id = prev_event.req_id;
+             dynsec_event->report_flags |= DYNSEC_REPORT_INTENT_FOUND;
         }
     }
 
+skip_task_cache:
     // Set Queueing Priority When Not High Priority
     if (lazy_notifier_enabled()) {
         if (!(dynsec_event->report_flags & (DYNSEC_REPORT_STALL|DYNSEC_REPORT_HI_PRI))) {
@@ -2382,6 +2411,7 @@ bool fill_in_clone(struct dynsec_event *dynsec_event,
     } else {
         __fill_in_task_ctx(child, true, &clone->kmsg.msg.task);
     }
+    clone->kmsg.hdr.tid = clone->kmsg.msg.task.tid;
 
     get_task_struct((struct task_struct *)child);
     clone->exec_path = fill_in_task_exe((struct task_struct *)child,

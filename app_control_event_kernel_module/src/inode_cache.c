@@ -8,6 +8,7 @@
 #include <linux/fs.h>
 #include <linux/vmalloc.h>
 #include <linux/random.h>
+#include <linux/sched.h>
 #include "inode_cache.h"
 #include "dynsec.h"
 
@@ -130,6 +131,7 @@ int inode_cache_register(void)
         spin_lock_init(&inode_cache->bkt[i].lock);
         inode_cache->bkt[i].size = 0;
         INIT_LIST_HEAD(&inode_cache->bkt[i].list);
+        cond_resched();
     }
 
     get_random_bytes(&inode_cache->seed, sizeof(inode_cache->seed));

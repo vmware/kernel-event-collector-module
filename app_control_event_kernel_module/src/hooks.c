@@ -19,6 +19,7 @@
 #include "config.h"
 #include "fs_utils.h"
 #include "protect.h"
+#include "path_utils.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {
@@ -787,10 +788,18 @@ void dynsec_file_free_security(struct file *file)
     }
 #endif
 
-    if (!may_report_file_close(file)) {
+    if (!stall_tbl_enabled(stall_tbl)) {
         return;
     }
-    if (!stall_tbl_enabled(stall_tbl)) {
+    // In between the TASK_EXIT and TASK_FREE hooks
+    // file descriptors are released as well. We may not
+    // want to send those CLOSE events. Unless userspace
+    // equipped to handle CLOSE events on tasks no longer alive.
+    if (!task_has_nsproxy(current)) {
+        return;
+    }
+
+    if (!may_report_file_close(file)) {
         return;
     }
     if (task_in_connected_tgid(current)) {
@@ -804,11 +813,11 @@ void dynsec_file_free_security(struct file *file)
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLOSE, DYNSEC_HOOK_TYPE_CLOSE,
                                report_flags, GFP_ATOMIC);
-
     if (!fill_in_file_free(event, file, GFP_ATOMIC)) {
         free_dynsec_event(event);
         return;
     }
+    prepare_dynsec_event(event, GFP_ATOMIC);
     (void)enqueue_nonstall_event(stall_tbl, event);
 }
 
@@ -881,6 +890,7 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
     // For now skip sending the event when we block ptrace events.
     // This is more for safety long term, than event reporting.
     if (dynsec_may_protect_ptrace(current, child)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_PTRACE, GFP_ATOMIC);
         ret = -EPERM;
         goto out;
     }
@@ -898,6 +908,7 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_ATOMIC);
 
     (void)enqueue_nonstall_event(stall_tbl, event);
 
@@ -955,6 +966,7 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
         free_dynsec_event(event);
         goto out;
     }
+    prepare_dynsec_event(event, GFP_ATOMIC);
     (void)enqueue_nonstall_event(stall_tbl, event);
 
 out:
@@ -978,21 +990,25 @@ void dynsec_sched_process_fork_tp(struct task_struct *parent,
     if (!child) {
         return;
     }
-    // Don't send thread events
-    if (child->tgid != child->pid) {
-        return;
-    }
-
     if (!stall_tbl_enabled(stall_tbl)) {
         return;
     }
+
+    // Don't send child thread clone events
+    if (child->tgid != child->pid) {
+        // (void)task_cache_insert_new_task(child->pid, child->tgid,
+        //                                  true, GFP_ATOMIC);
+        return;
+    }
+    (void)task_cache_insert_new_task(child->pid, parent->tgid,
+                                     false, GFP_ATOMIC);
+
     if (task_in_connected_tgid(parent)) {
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
                                report_flags, GFP_ATOMIC);
-    //
     if (!fill_in_clone(event, parent, child,
                        DYNSEC_TASK_IMPRECISE_START_TIME)) {
         free_dynsec_event(event);
@@ -1154,6 +1170,8 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         goto out;
     }
 
+    prepare_dynsec_event(event, GFP_KERNEL);
+
     if (event->report_flags & DYNSEC_REPORT_STALL) {
         int response = 0;
         int rc = dynsec_wait_event_timeout(event, &response, GFP_KERNEL);
@@ -1188,18 +1206,25 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
     if (!p) {
         goto out;
     }
-    // Don't send thread events
-    if (p->tgid != p->pid) {
+    if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    // Don't send thread events
+    if (p->tgid != p->pid) {
+        // Preallocate task entry for threads maybe?
+        // (void)task_cache_insert_new_task(p->pid, p->tgid,
+        //                                  true, GFP_ATOMIC);
         goto out;
+    }
+
+    if (p->real_parent) {
+        (void)task_cache_insert_new_task(p->pid, p->real_parent->tgid,
+                                         false, GFP_ATOMIC);
     }
     if (task_in_connected_tgid(p->real_parent)) {
         report_flags |= DYNSEC_REPORT_SELF;
     }
-
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CLONE, DYNSEC_TP_HOOK_TYPE_CLONE,
                                report_flags, GFP_ATOMIC);
     if (!fill_in_clone(event, NULL, p, 0)) {
@@ -1328,14 +1353,3 @@ ssize_t dynsec_task_dump_one(uint16_t opts, pid_t start_pid,
 
     return ret;
 }
-
-// int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int flags)
-// {
-// #if LINUX_VERSION_CODE < KERNEL_VERSION(4,0,0)
-//     if (g_original_ops_ptr) {
-//         return g_original_ops_ptr->task_fix_setuid(new, old, flags);
-//     }
-// #endif
-
-//     return 0;
-// }

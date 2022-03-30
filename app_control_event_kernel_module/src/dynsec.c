@@ -77,6 +77,7 @@ static void print_config(struct dynsec_config *dynsec_config)
             dynsec_config->notify_threshold);
     pr_info("dynsec_config: send_files %#x\n", dynsec_config->send_files);
     pr_info("dynsec_config: protect_mode: %#x\n", dynsec_config->protect_mode);
+    pr_info("dynsec_config: ignore_mode: %#x\n", dynsec_config->ignore_mode);
     pr_info("dynsec_config: lsm_hooks:%#llx process_hooks:%#llx preaction_hooks:%#llx\n",
             dynsec_config->lsm_hooks, dynsec_config->process_hooks,
             dynsec_config->preaction_hooks);

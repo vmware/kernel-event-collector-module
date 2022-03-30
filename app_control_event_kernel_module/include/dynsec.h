@@ -44,6 +44,7 @@
 #define DYNSEC_REPORT_AUDIT         0x0004
 // Event did not stall due to a cache option
 #define DYNSEC_REPORT_CACHED        0x0008
+#define DYNSEC_REPORT_UNSTALL       DYNSEC_REPORT_CACHED
 // Event Denied. Decision made within kernel module.
 #define DYNSEC_REPORT_DENIED        0x0010
 // Event came from a the client
@@ -60,6 +61,9 @@
 #define DYNSEC_REPORT_LAST_TASK     0x0400
 // File event was not stalled due to the read only cache.
 #define DYNSEC_REPORT_INODE_CACHED  0x0800
+// When set and sent to userspace. The event can be discarded.
+// Also helpful for debugging what would be ignored.
+#define DYNSEC_REPORT_IGNORE        0x1000
 
 // Response Type For Stalls
 #define DYNSEC_RESPONSE_ALLOW 0x00000000
@@ -82,7 +86,9 @@
 // Clear All Caching For An Event Type
 #define DYNSEC_CACHE_CLEAR_ON_EVENT   0x00000040
 // Unused - Instead of not stalling, don't send the event
-#define DYNSEC_CACHE_IGNORE           0x00010000
+#define DYNSEC_CACHE_IGNORE           0x00000100
+#define DYNSEC_CACHE_INHERIT          0x00001000
+#define DYNSEC_CACHE_INHERIT_RECURSE  0x00002000
 
 // For Setattr Event
 #define DYNSEC_SETATTR_MODE     (1 << 0)
@@ -139,6 +145,7 @@ struct dynsec_response {
     int32_t response;
     uint32_t cache_flags;
     uint32_t inode_cache_flags;
+    uint32_t task_label_flags;
 };
 
 // Eventually have dynsec_task_ctx contain this
@@ -423,7 +430,10 @@ struct dynsec_task_dump_umsg {
 #define DYNSEC_IOC_SEND_FILE       _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 9)
 // Operation to request
 #define DYNSEC_IOC_PROTECT         _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 10)
-
+// Set ignore events to disable, enable or debug enable
+#define DYNSEC_IOC_IGNORE_MODE     _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 11)
+// Explicitly set a task's label
+#define DYNSEC_IOC_LABEL_TASK      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 12)
 
 // May want a request to print out what kernel objects
 // that are blocking a clean rmmod.
@@ -490,6 +500,12 @@ struct dynsec_protect_ioc_hdr {
     uint16_t protect_flags;
 };
 
+struct dynsec_label_task_hdr {
+    pid_t tid;
+    pid_t pid;
+    uint32_t task_label_flags;
+};
+
 // Eventually will contain mix of global
 // and per-client settings and state of kmod.
 struct dynsec_config {
@@ -512,6 +528,9 @@ struct dynsec_config {
 
     // Protect a connected client and secondary applications.
     uint32_t protect_mode;
+
+    // Allow of kernel level ignoring.
+    uint32_t ignore_mode;
 
     // Available hooks. Currently Immutable.
     uint64_t lsm_hooks;
