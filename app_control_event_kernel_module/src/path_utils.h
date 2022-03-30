@@ -55,7 +55,7 @@ struct mnt_namespace {
 
 static inline bool task_has_nsproxy(const struct task_struct *task)
 {
-    return task && task->nsproxy;
+    return task && task->nsproxy != NULL;
 }
 static inline bool task_is_exiting(const struct task_struct *task)
 {

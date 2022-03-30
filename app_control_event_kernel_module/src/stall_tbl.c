@@ -304,7 +304,15 @@ static u32 stall_tbl_enqueue_event(struct stall_tbl *tbl, struct dynsec_event *e
 u32 enqueue_nonstall_event(struct stall_tbl *tbl,
                            struct dynsec_event *event)
 {
-    u32 size = stall_tbl_enqueue_event(tbl, event);
+    u32 size = 0;
+
+    if ((event->report_flags & DYNSEC_REPORT_IGNORE) &&
+        ignore_mode_enabled()) {
+        free_dynsec_event(event);
+        return 0;
+    }
+
+    size = stall_tbl_enqueue_event(tbl, event);
 
     if (size) {
         if (meets_notify_threshold(size) ||
@@ -325,7 +333,15 @@ u32 enqueue_nonstall_event(struct stall_tbl *tbl,
 u32 enqueue_nonstall_event_no_notify(struct stall_tbl *tbl,
                                      struct dynsec_event *event)
 {
-    u32 size = stall_tbl_enqueue_event(tbl, event);
+    u32 size = 0;
+
+    if ((event->report_flags & DYNSEC_REPORT_IGNORE) &&
+        ignore_mode_enabled()) {
+        free_dynsec_event(event);
+        return 0;
+    }
+
+    size = stall_tbl_enqueue_event(tbl, event);
 
     if (!size) {
         free_dynsec_event(event);
@@ -398,7 +414,7 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
     }
 
     if (key->event_type < 0 || key->event_type >= DYNSEC_EVENT_TYPE_MAX) {
-        return -EINVAL;
+        return -ERANGE;
     }
 
     switch (response)

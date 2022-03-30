@@ -20,7 +20,13 @@ extern int debug_task_cache;
 
 extern int task_cache_register(void);
 extern void task_cache_shutdown(void);
-extern int task_cache_set_last_event(pid_t tid, struct event_track *event,
+#ifdef DYNSEC_IOC_LABEL_TASK
+extern int handle_task_label_ioc(const struct dynsec_label_task_hdr *hdr);
+#endif /* DYNSEC_IOC_LABEL_TASK */
+extern int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
+                                      gfp_t mode);
+extern int task_cache_set_last_event(pid_t tid, pid_t parent_pid, bool is_thread,
+                                     struct event_track *event,
                                      struct event_track *prev_event, gfp_t mode);
 extern int task_cache_handle_response(struct dynsec_response *response);
 extern void task_cache_clear_response_caches(pid_t tid);
