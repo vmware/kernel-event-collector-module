@@ -13,6 +13,11 @@ variables:
   ARTIFACTORY_PROBE_PATH: carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
   BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
 
+  #---- check_probe test variables ----#
+  JENKINS_URL: https://jenkins-qa.cbenglab.com
+  JENKINS_CHECK_PROBE_JOB: lnx_check_bpf_probe
+  JENKINS_CHECK_PROBE_JOB_URL: ${JENKINS_URL}/job/${JENKINS_CHECK_PROBE_JOB}
+
 stages:
   - build_project
   - deploy
@@ -88,6 +93,40 @@ makefile_test:
 
 deploy_probe_test:
   extends: .deploy
+
+#----------------------------------------- Test -------------------------------------------#
+.test_script: &test_script |
+  get_ci_variables
+  source ./build-util/sh-utils/run_jenkins_tests.sh
+
+  if ! should_skip_test "$TEST_ON_UPSTREAM_PACKAGE" ; then
+      #ToDo: Add the ability to use dynamically find the newest versions of the sensor
+      #For the time being pass in a dummy agent build
+      SENSOR_KITS="cb-psc-sensor-rhel-2.5.0.328.tgz%2Ccb-psc-sensor-ubuntu-2.5.0.328.tgz%2Ccb-psc-sensor-suse-2.5.0.328.tgz%2Ccb-psc-sensor-amazon-linux-2.5.0.328.tgz"
+      run_jenkins_job "$JOB_URL" "$SENSOR_KITS" "$GITLAB_USER_EMAIL" "$SINGLE_VM"
+  fi
+
+test_probe:
+  script:
+    - JOB_URL=$JENKINS_CHECK_PROBE_JOB_URL
+    - TEST_ON_UPSTREAM_PACKAGE=bpf_probe
+    - SINGLE_VM=CentOS_80
+    - *test_script
+  stage: build_downstream
+  tags:
+    - docker
+    - docker-socket
+  image:
+    # TODO: Fix the image keys
+    name: ${ARTIFACTORY_URL}:5000/cbdev/centos6-linux-dev:201105_1907
+    entrypoint: [""]
+  variables:
+    GIT_STRATEGY: none
+  allow_failure: false
+  except:
+    - master
+    - /^release-/
+
 
 # Build downstream
 build_endpoint_common:
