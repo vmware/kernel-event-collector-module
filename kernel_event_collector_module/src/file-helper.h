@@ -11,7 +11,6 @@
 bool ec_file_helper_init(ProcessContext *context);
 bool ec_file_get_path(struct file const *file, char *buffer, unsigned int buflen, char **pathname);
 bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen, char **pathname);
-bool ec_dentry_get_path(struct dentry const *dentry, char *buffer, unsigned int buflen, char **pathname);
 char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen);
 char *ec_lsm_dentry_path(struct dentry const *dentry, char *path, int len);
 struct inode const *ec_get_inode_from_file(struct file const *file);
