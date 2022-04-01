@@ -8,8 +8,10 @@
 #include "path-cache.h"
 #include "path-buffers.h"
 
+#include <linux/err.h>
 #include <linux/magic.h>
 #include <linux/namei.h>
+#include <linux/string.h>    // memset()
 
 typedef PathData *(*path_find_fn)(
     uint64_t            ns_id,
@@ -24,7 +26,8 @@ bool ec_file_helper_init(ProcessContext *context)
 
 bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen, char **pathname)
 {
-    bool         xcode = true;
+    bool xcode = true;
+    int bufindex;
 
     CANCEL(pathname, false);
     CANCEL(buffer, false);
@@ -43,26 +46,78 @@ bool ec_path_get_path(struct path const *path, char *buffer, unsigned int buflen
     // dentry_path case, we consistently miss the root node. So each solution is the right solution for that
     // specific case, we just need to know when to use each.
 
-
     // If we failed to resolve the symbol, i.e. we're on a 2.6.32 kernel or it just doesn't resolve,
     // default to the d_path option
     if (current->nsproxy && CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
     {
         (*pathname) = ec_dentry_to_path(path->dentry, buffer, buflen);
-    } else
+    } else if (current->fs)
     {
         (*pathname) = d_path(path, buffer, buflen);
     }
 
-    if (IS_ERR_OR_NULL((*pathname)))
+    if (IS_ERR(*pathname) && -ENAMETOOLONG == PTR_ERR(*pathname))
+    {
+        // An ENAMETOOLONG results when last fetched component name length exceeds remaining space avail
+        // at beginning of buffer, so the partial path we want begins some offset beyond buffer[0] but
+        // less than buffer[0] + max component len + separator len
+
+        // Having arrived here by detection of ENAMETOOLONG we need to try and recover the partial path BUT the original
+        // invocation operated on an uncleared buffer for performance reasons and the random garbage leaves sought data
+        // indiscernible.  Here we explicitly set a reference buffer and reattempt to resolve the path.  This will allow
+        // us to walk the buffer and recover the partial data up to the exceeding path element.
+        memset(buffer, '.', buflen);
+        if (current->nsproxy && CB_CHECK_RESOLVED(current_chrooted) && CB_RESOLVED(current_chrooted)())
+        {
+            (*pathname) = ec_dentry_to_path(path->dentry, buffer, buflen);
+        } else if (current->fs)
+        {
+            (*pathname) = d_path(path, buffer, buflen);
+        }
+
+        // a non-error bail here such as  'if (!IS_ERR(*pathname)) break;' is pointless -- nothing has changed
+        // so press on resolving ENAMETOOLONG
+        xcode = false;
+        for (bufindex = 0; bufindex < buflen; bufindex++)
+        {
+            // path constructed R-to-L in buffer, first non '.' encountered is start of partial path return
+            if ('.' != buffer[bufindex])
+            {
+                // We want ellipsis as visual cue that returned data is truncated path not actual.
+                if (bufindex > 2)
+                {
+                    // normal -- '.../partial/path/<rest>'
+                    bufindex -= 3;
+                } else
+                {
+                    // edge case -- '...artial/path/<rest>'
+                    memset(buffer, '.', 3);
+                    bufindex = 0;
+                }
+
+                *pathname = &buffer[bufindex];
+                xcode = true;
+                break;
+            }
+        }
+
+        buffer[buflen - 1] = 0;       // ensure termination as a valid strz
+
+    } else if (IS_ERR_OR_NULL(*pathname))
     {
         (*pathname) = buffer;
-        xcode   = false;
-
         buffer[0] = 0;
+        xcode = false;
         strncat(buffer, path->dentry->d_name.name, buflen-1);
 
-        TRACE(DL_WARNING, "Path lookup failed, using |%s| as file name", buffer);
+        // report such info as we have for other error cases
+        if (IS_ERR(*pathname))
+        {
+            TRACE(DL_FILE, "Error %ld resolving path for |%s|", PTR_ERR(*pathname), path->dentry->d_name.name);
+        } else
+        {
+            TRACE(DL_FILE, "Null path resolved for |%s|", buffer);
+        }
     }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)  //{
@@ -186,30 +241,6 @@ char *ec_dentry_to_path(struct dentry const *dentry, char *buf, int buflen)
 {
     CANCEL_CB_RESOLVED(dentry_path, NULL);
     return CB_RESOLVED(dentry_path)((struct dentry *)dentry, buf, buflen);
-}
-
-bool ec_dentry_get_path(struct dentry const *dentry, char *buffer, unsigned int buflen, char **pathname)
-{
-    bool xcode = true;
-
-    CANCEL(dentry, false);
-    CANCEL(buffer, false);
-    CANCEL(pathname, false);
-
-    (*pathname) = ec_dentry_to_path(dentry, buffer, buflen);
-
-    if (IS_ERR_OR_NULL((*pathname)))
-    {
-        (*pathname) = buffer;
-        xcode   = false;
-
-        buffer[0] = 0;
-        strncat(buffer, dentry->d_name.name, buflen-1);
-
-        TRACE(DL_WARNING, "Path lookup failed, using |%s| as file name", buffer);
-    }
-
-    return xcode;
 }
 
 struct inode const *ec_get_inode_from_dentry(struct dentry const *dentry)
