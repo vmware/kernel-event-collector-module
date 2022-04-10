@@ -72,6 +72,10 @@ static void print_config(struct dynsec_config *dynsec_config)
     pr_info("dynsec_config: bypass_mode:%d stall_mode:%d\n",
             dynsec_config->bypass_mode, dynsec_config->stall_mode);
     pr_info("dynsec_config: stall_timeout:%u\n", dynsec_config->stall_timeout);
+    pr_info("dynsec_config: stall_timeout_continue:%u\n",
+            dynsec_config->stall_timeout_continue);
+    pr_info("dynsec_config: stall_timeout_deny:%u\n",
+            dynsec_config->stall_timeout_deny);
     pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d",
             dynsec_config->lazy_notifier, dynsec_config->queue_threshold,
             dynsec_config->notify_threshold);

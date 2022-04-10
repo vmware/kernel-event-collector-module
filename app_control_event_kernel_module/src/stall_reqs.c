@@ -4,7 +4,6 @@
 #include <linux/fs.h>
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
-#include <linux/wait.h>
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
@@ -25,6 +24,7 @@
 #include "hooks.h"
 #include "config.h"
 #include "protect.h"
+#include "wait.h"
 
 static dev_t g_maj_t;
 static int maj_no;
@@ -37,62 +37,6 @@ static DEFINE_MUTEX(dump_all_lock);
 bool task_in_connected_tgid(const struct task_struct *task)
 {
     return (task && stall_tbl && stall_tbl->tgid == task->tgid);
-}
-
-int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
-                              gfp_t mode)
-{
-    int ret;
-    struct stall_entry *entry;
-    int local_response = DYNSEC_RESPONSE_ALLOW;
-    unsigned long timeout;
-
-    if (!dynsec_event || !response || !stall_tbl_enabled(stall_tbl)) {
-        free_dynsec_event(dynsec_event);
-        return -EINVAL;
-    }
-
-    // Not the cleanest place to check
-    if ((dynsec_event->report_flags & DYNSEC_REPORT_IGNORE) &&
-        ignore_mode_enabled()) {
-        free_dynsec_event(dynsec_event);
-        return -ECHILD;
-    }
-
-    entry = stall_tbl_insert(stall_tbl, dynsec_event, mode);
-    if (IS_ERR(entry)) {
-        free_dynsec_event(dynsec_event);
-        return PTR_ERR(entry);
-    }
-
-    timeout = msecs_to_jiffies(get_wait_timeout());
-    ret = wait_event_interruptible_timeout(entry->wq, entry->mode != 0, timeout);
-    stall_tbl_remove_entry(stall_tbl, entry);
-    if (ret >= 1) {
-        // Act as a memory barrier
-        // spin_lock(&entry->lock);
-        local_response = entry->response;
-        // spin_unlock(&entry->lock);
-    } else if (ret == 0) {
-        // pr_info("%s:%d timedout:%u ms\n", __func__, __LINE__, ms);
-    } else {
-        // pr_info("%s: interruped %d\n", __func__, ret);
-    }
-
-    kfree(entry);
-    entry = NULL;
-
-    switch (local_response) {
-    case DYNSEC_RESPONSE_EPERM:
-        *response = -EPERM;
-        break;
-
-    default:
-        *response = 0;
-        break;
-    }
-
-    return 0;
 }
 
 
@@ -159,7 +103,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
         if (event->report_flags & DYNSEC_REPORT_STALL) {
-            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0);
+            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0, 0);
         }
         free_dynsec_event(event);
         event = NULL;
@@ -201,7 +145,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
             // Place it back into queue OR resume task if we
             // don't have a timeout during the stall.
             if (event->report_flags & DYNSEC_REPORT_STALL) {
-                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0);
+                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0, 0);
             }
             free_dynsec_event(event);
             event = NULL;
@@ -308,7 +252,8 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
     key.event_type = response.event_type;
     key.tid = response.tid;
     ret = stall_tbl_resume(stall_tbl, &key, response.response,
-                           response.inode_cache_flags);
+                           response.inode_cache_flags,
+                           response.overrided_stall_timeout);
     if (ret == 0) {
         if (response.cache_flags || response.task_label_flags) {
             (void)task_cache_handle_response(&response);
@@ -450,33 +395,17 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         break;
 
     // Enable/Disable Stall Mode
-    case DYNSEC_IOC_STALL_MODE:
-        if (!capable(CAP_SYS_ADMIN)) {
-            return -EPERM;
-        }
+    case DYNSEC_IOC_STALL_MODE: {
+        struct dynsec_stall_ioc_hdr hdr;
 
-        ret = 0;
+        memset(&hdr, 0, sizeof(hdr));
 
-        // Modfy end of config should at least be protected
-        // from this getting call to frequently.
-        lock_config();
-        if (stall_mode_enabled()) {
-            // Disable stalling
-            if (!arg) {
-                global_config.stall_mode = 0;
-                task_cache_clear();
-                inode_cache_clear();
-            }
-        } else {
-            // Enable stalling
-            if (arg) {
-                task_cache_clear();
-                inode_cache_clear();
-                global_config.stall_mode = 1;
-            }
-        }
-        unlock_config();
+        hdr.flags |= DYNSEC_STALL_MODE_SET;
+        hdr.stall_mode = arg;
+
+        ret = handle_stall_ioc(&hdr);
         break;
+    }
 
     // Set Event Queue specific optimizations.
     case DYNSEC_IOC_QUEUE_OPTS: {
@@ -522,22 +451,13 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
     }
 
     case DYNSEC_IO_STALL_TIMEOUT_MS: {
-        unsigned long timeout_ms = MAX_WAIT_TIMEOUT_MS;
+        struct dynsec_stall_ioc_hdr hdr;
 
-        if (!capable(CAP_SYS_ADMIN)) {
-            return -EPERM;
-        }
+        memset(&hdr, 0, sizeof(hdr));
+        hdr.flags |= DYNSEC_STALL_MODE_SET;
+        hdr.stall_timeout = arg;
 
-        // 0 means it won't stall "really" stall
-        // but will go through the motions.
-        if (arg < MAX_WAIT_TIMEOUT_MS) {
-            timeout_ms = arg;
-        }
-
-        ret = 0;
-        lock_config();
-        global_config.stall_timeout = timeout_ms;
-        unlock_config();
+        ret = handle_stall_ioc(&hdr);
         break;
     }
 
@@ -603,6 +523,18 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         }
 
         ret = handle_task_label_ioc(&hdr);
+        break;
+    }
+
+    case DYNSEC_IOC_STALL_OPTS: {
+        struct dynsec_stall_ioc_hdr hdr;
+
+        if (copy_from_user(&hdr, (void *)arg, sizeof(hdr))) {
+            ret = -EFAULT;
+            break;
+        }
+
+        ret = handle_stall_ioc(&hdr);
         break;
     }
 

@@ -147,8 +147,8 @@ static void stall_tbl_wake_entries(struct stall_tbl *stall_tbl)
         flags = lock_stall_bkt(&stall_tbl->bkt[i], flags);
         list_for_each_entry_safe(entry, tmp, &stall_tbl->bkt[i].list,
                       list) {
-            entry->mode = DYNSEC_STALL_MODE_DISABLE;
             spin_lock(&entry->lock);
+            entry->mode = DYNSEC_STALL_MODE_DISABLE;
             entry->response = DYNSEC_RESPONSE_ALLOW;
             spin_unlock(&entry->lock);
 
@@ -377,6 +377,12 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     entry->key.req_id = event->req_id;
     entry->key.event_type = event->event_type;
     entry->key.tid = event->tid;
+    entry->mode = DYNSEC_STALL_MODE_STALL;
+    if (deny_on_timeout_enabled()) {
+        entry->response = DYNSEC_RESPONSE_EPERM;
+    } else {
+        entry->response = DYNSEC_RESPONSE_ALLOW;
+    }
 
     // Copy over inode_addr data
     entry->inode_addr = event->inode_addr;
@@ -400,7 +406,8 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
 }
 
 int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
-                     int response, unsigned long inode_cache_flags)
+                     int response, unsigned long inode_cache_flags,
+                     unsigned int overrided_stall_timeout)
 {
     struct stall_entry *entry;
     unsigned long flags;
@@ -420,10 +427,18 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
     switch (response)
     {
     case DYNSEC_RESPONSE_ALLOW:
+        overrided_stall_timeout = 0;
         break;
     case DYNSEC_RESPONSE_EPERM:
+        overrided_stall_timeout = 0;
         // Remove inode from read only cache if we deny
         inode_cache_flags = DYNSEC_CACHE_DISABLE;
+        break;
+    case DYNSEC_RESPONSE_CONTINUE:
+        inode_cache_flags = 0;
+        if (overrided_stall_timeout > MAX_EXTENDED_TIMEOUT_MS) {
+            overrided_stall_timeout = MAX_EXTENDED_TIMEOUT_MS;
+        }
         break;
 
     default:
@@ -452,15 +467,16 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
     entry = lookup_entry_safe(hash, key, &tbl->bkt[index].list);
     if (entry) {
         ret = 0;
-        inode_addr = entry->inode_addr;
 
+        spin_lock(&entry->lock);
+        inode_addr = entry->inode_addr;
         entry->mode = DYNSEC_STALL_MODE_RESUME;
-        // spin_lock(&entry->lock);
         entry->response = response;
-        // spin_unlock(&entry->lock);
+        entry->stall_timeout = overrided_stall_timeout;
         if (waitqueue_active(&entry->wq)) {
             wake_up(&entry->wq);
         }
+        spin_unlock(&entry->lock);
     }
     unlock_stall_bkt(&tbl->bkt[index], flags);
 

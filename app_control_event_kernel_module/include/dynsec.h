@@ -66,9 +66,9 @@
 #define DYNSEC_REPORT_IGNORE        0x1000
 
 // Response Type For Stalls
-#define DYNSEC_RESPONSE_ALLOW 0x00000000
-#define DYNSEC_RESPONSE_EPERM 0x00000001
-
+#define DYNSEC_RESPONSE_ALLOW       0x00000000
+#define DYNSEC_RESPONSE_EPERM       0x00000001
+#define DYNSEC_RESPONSE_CONTINUE    0x00010000
 //
 // Task and Inode Event Labeling (Cache) Options
 //
@@ -146,6 +146,10 @@ struct dynsec_response {
     uint32_t cache_flags;
     uint32_t inode_cache_flags;
     uint32_t task_label_flags;
+
+    // allow this to override global continue value
+    // when continuation response set.
+    uint32_t overrided_stall_timeout;
 };
 
 // Eventually have dynsec_task_ctx contain this
@@ -434,6 +438,7 @@ struct dynsec_task_dump_umsg {
 #define DYNSEC_IOC_IGNORE_MODE     _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 11)
 // Explicitly set a task's label
 #define DYNSEC_IOC_LABEL_TASK      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 12)
+#define DYNSEC_IOC_STALL_OPTS      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 13)
 
 // May want a request to print out what kernel objects
 // that are blocking a clean rmmod.
@@ -506,6 +511,19 @@ struct dynsec_label_task_hdr {
     uint32_t task_label_flags;
 };
 
+// Multiplex stall and stall timeout options
+struct dynsec_stall_ioc_hdr {
+#define DYNSEC_STALL_MODE_SET             0x00000001
+#define DYNSEC_STALL_DEFAULT_TIMEOUT      0x00000002
+#define DYNSEC_STALL_CONTINUE_TIMEOUT     0x00000004
+#define DYNSEC_STALL_DEFAULT_DENY         0x00000008
+    uint32_t flags;
+    uint32_t stall_mode;
+    uint32_t stall_timeout;
+    uint32_t stall_timeout_continue;
+    uint32_t stall_timeout_deny;
+};
+
 // Eventually will contain mix of global
 // and per-client settings and state of kmod.
 struct dynsec_config {
@@ -513,8 +531,12 @@ struct dynsec_config {
     uint32_t bypass_mode;
     // Unsets STALL in report flags when disabled aka ZERO
     uint32_t stall_mode;
-    // Tells us how long we can stall
+    // Tells us how long we may initially stall in milliseconds
     uint32_t stall_timeout;
+    // Tells us how long we may continue stalling in milliseconds
+    uint32_t stall_timeout_continue;
+    // Tells if we are in default deny for stall timeouts.
+    uint32_t stall_timeout_deny;
 
     // Lazy notifer may not always notify when a new event is available
     uint32_t lazy_notifier;
@@ -529,7 +551,7 @@ struct dynsec_config {
     // Protect a connected client and secondary applications.
     uint32_t protect_mode;
 
-    // Allow of kernel level ignoring.
+    // Allow kernel level ignoring.
     uint32_t ignore_mode;
 
     // Available hooks. Currently Immutable.
