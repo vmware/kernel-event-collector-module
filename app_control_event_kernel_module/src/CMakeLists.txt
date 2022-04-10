@@ -156,6 +156,8 @@ set(SOURCE_FILES
     path_utils.h
     task_utils.c
     task_utils.h
+    wait.c
+    wait.h
     ../include/dynsec.h
     config.h
 )

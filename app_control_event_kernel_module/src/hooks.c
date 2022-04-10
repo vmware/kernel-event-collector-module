@@ -20,6 +20,7 @@
 #include "fs_utils.h"
 #include "protect.h"
 #include "path_utils.h"
+#include "wait.h"
 
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 {

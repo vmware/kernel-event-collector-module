@@ -9,7 +9,5 @@
 extern struct stall_tbl *stall_tbl;
 
 extern bool task_in_connected_tgid(const struct task_struct *task);
-extern int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event,
-                                     int *response, gfp_t mode);
 extern bool dynsec_chrdev_init(void);
 extern void dynsec_chrdev_shutdown(void);

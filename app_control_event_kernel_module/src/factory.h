@@ -7,6 +7,8 @@
 #include <linux/version.h>
 #include <linux/path.h>
 
+struct iattr;
+
 // Important for these structs to be packed as
 // they are critical to copying events to userspace.
 #pragma pack(push, 1)
