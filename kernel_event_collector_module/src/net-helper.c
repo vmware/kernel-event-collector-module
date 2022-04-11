@@ -330,8 +330,8 @@ CATCH_DEFAULT:
 
 void ec_enumerate_task_sockets(struct task_struct *task, ProcessHandle *handle, ProcessContext *context)
 {
-    int n = 0;
-    SocketIterateData data = {task, handle, context};
-
-    iterate_fd(task->files, n, __ec_report_task_socket, &data);
+//    int n = 0;
+//    SocketIterateData data = {task, handle, context};
+//
+//    iterate_fd(task->files, n, __ec_report_task_socket, &data);
 }

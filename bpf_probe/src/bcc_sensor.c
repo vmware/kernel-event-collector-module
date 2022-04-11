@@ -1122,17 +1122,32 @@ static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
 		ip_cache.insert(&ip_key->pid, ip_key);
 	}
 #else
-	struct ip_entry *ip_entry = ip_cache.lookup(ip_key);
-	if (ip_entry) {
-		if ((ip_entry->flow & flow)) {
-			return true;
-		}
-		// Updates map entry
-		ip_entry->flow |= flow;
+	struct ip_key ip_key_alternate = *ip_key;
+	struct ip_entry *ip_entry = NULL;
+
+	if (flow == FLOW_RX)
+	{
+		ip_key->remote_port = 0;
+		ip_key_alternate.local_port = 0;
 	} else {
+		ip_key->local_port = 0;
+		ip_key_alternate.remote_port = 0;
+	}
+
+	ip_entry = ip_cache.lookup(ip_key);
+	if (!ip_entry) {
 		struct ip_entry new_entry = {};
 		new_entry.flow = flow;
 		ip_cache.insert(ip_key, &new_entry);
+
+		ip_entry = ip_cache.lookup(&ip_key_alternate);
+		if (!ip_entry) {
+			ip_cache.insert(&ip_key_alternate, &new_entry);
+		} else {
+			return true;
+		}
+	} else {
+		return true;
 	}
 #endif
 	return false;
@@ -1162,17 +1177,32 @@ static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 		ip6_cache.insert(&ip6_key->pid, ip6_key);
 	}
 #else
-	struct ip_entry *ip_entry = ip6_cache.lookup(ip6_key);
-	if (ip_entry) {
-		if ((ip_entry->flow & flow)) {
-			return true;
-		}
-		// Updates map entry
-		ip_entry->flow |= flow;
+	struct ip6_key ip6_key_alternate = *ip6_key;
+	struct ip_entry *ip_entry = NULL;
+
+	if (flow == FLOW_RX)
+	{
+		ip6_key->remote_port = 0;
+		ip6_key_alternate.local_port = 0;
 	} else {
+		ip6_key->local_port = 0;
+		ip6_key_alternate.remote_port = 0;
+	}
+
+	ip_entry = ip6_cache.lookup(ip6_key);
+	if (!ip_entry) {
 		struct ip_entry new_entry = {};
 		new_entry.flow = flow;
 		ip6_cache.insert(ip6_key, &new_entry);
+
+		ip_entry = ip6_cache.lookup(&ip6_key_alternate);
+		if (!ip_entry) {
+			ip6_cache.insert(&ip6_key_alternate, &new_entry);
+		} else {
+			return true;
+		}
+	} else {
+		return true;
 	}
 #endif
 	return false;
@@ -1341,8 +1371,8 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 #ifdef CACHE_UDP
 		struct ip_key ip_key = {};
 		ip_key.pid = data.header.pid;
-		ip_key.remote_port =
-			0; // Ignore the remote port for incoming connections
+		bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
+				   &data.remote_port);
 		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
 				   &data.local_port);
 		bpf_probe_read(&ip_key.remote_addr,
@@ -1369,8 +1399,8 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 #ifdef CACHE_UDP
 		struct ip6_key ip_key = {};
 		ip_key.pid = data.header.pid;
-		ip_key.remote_port =
-			0; // Ignore the remote port for incoming connections
+		bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
+				   &data.remote_port);
 		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
 				   &data.local_port);
 		bpf_probe_read(ip_key.remote_addr6,
@@ -1558,8 +1588,8 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 		bpf_probe_read(&ip_key.remote_port,
 				   sizeof(data.remote_port),
 				   &data.remote_port);
-		ip_key.local_port =
-			0; // Ignore the local port for outgoing connections
+		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
+				   &data.local_port);
 		bpf_probe_read(&ip_key.remote_addr,
 				   sizeof(data.remote_addr),
 				   &data.remote_addr);
@@ -1584,8 +1614,8 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 		bpf_probe_read(&ip_key.remote_port,
 				   sizeof(data.remote_port),
 				   &data.remote_port);
-		ip_key.local_port =
-			0; // Ignore the local port for outgoing connections
+		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
+				   &data.local_port);
 		bpf_probe_read(
 			ip_key.remote_addr6, sizeof(data.remote_addr6),
 			&(skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32));
@@ -1655,11 +1685,10 @@ int on_cgroup_attach_task(struct pt_regs *ctx, struct cgroup *dst_cgrp, struct t
 	return 0;
 }
 
-int trace_tcp_sendmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg)
-{
-	// TODO: The collector is not currently handling the proxy event, so dont't bother sending it
-	//        this needs to be reworked to send multiple events (similar to the file events)
-	return 0;
+// TODO: The collector is not currently handling the proxy event, so dont't bother sending it
+//        this needs to be reworked to send multiple events (similar to the file events)
+//int trace_tcp_sendmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg)
+//{
 //	struct dns_data data = {};
 //	int cmd = 0;
 //	int offset = 0;
@@ -1747,4 +1776,4 @@ int trace_tcp_sendmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg)
 //	}
 //
 //	return 0;
-}
+//}
