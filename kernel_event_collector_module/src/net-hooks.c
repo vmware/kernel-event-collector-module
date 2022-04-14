@@ -35,6 +35,7 @@
 
 struct probe_sock_data {
     struct sock *sk;
+    struct msghdr *msg;
 };
 
 void __ec_handle_net_event(char *msg,
@@ -55,6 +56,7 @@ int ec_sock_arg_2_entry_handler(struct kretprobe_instance *ri, struct pt_regs *r
     struct probe_sock_data *data = (struct probe_sock_data *)ri->data;
 
     data->sk = (struct sock *) PT_REGS_ARG_2(regs);
+    data->msg = (struct msghdr *)  PT_REGS_ARG_3(regs);
 
     return 0;
 }
@@ -84,7 +86,14 @@ int ec_sendmsg_ret_handler(struct kretprobe_instance *ri, struct pt_regs *regs)
     TRY(CHECK_SK_FAMILY(data->sk) && CHECK_SK_PROTO_UDP(data->sk));
 
     ec_getsockname(data->sk, &localAddr);
-    ec_getpeername(data->sk, &remoteAddr);
+
+    if (data->msg && data->msg->msg_name && data->msg->msg_namelen)
+    {
+        memcpy(&remoteAddr.sa_addr, data->msg->msg_name, data->msg->msg_namelen);
+    } else
+    {
+        ec_getpeername(data->sk, &remoteAddr);
+    }
 
     __ec_handle_net_event("SEND", CB_EVENT_TYPE_NET_CONNECT_PRE, data->sk, &localAddr, &remoteAddr, CONN_OUT, &context);
 
