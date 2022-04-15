@@ -1385,7 +1385,7 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 		}
 #endif /* CACHE_UDP */
 	} else if (hdr_len == sizeof(struct ipv6hdr)) {
-		// Why IPv6 address/port is read in a differen way than IPv4:
+		// Why IPv6 address/port is read in a different way than IPv4:
 		//  - BPF C compiled to BPF instructions don't always do what we expect
 		//  - especially when accessing members of a struct containing bitfields
 		struct ipv6hdr *ipv6hdr = (struct ipv6hdr *)hdr;
@@ -1538,100 +1538,158 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 
 int trace_udp_sendmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg)
 {
-	u64 id;
+    u64 id;
 
-	id = bpf_get_current_pid_tgid();
-	currsock3.update(&id, &sk);
-	return 0;
+    id = bpf_get_current_pid_tgid();
+    currsock3.update(&id, &sk);
+    currsock2.update(&id, &msg);
+    return 0;
 }
 
 int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
-				 struct msghdr *msg)
+                             struct msghdr *msg)
 {
-	int ret = PT_REGS_RC(ctx);
-	u64 id = bpf_get_current_pid_tgid();
+    int ret = PT_REGS_RC(ctx);
+    u64 id  = bpf_get_current_pid_tgid();
 
-	struct sock **skpp;
-	skpp = currsock3.lookup(&id);
-	if (skpp == 0) {
-		return 0;
-	}
+    struct sock **skpp;
+    skpp = currsock3.lookup(&id);
+    if (skpp == 0)
+    {
+        return 0;
+    }
 
-	if (ret <= 0) {
-		currsock3.delete(&id);
-		return 0;
-	}
+    struct msghdr **msgpp;
+    msgpp = currsock2.lookup(&id);
 
-	struct net_data data = {};
-	__init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA, &data.header);
-	data.protocol = IPPROTO_UDP;
+    if (ret <= 0)
+    {
+        currsock3.delete(&id);
+        currsock2.delete(&id);
+        return 0;
+    }
 
-	// get ip version
-	struct sock *skp = *skpp;
+    struct net_data data = {};
+    __init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA, &data.header);
+    data.protocol = IPPROTO_UDP;
+    // The remote addr could be in the msghdr::msg_name or on the sock
+    bool addr_in_msghr = false;
 
-	data.ipver = skp->__sk_common.skc_family;
-	bpf_probe_read(&data.local_port, sizeof(skp->__sk_common.skc_num),
-			   &skp->__sk_common.skc_num);
-	data.local_port = htons(data.local_port);
-	data.remote_port =
-		skp->__sk_common.skc_dport; // already network order
+    // get ip version
+    struct sock *skp = *skpp;
+    data.ipver = skp->__sk_common.skc_family;
 
-	if (check_family(skp, AF_INET)) {
-		data.remote_addr =
-			skp->__sk_common.skc_daddr;
-		data.local_addr =
-			skp->__sk_common.skc_rcv_saddr;
+    if (msgpp)
+    {
+        struct msghdr msghdr;
+
+        bpf_probe_read(&msghdr, sizeof(msghdr), *msgpp);
+
+        if (msghdr.msg_name && msghdr.msg_namelen > 0)
+        {
+            if (check_family(skp, AF_INET) && msghdr.msg_namelen >= sizeof(struct sockaddr_in))
+            {
+                struct sockaddr_in addr_in;
+                bpf_probe_read(&addr_in, sizeof(addr_in), msghdr.msg_name);
+                data.remote_port = addr_in.sin_port;
+                data.remote_addr = addr_in.sin_addr.s_addr;
+
+                addr_in_msghr = true;
+            }
+            else if (check_family(skp, AF_INET6) && msghdr.msg_namelen >= sizeof(struct sockaddr_in6))
+            {
+                struct sockaddr_in6 addr_in;
+                bpf_probe_read(&addr_in, sizeof(addr_in), msghdr.msg_name);
+                data.remote_port = addr_in.sin6_port;
+                bpf_probe_read(
+                    &data.remote_addr6, sizeof(data.remote_addr6),
+                    &addr_in.sin6_addr);
+
+                addr_in_msghr = true;
+            }
+        }
+    }
+
+    bpf_probe_read(&data.local_port, sizeof(skp->__sk_common.skc_num),
+                   &skp->__sk_common.skc_num);
+    data.local_port = htons(data.local_port);
+
+    if (!addr_in_msghr)
+    {
+        data.remote_port =
+            skp->__sk_common.skc_dport; // already network order
+    }
+
+    if (check_family(skp, AF_INET))
+    {
+        if (!addr_in_msghr)
+        {
+            data.remote_addr =
+                skp->__sk_common.skc_daddr;
+        }
+
+        data.local_addr =
+            skp->__sk_common.skc_rcv_saddr;
 
 #ifdef CACHE_UDP
-		struct ip_key ip_key = {};
-		ip_key.pid = data.header.pid;
-		bpf_probe_read(&ip_key.remote_port,
-				   sizeof(data.remote_port),
-				   &data.remote_port);
-		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
-				   &data.local_port);
-		bpf_probe_read(&ip_key.remote_addr,
-				   sizeof(data.remote_addr),
-				   &data.remote_addr);
-		bpf_probe_read(&ip_key.local_addr, sizeof(data.local_addr),
-				   &data.local_addr);
+        struct ip_key ip_key = {};
+        ip_key.pid = data.header.pid;
+        bpf_probe_read(&ip_key.remote_port,
+                       sizeof(data.remote_port),
+                       &data.remote_port);
+        bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
+                       &data.local_port);
+        bpf_probe_read(&ip_key.remote_addr,
+                       sizeof(data.remote_addr),
+                       &data.remote_addr);
+        bpf_probe_read(&ip_key.local_addr, sizeof(data.local_addr),
+                       &data.local_addr);
 
-		if (has_ip_cache(&ip_key, FLOW_TX)) {
-			goto out;
-		}
+        if (has_ip_cache(&ip_key, FLOW_TX))
+        {
+            goto out;
+        }
 #endif /* CACHE_UDP */
-	} else if (check_family(skp, AF_INET6)) {
-		bpf_probe_read(
-			&data.remote_addr6, sizeof(data.remote_addr6),
-			&(skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32));
-		bpf_probe_read(
-			&data.local_addr6, sizeof(data.local_addr6),
-			&(skp->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32));
+    }
+    else if (check_family(skp, AF_INET6))
+    {
+        if (!addr_in_msghr)
+        {
+            bpf_probe_read(
+                &data.remote_addr6, sizeof(data.remote_addr6),
+                &(skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32));
+        }
+
+        bpf_probe_read(
+            &data.local_addr6, sizeof(data.local_addr6),
+            &(skp->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32));
 
 #ifdef CACHE_UDP
-		struct ip6_key ip_key = {};
-		ip_key.pid = data.header.pid;
-		bpf_probe_read(&ip_key.remote_port,
-				   sizeof(data.remote_port),
-				   &data.remote_port);
-		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
-				   &data.local_port);
-		bpf_probe_read(
-			ip_key.remote_addr6, sizeof(data.remote_addr6),
-			&(skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32));
-		bpf_probe_read(
-			ip_key.local_addr6, sizeof(data.local_addr6),
-			&(skp->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32));
-		if (has_ip6_cache(&ip_key, FLOW_TX)) {
-			goto out;
-		}
+        struct ip6_key ip_key = {};
+        ip_key.pid = data.header.pid;
+        bpf_probe_read(&ip_key.remote_port,
+                       sizeof(data.remote_port),
+                       &data.remote_port);
+        bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
+                       &data.local_port);
+        bpf_probe_read(
+            ip_key.remote_addr6, sizeof(data.remote_addr6),
+            &data.remote_addr6);
+        bpf_probe_read(
+            ip_key.local_addr6, sizeof(data.local_addr6),
+            &data.local_addr6);
+        if (has_ip6_cache(&ip_key, FLOW_TX))
+        {
+            goto out;
+        }
 #endif /* CACHE_UDP */
-	}
-	send_event(ctx, &data, sizeof(data));
+    }
+    send_event(ctx, &data, sizeof(data));
 
 out:
-	currsock3.delete(&id);
-	return 0;
+    currsock3.delete(&id);
+    currsock2.delete(&id);
+    return 0;
 }
 
 int on_cgroup_attach_task(struct pt_regs *ctx, struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup)
