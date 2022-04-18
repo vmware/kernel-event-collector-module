@@ -46,6 +46,7 @@
 #define DYNSEC_REPORT_CACHED        0x0008
 #define DYNSEC_REPORT_UNSTALL       DYNSEC_REPORT_CACHED
 // Event Denied. Decision made within kernel module.
+// If POST flag is set, the operation was denied somewhere.
 #define DYNSEC_REPORT_DENIED        0x0010
 // Event came from a the client
 #define DYNSEC_REPORT_SELF          0x0020
@@ -64,6 +65,8 @@
 // When set and sent to userspace. The event can be discarded.
 // Also helpful for debugging what would be ignored.
 #define DYNSEC_REPORT_IGNORE        0x1000
+// Clue for POST events that an operation failed.
+#define DYNSEC_REPORT_FAIL          0x2000
 
 // Response Type For Stalls
 #define DYNSEC_RESPONSE_ALLOW       0x00000000
@@ -223,7 +226,8 @@ struct dynsec_file {
 #define DYNSEC_FILE_ATTR_PATH_DENTRY    0x0020
 // Hints path needs normalization and is raw intent
 #define DYNSEC_FILE_ATTR_PATH_RAW       0x0040
-#define DYNSEC_FILE_ATTR_PATH_RESERVED  0x0080
+// Tell us some part of the path may be truncated
+#define DYNSEC_FILE_ATTR_PATH_TRUNC     0x0080
 // Hints that umode will likely inherit parent DAC perms
 #define DYNSEC_FILE_ATTR_POSIX_ACL      0x0100
 #define DYNSEC_FILE_ATTR_DELETED        0x0200
