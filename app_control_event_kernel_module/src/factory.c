@@ -1531,6 +1531,24 @@ ssize_t copy_dynsec_event_to_user(const struct dynsec_event *dynsec_event,
         return -EINVAL;
     }
 
+    // For now POST events will just be the event header
+    if (dynsec_event->report_flags & DYNSEC_REPORT_POST) {
+        struct dynsec_msg_hdr hdr;
+
+        memset(&hdr, 0, sizeof(hdr));
+        hdr.payload = sizeof(hdr);
+        hdr.report_flags = dynsec_event->report_flags;
+        hdr.tid = dynsec_event->tid;
+        hdr.req_id = dynsec_event->req_id;
+        hdr.intent_req_id = dynsec_event->intent_req_id;
+        hdr.event_type = dynsec_event->event_type;
+
+        if (copy_to_user(p, &hdr, sizeof(hdr))) {
+            return -EFAULT;
+        }
+        return sizeof(hdr);
+    }
+
     // Copy might be different per event type
     switch (dynsec_event->event_type)
     {
@@ -2702,10 +2720,11 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
 }
 
 bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
-                              int newdfd, const char __user *newname,
-                              struct path *oldpath)
+                              int olddfd, const char __user *oldname,
+                              int newdfd, const char __user *newname)
 {
     int ret;
+    struct path oldpath;
     struct path newpath;
     struct dynsec_rename_event *rename = NULL;
 
@@ -2717,11 +2736,25 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
 
     fill_in_task_ctx(&rename->kmsg.msg.task);
 
-    fill_in_file_data(&rename->kmsg.msg.old_file, oldpath);
+    ret = user_path_at(olddfd, oldname, 0, &oldpath);
+    if (!ret) {
+        fill_in_file_data(&rename->kmsg.msg.old_file, &oldpath);
+        rename->old_path = dynsec_build_path(&oldpath,
+                                             &rename->kmsg.msg.old_file,
+                                             GFP_KERNEL);
+        path_put(&oldpath);
+    } else if (ret == -ENOENT) {
+        rename->old_path = build_preaction_path(olddfd, oldname, 0,
+                                                &rename->kmsg.msg.old_file);
+        // Allow this bad intent to be sent
+        if (IS_ERR(rename->old_path)) {
+            rename->old_path = NULL;
+        }
+    } else {
+        // Other path lookup errors likely won't let operation succeed
+        return false;
+    }
 
-    rename->old_path = dynsec_build_path(oldpath,
-                                         &rename->kmsg.msg.old_file,
-                                         GFP_KERNEL);
     if (rename->old_path && rename->kmsg.msg.old_file.path_size) {
         rename->kmsg.msg.old_file.path_offset = rename->kmsg.hdr.payload;
         rename->kmsg.hdr.payload += rename->kmsg.msg.old_file.path_size;
@@ -2735,13 +2768,12 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
                                              &rename->kmsg.msg.new_file,
                                              GFP_KERNEL);
         path_put(&newpath);
-    } else {
+    } else if (ret == -ENOENT) {
         rename->new_path = build_preaction_path(newdfd, newname, 0,
                                                 &rename->kmsg.msg.new_file);
-        // Allow this bad intent to
+        // Allow this bad intent to be sent still
         if (IS_ERR(rename->new_path)) {
             rename->new_path = NULL;
-            return false;
         }
     }
     if (rename->new_path && rename->kmsg.msg.new_file.path_size) {
