@@ -5,7 +5,7 @@
 
 struct dynsec_file;
 
-#define DEFAULT_PATH_ALLOC_SZ 128
+#define DEFAULT_PATH_ALLOC_SZ 1024
 
 extern bool dynsec_path_utils_init(void);
 
@@ -15,7 +15,13 @@ extern char *dynsec_dentry_path(const struct dentry *dentry, char *buf, int bufl
 
 extern char *dynsec_d_path(const struct path *path, char *buf, int buflen);
 
+extern char *build_preaction_path(int dfd, const char __user *filename,
+                                  int lookup_flags,
+                                  struct dynsec_file *file);
+
 extern char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode);
+extern char *dynsec_build_path_old(struct path *path, struct dynsec_file *file,
+                                   gfp_t mode);
 extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file,
                                  gfp_t mode);
 extern char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file,
