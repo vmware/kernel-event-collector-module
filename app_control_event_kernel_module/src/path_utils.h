@@ -20,8 +20,6 @@ extern char *build_preaction_path(int dfd, const char __user *filename,
                                   struct dynsec_file *file);
 
 extern char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode);
-extern char *dynsec_build_path_old(struct path *path, struct dynsec_file *file,
-                                   gfp_t mode);
 extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file,
                                  gfp_t mode);
 extern char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file,

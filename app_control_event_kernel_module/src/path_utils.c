@@ -40,7 +40,7 @@ struct path_symz path_syms;
 bool dynsec_path_utils_init(void)
 {
     BUILD_BUG_ON(DYNSEC_PATH_MAX <= DEFAULT_PATH_ALLOC_SZ);
-    BUILD_BUG_ON(DYNSEC_PATH_MAX >= PAGE_SIZE * 3);
+    BUILD_BUG_ON(DYNSEC_PATH_MAX > PAGE_SIZE * 2);
     BUILD_BUG_ON(DEFAULT_PATH_ALLOC_SZ >= 2048);
     memset(&path_syms, 0, sizeof(path_syms));
 
@@ -295,7 +295,6 @@ static char *dynsec_prepend_dfd(int dfd, char *pathbuf, int buflen,
 
     dfd_file = fget(dfd);
     if (IS_ERR_OR_NULL(dfd_file)) {
-        pr_info("%s:%d %ld\n", __func__, __LINE__, PTR_ERR(dfd_file));
         return NULL;
     }
 
