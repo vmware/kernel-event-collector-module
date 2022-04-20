@@ -163,6 +163,9 @@ int ec_proc_state(struct seq_file *m, void *v)
         case ModuleStateDisabled:
             state_str = "disabled";
             break;
+        case ModuleStateBroken:
+            state_str = "broken";
+            break;
     }
 
     seq_printf(m, "%s\n", state_str);
@@ -205,11 +208,15 @@ static struct subsystem_init s_module_init[] = {
     SUBSYSTEM_INIT(ec_hashtbl_startup,              ec_hashtbl_shutdown),
     SUBSYSTEM_INIT(ec_reader_init,                  ec_reader_shutdown),
     SUBSYSTEM_INIT(ec_module_state_info_initialize, ec_module_state_info_shutdown),
-    SUBSYSTEM_INIT(ec_do_lsm_initialize,            ec_do_lsm_shutdown),
-    SUBSYSTEM_INIT(ec_do_sys_initialize,            ec_do_sys_shutdown),
     SUBSYSTEM_INIT(ec_user_devnode_init,            ec_user_devnode_close),
     SUBSYSTEM_INIT(ec_hook_tracking_initialize,     ec_hook_tracking_shutdown),
 
+    SUBSYSTEM_INIT_END
+};
+
+static struct subsystem_init s_hook_init[] = {
+    SUBSYSTEM_INIT(ec_do_lsm_initialize,            ec_do_lsm_shutdown),
+    SUBSYSTEM_INIT(ec_do_sys_initialize,            ec_do_sys_shutdown),
     SUBSYSTEM_INIT_END
 };
 
@@ -225,9 +232,18 @@ int __init ec_init(void)
     TRY(_ec_init_subsystems(s_module_init, &context));
     TRY_STEP(SUBSYSTEMS, ec_test_module(&context));
     TRY_STEP(SUBSYSTEMS, ec_enable_module(&context));
+    TRY_STEP(HOOKS, _ec_init_subsystems(s_hook_init, &context));
 
     TRACE(DL_INIT, "Kernel sensor initialization complete");
     return 0;
+
+    // Once hooks are added, module is not supposed to be removed
+    // If hooks are not added, set the module state to "broken" - only "rmmod" can remove it
+CATCH_HOOKS:
+    ec_disable_module(&context);
+    ec_set_module_state(&context, ModuleStateBroken);
+    TRACE(DL_ERROR, "Kernel sensor initialization failed - module loaded but disabled");
+    return -1;
 
 CATCH_SUBSYSTEMS:
     // We get here after running the tests or the enable fails-
@@ -292,6 +308,8 @@ void __exit ec_cleanup(void)
         TRACE(DL_SHUTDOWN, "Module has %lld active hooks, delaying shutdown...", l_module_inuse);
         ssleep(5);
     }
+
+    _ec_destroy_subsystems(s_hook_init, &context);
 
     _ec_destroy_subsystems(s_module_init, &context);
 
@@ -369,6 +387,11 @@ bool ec_disable_module(ProcessContext *context)
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
             udelay(100);
             break;
+
+        case ModuleStateBroken:
+            TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to disable module while module is in broken state", __func__);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
+            return -EPERM;
     }
 
 
@@ -468,6 +491,12 @@ bool ec_enable_module(ProcessContext *context)
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to enable module while module is in enabling state", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
             return false; //-EPERM;
+
+        case ModuleStateBroken:
+            TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to enable module while module is in broken state", __func__);
+            ec_write_unlock(&g_module_state_info.module_state_lock, context);
+            return false; //-EPERM;
+
         case ModuleStateEnabled:
         {
             TRACE(DL_INFO, "%s Received a request to enable a module that's already enabled, so no-op. ", __func__);
