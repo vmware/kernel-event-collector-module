@@ -131,27 +131,27 @@ test_probe:
     - master
     - /^release-/
 
-test_kernel:
-  script:
-    - JOB_URL=$JENKINS_KERNEL_SELF_TEST_JOB_URL
-    - TEST_ON_UPSTREAM_PACKAGE=kernel_event_collector_module
-    - SINGLE_VM=CentOS_7
-    - *test_script
-  stage: build_downstream
-  tags:
-    - docker
-    - docker-socket
-  image:
-    # TODO: Fix the image keys
-    name: ${ARTIFACTORY_URL}:5000/cbdev/centos6-linux-dev:201105_1907
-    entrypoint: [""]
-  variables:
-    GIT_STRATEGY: none
-  allow_failure: false
-  except:
-    - master
-    - /^release-/
-
+# TODO: Uncomment as a part of PSCLNX-10338 to add a kernel self test job to the CI
+#test_kernel:
+#  script:
+#    - JOB_URL=$JENKINS_KERNEL_SELF_TEST_JOB_URL
+#    - TEST_ON_UPSTREAM_PACKAGE=kernel_event_collector_module
+#    - SINGLE_VM=CentOS_7
+#    - *test_script
+#  stage: build_downstream
+#  tags:
+#    - docker
+#    - docker-socket
+#  image:
+#    # TODO: Fix the image keys
+#    name: ${ARTIFACTORY_URL}:5000/cbdev/centos6-linux-dev:201105_1907
+#    entrypoint: [""]
+#  variables:
+#    GIT_STRATEGY: none
+#  allow_failure: false
+#  except:
+#    - master
+#    - /^release-/
 
 # Build downstream
 build_endpoint_common:
