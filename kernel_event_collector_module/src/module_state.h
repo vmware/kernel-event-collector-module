@@ -12,7 +12,8 @@ typedef enum {
     ModuleStateEnabled = 1,
     ModuleStateDisabling = 2,
     ModuleStateDisabled = 3,
-    ModuleStateEnabling = 4
+    ModuleStateEnabling = 4,
+    ModuleStateBroken = 5
 } ModuleState;
 
 typedef struct _ModuleStateInfo {
