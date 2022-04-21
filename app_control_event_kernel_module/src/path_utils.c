@@ -20,7 +20,7 @@
 
 #define DYNSEC_PATH_MAX (PATH_MAX)
 
-int debug_append_component = 1;
+int debug_append_component = 0;
 
 struct path_symz {
     char *(* dentry_path_raw)(const struct dentry *dentry, char *buf, int buflen);
@@ -98,7 +98,7 @@ char *dynsec_d_path(const struct path *path, char *buf, int buflen)
 }
 
 // Helper to use when ENAMETOOLONG is returned
-const char *find_trunc_path(const char *buf, int buflen)
+static const char *find_trunc_path(const char *buf, int buflen)
 {
     int i;
 
@@ -495,8 +495,8 @@ extern void fill_in_preaction_data(struct dynsec_file *dynsec_file,
                                    const struct path *parent_path);
 
 char *build_preaction_path(int dfd, const char __user *filename,
-                             int lookup_flags,
-                             struct dynsec_file *file)
+                           int lookup_flags,
+                           struct dynsec_file *file)
 {
     struct path parent_path;
     char namebuf[NAME_MAX + 1];
