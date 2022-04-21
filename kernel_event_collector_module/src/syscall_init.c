@@ -159,13 +159,14 @@ void restore_32bit_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 }
 #endif
 
+#define DEBUGGING_HOOK_FAILURE 0
+
 static bool s_hooks_replaced;
 
 bool ec_do_sys_initialize(ProcessContext *context)
 {
     bool rval = false;
     p_sys_call_table syscall_table;
-
     // If the hooks are not enabled, then no point in continuing.
     if (!(g_enableHooks & SYSCALL_HOOK_MASK)) return true;
 
@@ -190,6 +191,10 @@ bool ec_do_sys_initialize(ProcessContext *context)
 
 CATCH_DEFAULT:
     s_hooks_replaced = rval;
+
+#if DEBUGGING_HOOK_FAILURE
+    return false;
+#endif
     return rval;
 }
 
