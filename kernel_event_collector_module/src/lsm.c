@@ -46,12 +46,8 @@ static unsigned int cblsm_hooks_count;
 static struct security_hook_list cblsm_hooks[64];  // [0..39] not needed?
 #endif  //}
 
-#define DEBUGGING_HOOK_FAILURE 0
 bool ec_do_lsm_initialize(ProcessContext *context)
 {
-#if DEBUGGING_HOOK_FAILURE
-    return false;
-#endif
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     TRY_CB_RESOLVED(security_ops);
 

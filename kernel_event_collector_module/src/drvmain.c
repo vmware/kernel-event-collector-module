@@ -240,12 +240,14 @@ int __init ec_init(void)
     return 0;
 
     // Once hooks are added, module is not supposed to be removed
-    // If hooks are not added, set the module state to "broken" - only "rmmod" can remove it
+    // If hooks initialization failed, we set the module state to "broken" - only "rmmod" can remove it
+    // A return of 0 here results in the module remaining loaded but in a "broken" state
+    // Otherwise, a return of -1 results in Linux unloading the module and leaving hooks in place
 CATCH_HOOKS:
     ec_disable_module(&context);
     ec_set_module_state(&context, ModuleStateBroken);
     TRACE(DL_ERROR, "Kernel sensor initialization failed - module loaded but disabled");
-    return -1;
+    return 0;
 
 CATCH_SUBSYSTEMS:
     // We get here after running the tests or the enable fails-
