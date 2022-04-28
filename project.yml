@@ -16,9 +16,9 @@ service-env:
 
     # Imported from cb-vendor
     CPPUTEST_VERSION: CppUTest/3.8+1048@${DEFAULT_CHANNEL}
-    BOOST_VERSION: Boost/1.74.0+1048@${DEFAULT_CHANNEL}
-    ELFUTILS_VERSION: elfutils/0.174+1048@${DEFAULT_CHANNEL}
-    BCC_VERSION: bcc/0.20.0+1113@${DEFAULT_CHANNEL}
+    BOOST_VERSION: Boost/1.74.0+1397@${DEFAULT_CHANNEL}
+    ELFUTILS_VERSION: elfutils/0.174+1397@${DEFAULT_CHANNEL}
+    BCC_VERSION: bcc/0.24.0+1397@${DEFAULT_CHANNEL}
     LLVM_VERSION: llvm/9.0.1+1048@${DEFAULT_CHANNEL}
 
     KERNEL_HEADERS_VERSION: # Note, this is needed here for proper dependency tracking
