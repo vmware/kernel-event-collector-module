@@ -189,6 +189,8 @@ void ec_getsockname(struct sock *sk, CB_SOCK_ADDR *localAddr)
     CANCEL_VOID(sk);
     CANCEL_VOID(localAddr);
 
+    memset(localAddr, 0, sizeof(*localAddr));
+
     inet = inet_sk(sk);
 
     localAddr->sa_addr.sa_family = sk->sk_family;
@@ -217,6 +219,8 @@ void ec_getpeername(struct sock *sk, CB_SOCK_ADDR *remoteAddr)
     CANCEL_VOID(sk);
     CANCEL_VOID(remoteAddr);
 
+    memset(remoteAddr, 0, sizeof(*remoteAddr));
+
     inet = inet_sk(sk);
 
     remoteAddr->sa_addr.sa_family = sk->sk_family;
@@ -238,6 +242,9 @@ bool ec_get_addrs_from_skb(struct sock *sk, struct sk_buff *skb, CB_SOCK_ADDR *s
 
     TRY(skb);
     TRY(CHECK_SK_PROTO(sk));
+
+    memset(srcAddr, 0, sizeof(*srcAddr));
+    memset(dstAddr, 0, sizeof(*dstAddr));
 
     family = sk->sk_family;
 
