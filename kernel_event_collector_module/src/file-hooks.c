@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-// Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
+// Copyright (c) 2019-2022 VMware, Inc. All rights reserved.
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
 #include "priv.h"
@@ -297,7 +297,7 @@ long __ec_sys_open(
     long                fd;
     CB_EVENT_TYPE       eventType = 0;
 
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DISABLED);
+    IF_MODULE_DISABLED_GOTO(context, CATCH_DISABLED);
 
     if ((args->flags & O_CREAT) && !ec_file_exists(args->dfd, args->filename))
     {
@@ -315,7 +315,7 @@ long __ec_sys_open(
 CATCH_DISABLED:
     fd = call_open_func(args);
 
-    IF_MODULE_DISABLED_GOTO(context, CATCH_DEFAULT);
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DEFAULT);
 
     if (!IS_ERR_VALUE(fd) && eventType)
     {
@@ -382,19 +382,18 @@ long __ec_sys_unlink(
     long ret;
     PathData *path_data = NULL;
 
-    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
+    // __ec_get_path_data can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, since that can block module disable
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DISABLED);
+    IF_MODULE_DISABLED_GOTO(context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
-    //  after a successful operation
+    // after a successful operation
     path_data = __ec_get_path_data(args->dfd, args->filename, context);
 
 CATCH_DISABLED:
     ret = call_unlink_func(args);
 
-    IF_MODULE_DISABLED_GOTO(context, CATCH_DEFAULT);
-
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DEFAULT);
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && path_data)
@@ -429,12 +428,12 @@ long __ec_sys_rename(
     PathData *new_path_data_pre_rename = NULL;
     PathData *new_path_data_post_rename = NULL;
 
-    // __ec_get_file_data_from_name can block if the device is unavailable (e.g. network timeout)
+    // __ec_get_path_data can block if the device is unavailable (e.g. network timeout)
     // so do not begin hook tracking yet, since that can block module disable
-    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DISABLED);
+    IF_MODULE_DISABLED_GOTO(context, CATCH_DISABLED);
 
     // Collect data about the file before it is modified.  The event will be sent
-    //  after a successful operation
+    // after a successful operation
     old_path_data = __ec_get_path_data(args->olddirfd, args->oldname, context);
 
     // Only lookup new path when old path was found
@@ -447,8 +446,7 @@ long __ec_sys_rename(
 CATCH_DISABLED:
     ret = call_rename_func(args);
 
-    IF_MODULE_DISABLED_GOTO(context, CATCH_DEFAULT);
-
+    BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(context, CATCH_DEFAULT);
     // Now the active count is incremented and the hook is being tracked
 
     if (!IS_ERR_VALUE(ret) && old_path_data)
