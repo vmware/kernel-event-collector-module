@@ -89,6 +89,7 @@ while (false)
 do {                                                                           \
    if ((CONTEXT)->decr_active_call_count_on_exit)                              \
    {                                                                           \
+       (CONTEXT)->decr_active_call_count_on_exit = false;                      \
        ec_hook_tracking_del_entry((CONTEXT));                                  \
        this_cpu_dec(module_active_inuse);                                      \
    }                                                                           \
