@@ -6,7 +6,6 @@
 #include <linux/kernel.h>
 #include <linux/version.h>
 #include "lsm_mask.h"
-#include "version.h"
 #include "symbols.h"
 
 #include "stall_reqs.h"
