@@ -18,7 +18,6 @@
 #include "dynsec.h"
 #include "stall_tbl.h"
 #include "factory.h"
-#include "version.h"
 #include "inode_cache.h"
 #include "task_cache.h"
 #include "hooks.h"

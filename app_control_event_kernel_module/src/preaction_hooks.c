@@ -12,7 +12,6 @@
 
 #include "preaction_hooks.h"
 #include "symbols.h"
-#include "version.h"
 #include "dynsec.h"
 #include "lsm_mask.h"
 
