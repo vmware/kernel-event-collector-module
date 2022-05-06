@@ -1,4 +1,4 @@
-/* Copyright (c) 2021 VMWare, Inc. All rights reserved. */
+/* Copyright (c) 2021-2022 VMware, Inc. All rights reserved. */
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
 #pragma once
@@ -30,9 +30,9 @@ namespace bpf_probe {
 
             header.tid = pid;
             header.pid = pid;
-			header.ppid = parent_pid;
+            header.ppid = parent_pid;
             header.uid = 0;
-		    header.mnt_ns = 0;
+            header.mnt_ns = 0;
         }
 
         static Event Data(
@@ -59,7 +59,26 @@ namespace bpf_probe {
             uint32_t     pid,
             uint32_t     parent_pid)
         {
-            return Data(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, event_time, pid, parent_pid);
+            auto type  = EVENT_PROCESS_CLONE;
+            auto state = PP_NO_EXTRA_DATA;
+
+            Event event(new char[sizeof(struct file_data)]);
+
+            if (event)
+            {
+                auto data = static_cast<struct file_data *>((void*)event.get());
+                InitHeader(
+                    data->header, type, state,
+                    event_time, pid, parent_pid);
+
+                // These could be added to the function signature
+                data->device = 0;
+                data->inode = 0;
+                data->flags = 0;
+                data->prot = 0;
+            }
+
+            return event;
         }
 
         static Event Exit(
@@ -287,9 +306,8 @@ namespace bpf_probe {
                 data->protocol = protocol;
                 data->local_port = local_port;
                 data->remote_port = remote_port;
-
-                memcpy(&data->local_addr, &local_addr, sizeof(data->local_addr));
-                memcpy(&data->remote_addr, &remote_addr, sizeof(data->remote_addr));
+                memcpy(& data->local_addr6[0], local_addr, sizeof(data->local_addr6));
+                memcpy(& data->remote_addr6[0], remote_addr, sizeof(data->remote_addr6));
             }
             return event;
         }
