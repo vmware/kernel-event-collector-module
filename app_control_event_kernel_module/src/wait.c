@@ -67,6 +67,9 @@ retry:
         atomic_inc(&stall_timeout_ctr);
 
         if (atomic_read(&stall_timeout_ctr) >= DYNSEC_STALL_TIMEOUT_CTR_LIMIT) {
+            stall_tbl_disable(stall_tbl);
+            task_cache_clear();
+            inode_cache_clear();
             lock_config();
             global_config.stall_mode = DEFAULT_DISABLED;
             unlock_config();
