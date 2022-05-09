@@ -206,6 +206,8 @@ int handle_stall_ioc(const struct dynsec_stall_ioc_hdr *hdr)
                 task_cache_clear();
                 inode_cache_clear();
                 global_config.stall_mode = DEFAULT_ENABLED;
+                // reset counter
+                atomic_set(&stall_timeout_ctr, 0);
             }
         }
     }
