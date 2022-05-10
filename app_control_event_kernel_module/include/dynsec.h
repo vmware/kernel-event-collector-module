@@ -528,6 +528,10 @@ struct dynsec_stall_ioc_hdr {
     uint32_t stall_timeout_deny;
 };
 
+// 1 minute time, 5 sec timeout...
+// 60/5 = 12 counter
+#define DYNSEC_STALL_TIMEOUT_CTR_LIMIT      12
+
 // Eventually will contain mix of global
 // and per-client settings and state of kmod.
 struct dynsec_config {

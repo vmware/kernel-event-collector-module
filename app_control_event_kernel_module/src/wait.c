@@ -15,6 +15,9 @@
 
 int dynsec_debug_stall = 0;
 
+// counter to track consecutive stall timeouts
+atomic_t  stall_timeout_ctr = ATOMIC_INIT(0);
+
 static int do_stall_interruptible(struct stall_entry *entry, int *response)
 {
     int ret = 0;
@@ -59,6 +62,20 @@ retry:
     else if (wait_ret == 0) {
         // Where default response is desired most and hit most frequently
 
+        // timeout not extended, increament counter
+        // for timed_out events.
+        atomic_inc(&stall_timeout_ctr);
+
+        if (atomic_read(&stall_timeout_ctr) >= DYNSEC_STALL_TIMEOUT_CTR_LIMIT) {
+            stall_tbl_disable(stall_tbl);
+            task_cache_clear();
+            inode_cache_clear();
+            lock_config();
+            global_config.stall_mode = DEFAULT_DISABLED;
+            unlock_config();
+            pr_warn("Stalling disabled after many events timed out.\n");
+        }
+
         if (dynsec_debug_stall) {
             pr_info("%s:%d response:%d timedout:%lu jiffies\n", __func__, __LINE__,
                     local_response, timeout);
@@ -66,6 +83,9 @@ retry:
     }
     // Conditional was true, likely wake_up
     else {
+        // reset this value
+        atomic_set(&stall_timeout_ctr, 0);
+
         // Acts more like a memory barrier.
         // Copy all data needed for possible continuation.
         spin_lock(&entry->lock);
@@ -186,6 +206,8 @@ int handle_stall_ioc(const struct dynsec_stall_ioc_hdr *hdr)
                 task_cache_clear();
                 inode_cache_clear();
                 global_config.stall_mode = DEFAULT_ENABLED;
+                // reset counter
+                atomic_set(&stall_timeout_ctr, 0);
             }
         }
     }

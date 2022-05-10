@@ -188,6 +188,10 @@ static int dynsec_stall_release(struct inode *inode, struct file *file)
     // Reset back to default settings
     global_config = preserved_config;
 
+    // Enter bypass mode, no stalling 
+    global_config.bypass_mode = 1;
+    global_config.stall_mode = 0;
+
     return 0;
 }
 
