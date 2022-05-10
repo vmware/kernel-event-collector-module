@@ -1,8 +1,5 @@
 FROM ubuntu:21.10
 
-RUN apt-get update && apt-get -y install libelf1
-
-ADD bin/libbpf_sensor /
-RUN chmod +x /libbpf_sensor
-
+# on a non-mac setting - we can do this as a second stage in the build container
+COPY bin/libbpf_sensor /
 CMD ["/libbpf_sensor"]

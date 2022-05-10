@@ -9,6 +9,8 @@ LIBBPF_SRC = $(abspath ./libbpf/src)
 LIBBPF_OBJ = $(abspath ./$(OUTPUT)/libbpf.a)
 LIBBPF_OBJDIR = $(abspath ./$(OUTPUT)/libbpf)
 LIBBPF_DESTDIR = $(abspath ./$(OUTPUT))
+LIBELF_OBJ = $(abspath ./libelf.a)
+ZLIB_OBJ = $(abspath ./libz.a)
 
 CC = gcc
 CLANG = clang
@@ -74,7 +76,7 @@ sensor.skel.h: sensor.bpf.o
 # static here means libbpf statically compiled not full static binaries
 
 libbpf_sensor: libbpf-static | sensor.skel.h
-	$(CLANG) -lelf -lz -I$(OUTPUT) libbpf_sensor.c -o $@ $(LIBBPF_OBJ)
+	$(CLANG) -flto -I$(OUTPUT) libbpf_sensor.c -o $@ $(LIBBPF_OBJ) $(LIBELF_OBJ) $(ZLIB_OBJ)
 
 # output
 

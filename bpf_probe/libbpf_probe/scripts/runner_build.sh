@@ -9,6 +9,7 @@ BUILD_IMAGE=$REP/libbpf_builder
 RUN_IMAGE=$REP/libbpf_test
 TAG=sensor
 
+# this will only work on hosts with BPF enabled kernel (not mac docker host VM)
 echo "--- running remote build container ---"
 kubectl -n default run libbpf-build --image-pull-policy Always --image $BUILD_IMAGE:$TAG
 while true
@@ -23,18 +24,6 @@ done
 
 echo "--- remote build finished ---"
 
-#echo "--- copying object file ---"
-#while true
-#do
-#	kubectl cp default/libbpf-build:/libbpf_sensor/sensor.bpf.o ./bin/sensor.bpf.o
-#	if [[ $? -eq 0 ]]; then
-#	  break
-#	fi
-#	echo "--- remote copy FAILED ---"
-#	sleep 5
-#	echo "--- retry ---"
-#done
-
 echo "--- copying exec file ---"
 while true
 do
@@ -46,6 +35,8 @@ do
 	sleep 5
 	echo "--- retry ---"
 done
+
+chmod +x ./bin/libbpf_sensor
 
 echo "--- building run container ---"
 docker build . -f run.Dockerfile -t $RUN_IMAGE:$TAG
