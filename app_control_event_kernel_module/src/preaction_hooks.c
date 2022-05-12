@@ -340,6 +340,8 @@ out:
 static void dynsec_do_create(int dfd, const char __user *filename,
                              int flags, umode_t umode)
 {
+    int ret;
+    struct path path;
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
     int lookup_flags = LOOKUP_FOLLOW;
@@ -365,10 +367,19 @@ static void dynsec_do_create(int dfd, const char __user *filename,
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
+    ret = user_path_at(dfd, filename, lookup_flags, &path);
+    if (!ret) {
+        path_put(&path);
+        return;
+    }
+    if (ret != -ENOENT) {
+        return;
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CREATE, DYNSEC_HOOK_TYPE_OPEN,
                                report_flags, GFP_KERNEL);
 
-    if (!fill_in_preaction_create(event, dfd, filename, flags, umode)) {
+    if (!fill_in_preaction_create(event, dfd, filename, flags, umode | S_IFREG)) {
         prepare_non_report_event(DYNSEC_EVENT_TYPE_CREATE, GFP_KERNEL);
         free_dynsec_event(event);
         return;
@@ -432,12 +443,18 @@ DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
 DEF_DYNSEC_SYS(mknod, const char __user *filename,
                umode_t mode, unsigned dev)
 {
+    umode_t local_mode;
     SYS_ARG_1(const char __user *, filename);
     SYS_ARG_2(umode_t, mode);
     SYS_ARG_3(unsigned, dev);
 
-    if ((mode & S_IFMT) == S_IFREG) {
-        dynsec_do_create(AT_FDCWD, filename, O_CREAT, mode);
+    // Empty file type defaults to regular file
+    local_mode = mode;
+    if (!(local_mode & S_IFMT)) {
+        local_mode |= S_IFREG;
+    }
+    if (S_ISREG(local_mode)) {
+        dynsec_do_create(AT_FDCWD, filename, O_CREAT, local_mode);
     }
     return ret_sys(mknod, filename, mode, dev);
 }
@@ -445,13 +462,19 @@ DEF_DYNSEC_SYS(mknod, const char __user *filename,
 DEF_DYNSEC_SYS(mknodat, int dfd, const char __user *filename,
                umode_t mode, unsigned dev)
 {
+    umode_t local_mode;
     SYS_ARG_1(int, dfd);
     SYS_ARG_2(const char __user *, filename);
     SYS_ARG_3(umode_t, mode);
     SYS_ARG_4(unsigned, dev);
 
-    if ((mode & S_IFMT) == S_IFREG) {
-        dynsec_do_create(dfd, filename, O_CREAT, mode);
+    // Empty file type defaults to regular file
+    local_mode = mode;
+    if (!(local_mode & S_IFMT)) {
+        local_mode |= S_IFREG;
+    }
+    if (S_ISREG(local_mode)) {
+        dynsec_do_create(dfd, filename, O_CREAT, local_mode);
     }
     return ret_sys(mknodat, dfd, filename, mode, dev);
 }
@@ -619,7 +642,7 @@ static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MKDIR, DYNSEC_HOOK_TYPE_MKDIR,
                                report_flags, GFP_KERNEL);
-    if (!fill_in_preaction_create(event, dfd, pathname, O_CREAT, umode)) {
+    if (!fill_in_preaction_create(event, dfd, pathname, O_CREAT, umode | S_IFDIR)) {
         prepare_non_report_event(DYNSEC_EVENT_TYPE_MKDIR, GFP_KERNEL);
         free_dynsec_event(event);
         return;
