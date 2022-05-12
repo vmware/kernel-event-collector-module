@@ -18,6 +18,7 @@
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "factory.h"
+#include "mem.h"
 
 
 struct syscall_hooks {
@@ -421,7 +422,7 @@ DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
     // copy in how
 
     if (!copy_from_user(&khow, how, sizeof(khow))) {
-        dynsec_do_create(dfd, filename, khow->flags, khow->mode);
+        dynsec_do_create(dfd, filename, khow.flags, khow.mode);
     }
 
     return ret_sys(openat2, dfd, filename, how, usize);
@@ -1019,55 +1020,6 @@ static void init_our_syscall_hooks(uint64_t lsm_hooks)
     ours = &in_our_kmod;
 }
 
-#ifdef CONFIG_X86_64
-#define GPF_DISABLE() write_cr0(read_cr0() & (~ 0x10000))
-#define GPF_ENABLE()  write_cr0(read_cr0() | 0x10000)
-
-static inline bool set_page_state_rw(void **tbl, unsigned long *old_page_rw)
-{
-    unsigned int level;
-    unsigned long irq_flags;
-    pte_t *pte = NULL;
-
-    local_irq_save(irq_flags);
-    local_irq_disable();
-
-    pte = lookup_address((unsigned long)tbl, &level);
-    if (!pte) {
-        local_irq_restore(irq_flags);
-        return false;
-    }
-
-    *old_page_rw = pte->pte & _PAGE_RW;
-    pte->pte |= _PAGE_RW;
-
-    local_irq_restore(irq_flags);
-    return true;
-}
-
-static inline void restore_page_state(void **tbl, unsigned long page_rw)
-{
-    unsigned int level;
-    unsigned long irq_flags;
-    pte_t *pte = NULL;
-
-    local_irq_save(irq_flags);
-    local_irq_disable();
-
-    pte = lookup_address((unsigned long)tbl, &level);
-    if (!pte)
-    {
-        local_irq_restore(irq_flags);
-        return;
-    }
-
-    // If the page state was originally RO, restore it to RO.
-    // We don't just assign the original value back here in case some other bits were changed.
-    if (!page_rw) pte->pte &= ~_PAGE_RW;
-    local_irq_restore(irq_flags);
-}
-#endif /* CONFIG_X86_64 */
-
 static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 {
     unsigned long flags;
@@ -1092,7 +1044,7 @@ static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
     get_cpu();
     GPF_DISABLE();
 
-    if (!set_page_state_rw(table, &page_rw_set)) {
+    if (!set_page_state_rw((void *)table, &page_rw_set)) {
         goto out_unlock;
     }
 
@@ -1132,7 +1084,7 @@ static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 #undef set_syscall
 #undef cond_set_syscall
 
-    restore_page_state(table, page_rw_set);
+    restore_page_state((void *)table, page_rw_set);
 
 out_unlock:
     GPF_ENABLE();

@@ -113,10 +113,12 @@ static void dummy_post_handler(struct kprobe *p, struct pt_regs *regs,
                 unsigned long flags)
 {
 }
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 static int dummy_fault_handler(struct kprobe *kprobe, struct pt_regs *regs, int trapnr)
 {
     return 0;
 }
+#endif
 
 // hold tp_lock
 static void __enable_clone_tp(uint32_t tp_hooks)
@@ -134,7 +136,9 @@ static void __enable_clone_tp(uint32_t tp_hooks)
     new_task_kprobe->symbol_name = "wake_up_new_task";
     new_task_kprobe->pre_handler   = dynsec_wake_up_new_task;
     new_task_kprobe->post_handler  = dummy_post_handler;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
     new_task_kprobe->fault_handler = dummy_fault_handler;
+#endif
 
     if (register_kprobe(new_task_kprobe) >= 0 || new_task_kprobe->addr) {
         enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;

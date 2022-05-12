@@ -22,7 +22,12 @@
 #include "path_utils.h"
 #include "wait.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
+#else
+// TODO: Determine if bprm_creds_from_file requires a new hook
+int dynsec_bprm_creds_for_exec(struct linux_binprm *bprm)
+#endif
 {
     struct dynsec_event *event = NULL;
     int ret = 0;

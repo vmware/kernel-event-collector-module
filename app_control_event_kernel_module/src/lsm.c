@@ -4,6 +4,15 @@
 // Adapted from kernel-event-collector-module
 // kver 4.2 appears to be the kernel with the hook lists
 
+//
+// Works on kernels:
+//      EL7         3.10.0
+//      EL8         4.18.0
+//      EL9         5.14.0
+//
+// TODO: Improve kernel version ABI checks
+//
+
 #include <linux/version.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)  //{
 #include <linux/lsm_hooks.h>  // security_hook_heads
@@ -14,6 +23,7 @@
 #include "lsm_mask.h"
 #include "dynsec.h"
 #include "hooks.h"
+#include "mem.h"
 
 // checkpatch-ignore: AVOID_EXTERNS
 #define DEBUGGING_SANITY 0
@@ -37,6 +47,8 @@
 
 // may need another hook
 #define DYNSEC_LSM_bprm_set_creds       DYNSEC_HOOK_TYPE_EXEC
+#define DYNSEC_LSM_bprm_creds_for_exec  DYNSEC_HOOK_TYPE_EXEC
+#define DYNSEC_LSM_bprm_creds_from_file DYNSEC_HOOK_TYPE_EXEC
 
 #define DYNSEC_LSM_task_kill            DYNSEC_HOOK_TYPE_SIGNAL
 // depends on kver
@@ -173,7 +185,11 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     //
     // Now add our hooks
     //
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
     CB_LSM_SETUP_HOOK(bprm_set_creds); // process banning  (exec)
+#else
+    CB_LSM_SETUP_HOOK(bprm_creds_for_exec);
+#endif
     CB_LSM_SETUP_HOOK(inode_unlink);   // security_inode_unlink
     CB_LSM_SETUP_HOOK(inode_rmdir);   // security_inode_rmdir
     CB_LSM_SETUP_HOOK(inode_rename);   // security_inode_rename
@@ -205,13 +221,36 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     if (enabled_lsm_hooks) {
         *(p_lsm->security_ops) = &g_combined_ops;
     }
-#else  //}{
+// Determine which kernel requires rw hooks
+#elif LINUX_VERSION_CODE <= KERNEL_VERSION(4, 18, 0)
     {
         unsigned int j;
 
         for (j = 0; j < cblsm_hooks_count; ++j) {
             cblsm_hooks[j].lsm = "dynsec";
             hlist_add_tail_rcu(&cblsm_hooks[j].list, cblsm_hooks[j].head);
+        }
+    }
+#else  //}{
+    if (cblsm_hooks_count > 0) {
+        unsigned int j;
+
+        for (j = 0; j < cblsm_hooks_count; ++j) {
+            unsigned long flags = 0;
+            unsigned long page_rw_set = 0;
+
+            local_irq_save(flags);
+            local_irq_disable();
+            get_cpu();
+            GPF_DISABLE();
+            if (set_page_state_rw((void *)cblsm_hooks[j].head, &page_rw_set)) {
+                cblsm_hooks[j].lsm = "dynsec";
+                hlist_add_tail_rcu(&cblsm_hooks[j].list, cblsm_hooks[j].head);
+                restore_page_state((void *)cblsm_hooks[j].head, page_rw_set);
+            }
+            GPF_ENABLE();
+            put_cpu();
+            local_irq_restore(flags);
         }
     }
 #endif  //}
@@ -319,8 +358,30 @@ void dynsec_lsm_shutdown(void)
         *(p_lsm->security_ops) = g_original_ops_ptr;
         enabled_lsm_hooks = 0;
         p_lsm = NULL;
-#else  // }{ >= KERNEL_VERSION(4,0,0)
+// TODO: Figure out exact kernel has security_hook_heads set as read-only
+#elif LINUX_VERSION_CODE <= KERNEL_VERSION(4,18,0)
         security_delete_hooks(cblsm_hooks, cblsm_hooks_count);
+#else
+        {
+            unsigned int j;
+
+            for (j = 0; j < cblsm_hooks_count; j++) {
+                unsigned long flags = 0;
+                unsigned long page_rw_set = 0;
+
+                local_irq_save(flags);
+                local_irq_disable();
+                get_cpu();
+                GPF_DISABLE();
+                if (set_page_state_rw((void *)cblsm_hooks[j].head, &page_rw_set)) {
+                    hlist_del_rcu(&cblsm_hooks[j].list);
+                    restore_page_state((void *)cblsm_hooks[j].head, page_rw_set);
+                }
+                GPF_ENABLE();
+                put_cpu();
+                local_irq_restore(flags);
+            }
+        }
 #endif  //}
     } else
     {

@@ -26,10 +26,12 @@ static void __kprobes dummy_post_handler(struct kprobe *p, struct pt_regs *regs,
 {
 
 }
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 static int dummy_fault_handler(struct kprobe *p, struct pt_regs *regs, int trapnr)
 {
     return 0;
 }
+#endif
 
 static int find_symbol_by_kprobe(const char *symbol_name, unsigned long *addr)
 {
@@ -40,7 +42,9 @@ static int find_symbol_by_kprobe(const char *symbol_name, unsigned long *addr)
         .symbol_name   = symbol_name,
         .pre_handler   = dummy_pre_handler,
         .post_handler  = dummy_post_handler,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
         .fault_handler = dummy_fault_handler,
+#endif
     };
 
     ret = register_kprobe(&p);
