@@ -1870,8 +1870,8 @@ static void fill_in_parent_data(struct dynsec_file *dynsec_file,
     }
 }
 
-static void fill_in_preaction_data(struct dynsec_file *dynsec_file,
-                                   const struct path *parent_path)
+void fill_in_preaction_data(struct dynsec_file *dynsec_file,
+                            const struct path *parent_path)
 {
     if (dynsec_file && parent_path) {
         if (parent_path->dentry) {
@@ -2133,10 +2133,14 @@ bool fill_in_inode_create(struct dynsec_event *dynsec_event,
     if (!dir || !IS_POSIXACL(dir)) {
         create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
     }
-    if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
-        create->kmsg.msg.file.umode |= S_IFDIR;
-    } else {
-        create->kmsg.msg.file.umode |= S_IFREG;
+    create->kmsg.msg.file.umode |= (uint16_t)(umode & S_IFMT);
+
+    if (!(create->kmsg.msg.file.umode & S_IFMT)) {
+        if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
+            create->kmsg.msg.file.umode |= S_IFDIR;
+        } else if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE) {
+            create->kmsg.msg.file.umode |= S_IFREG;
+        }
     }
 
     create->path = dynsec_build_dentry(dentry,
@@ -2484,203 +2488,6 @@ bool fill_in_task_kill(struct dynsec_event *dynsec_event,
     return true;
 }
 
-//#ifndef CONFIG_SECURITY_PATH
-static char *build_preaction_path(int dfd, const char __user *filename,
-                                  int lookup_flags, struct dynsec_file *file)
-{
-    char *filebuf = NULL;
-    char *input_buf = NULL;
-    char *last_component = NULL;
-    char *p = NULL;
-    char *last = NULL;
-    char *norm_path = NULL;
-    int total_len = 0;
-    int input_len = 0;
-    int last_len = 0;
-    int error = -EINVAL;
-    long max_input_len;
-    struct path parent_path;
-
-    lookup_flags |= LOOKUP_FOLLOW;
-
-    if (!filename || !file) {
-        return ERR_PTR(-EINVAL);
-    }
-    if (dfd < 0 && dfd != AT_FDCWD) {
-        return ERR_PTR(-EINVAL);
-    }
-
-    // A couple extra bytes to detect invalid component
-    last_component = kzalloc(NAME_MAX + 2, GFP_KERNEL);
-    if (!last_component) {
-        return ERR_PTR(-ENOMEM);
-    }
-    // Setup raw last component
-    last = last_component + NAME_MAX;
-    *last = '\0';
-
-    filebuf = kzalloc(PATH_MAX, GFP_KERNEL);
-    if (!filebuf) {
-        error = -ENOMEM;
-        goto out_err_free;
-    }
-    filebuf[0] = 0;
-    input_buf = filebuf;
-
-
-    if (dfd >= 0) {
-        char *bufp;
-        struct file *dfd_file = fget(dfd);
-
-        if (IS_ERR_OR_NULL(dfd_file)) {
-            goto out_err_free;
-        }
-        if (!dfd_file->f_path.dentry || !dfd_file->f_path.mnt) {
-            fput(dfd_file);
-            goto out_err_free;
-        }
-
-        // // Might as well check if dir
-        // if (!dfd_file->f_path.dentry || !d_is_dir(dfd_file->f_path.dentry)) {
-        //     error = -ENOTDIR;
-        //     fput(dfd_file);
-        //     goto out_err_free;
-        // }
-        if (!dfd_file->f_path.dentry ||
-            !dfd_file->f_path.dentry->d_inode ||
-            !S_ISDIR(dfd_file->f_path.dentry->d_inode->i_mode)) {
-            error = -ENOTDIR;
-            fput(dfd_file);
-            goto out_err_free;
-        }
-
-        bufp = dynsec_d_path(&dfd_file->f_path, filebuf, PATH_MAX);
-        fput(dfd_file);
-        dfd_file = NULL;
-
-        if (IS_ERR_OR_NULL(bufp) || !*bufp) {
-            error = -ENAMETOOLONG;
-            goto out_err_free;
-        }
-        total_len = strlen(bufp);
-        if (total_len >= PATH_MAX) {
-            error = -ENAMETOOLONG;
-            goto out_err_free;
-        }
-        memmove(filebuf, bufp, total_len);
-
-        // Setup for appending user string
-        filebuf[total_len] = '/';
-        total_len += 1;
-        input_buf = filebuf + total_len;
-    }
-
-    // TODO: Allocate own buffer for user filepath
-    max_input_len = PATH_MAX - total_len;
-    input_buf[max_input_len - 1] = 0; // aka filebuf[PATH_MAX - 1] = 0
-    input_len = strncpy_from_user(input_buf, filename, max_input_len);
-    if (input_len < 0) {
-        error = input_len;
-        goto out_err_free;
-    }
-    if (input_len == 0) {
-        goto out_err_free;
-    }
-    if (input_len == max_input_len &&
-        input_buf[max_input_len - 1] != 0) {
-        error = -ENAMETOOLONG;
-        goto out_err_free;
-    }
-    total_len += input_len;
-
-    // pr_info("%s:%d dfd:%d input_len:%d '%s'", __func__, __LINE__,
-    //         dfd, input_len, filebuf);
-
-
-    // Chomp trailing slashes
-    p = input_buf + input_len;
-    while (p >= input_buf && *p == '/') {
-        *p = '\0';
-        p--;
-        total_len--;
-    }
-
-    // copy component until we hit a barrier
-    while (p >= input_buf && last > last_component) {
-        if (*p == '/') {
-            break;
-        }
-        last--;
-        *last = *p;
-        last_len++;
-
-        *p = '\0';
-        p--;
-        total_len--;
-    }
-    if (last_len > NAME_MAX) {
-        error = -ENAMETOOLONG;
-        goto out_err_free;
-    }
-    if (!last_len) {
-        error = -EINVAL;
-        goto out_err_free;
-    }
-
-    // Normalize the filepath
-    error = kern_path(filebuf, lookup_flags, &parent_path);
-    if (error) {
-        goto out_err_free;
-    }
-
-    error = -ENAMETOOLONG;
-
-    fill_in_preaction_data(file, &parent_path);
-    norm_path = dynsec_build_path(&parent_path, file, GFP_KERNEL);
-    path_put(&parent_path);
-
-    // Append the last component to the normalized or raw input data
-    if (IS_ERR_OR_NULL(norm_path)) {
-        int raw_len = strlen(filebuf);
-
-        if (raw_len + 1 + last_len > PATH_MAX) {
-            error = -ENAMETOOLONG;
-            goto out_err_free;
-        }
-        filebuf[raw_len] = '/';
-        raw_len += 1;
-        strlcpy(filebuf + raw_len, last, last_len);
-        file->path_size = (uint16_t)strlen(filebuf) + 1;
-        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_RAW;
-        kfree(last_component);
-        return filebuf;
-    } else {
-        int parent_len = strlen(norm_path);
-
-        // parent + '/' + last component
-        if (parent_len + 1 + last_len > PATH_MAX) {
-            error = -ENAMETOOLONG;
-            kfree(norm_path);
-            goto out_err_free;
-        }
-
-        norm_path[parent_len] = '/';
-        parent_len += 1;
-
-        strlcpy(norm_path + parent_len, last, last_len);
-        file->path_size = (uint16_t)strlen(norm_path) + 1;
-        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
-        kfree(filebuf);
-        kfree(last_component);
-        return norm_path;
-    }
-
-out_err_free:
-    kfree(filebuf);
-    kfree(last_component);
-    return ERR_PTR(error);
-}
-
 
 bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                               int dfd, const char __user *filename,
@@ -2706,10 +2513,13 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
     }
 
     create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
-    if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
-        create->kmsg.msg.file.umode |= S_IFDIR;
-    } else if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE) {
-        create->kmsg.msg.file.umode |= S_IFREG;
+    create->kmsg.msg.file.umode |= (uint16_t)(umode & S_IFMT);
+    if (!(create->kmsg.msg.file.umode & S_IFMT)) {
+        if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_MKDIR) {
+            create->kmsg.msg.file.umode |= S_IFDIR;
+        } else if (dynsec_event->event_type == DYNSEC_EVENT_TYPE_CREATE) {
+            create->kmsg.msg.file.umode |= S_IFREG;
+        }
     }
 
     if (create->path && create->kmsg.msg.file.path_size) {
