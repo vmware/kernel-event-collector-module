@@ -35,7 +35,8 @@ struct stall_entry {
 // Client disconnect or kmod shutdown
 #define DYNSEC_STALL_MODE_SHUTDOWN  0x00000008
     u32 mode;  // switch to atomic or test_bit/set_bit?
-    struct timespec start; // rough duration of in tbl/stalled
+    // TODO: use new large timespec
+    // struct timespec start; // rough duration of in tbl/stalled
     wait_queue_head_t wq; // Optionally we could have this be per-bucket not per-entry
 
     unsigned long inode_addr;

@@ -391,7 +391,8 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     entry->hash = stall_hash(tbl->secret, &entry->key);
     index = stall_bkt_index(entry->hash);
 
-    getrawmonotonic(&entry->start);
+    // TODO: use new large timespec
+    // getrawmonotonic(&entry->start);
 
     flags = lock_stall_bkt(&stall_tbl->bkt[index], flags);
     list_add(&entry->list, &tbl->bkt[index].list);

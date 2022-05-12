@@ -2,7 +2,11 @@
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 #pragma once
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
 extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
+#else
+extern int dynsec_bprm_creds_for_exec(struct linux_binprm *bprm);
+#endif
 
 extern int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry);
 
