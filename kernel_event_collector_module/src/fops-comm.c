@@ -1103,11 +1103,11 @@ int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
         break;
 
     case CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR:
-        result = ec_enable_module(context) ? 0 : 1;
+        result = ec_enable_module(context) ? 0 : -EPERM;
         break;
 
     case CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR:
-        result = ec_disable_module(context);
+        result = ec_disable_module(context) ? 0 : -EPERM;
         break;
 
     case CB_EVENT_ACTION_REQUEST_PROCESS_DISCOVERY:
