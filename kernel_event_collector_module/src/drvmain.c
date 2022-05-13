@@ -131,11 +131,9 @@ bool ec_disable_if_not_connected(ProcessContext *context, char *src_module_name,
     }
 
     {
-        int ret = ec_disable_module(context);
-
-        if (ret < 0)
+        if (!ec_disable_module(context))
         {
-            TRACE(DL_ERROR, "Disabled failed with error %d", ret);
+            TRACE(DL_ERROR, "Disabled failed");
             *failure_reason = "Disable operation failed with unexpected error";
             return false;
         }
@@ -270,7 +268,7 @@ void ec_shutdown(ProcessContext *context)
      * Disables the module & free up the memory resources.
      * Refer to function header for ec_disable_module, to get more details.
      */
-    CANCEL_VOID((ec_disable_module(context) == 0));
+    CANCEL_VOID(ec_disable_module(context));
 
     // Remove hooks from the first unload call.  These will be called again in the final unload, but that will be a no-op
     ec_do_sys_shutdown(context);
@@ -361,7 +359,7 @@ void __exit ec_cleanup(void)
  *    reading a partially written state.
  *
  */
-int ec_disable_module(ProcessContext *context)
+bool ec_disable_module(ProcessContext *context)
 {
     int print_count         = 0;
 
@@ -372,17 +370,17 @@ int ec_disable_module(ProcessContext *context)
         case ModuleStateDisabled:
             TRACE(DL_INFO, "%s Received a request to disable a module that's already disabled, so no-op. ", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return 0;
+            return true;
 
         case ModuleStateDisabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to disable module while module is in disabling state", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return -EPERM;
+            return false;
 
         case ModuleStateEnabling:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to disable module while module is in enabling state", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return -EPERM;
+            return false;
 
         case ModuleStateEnabled:
             TRACE(DL_INIT,  "%s Received a request to disable module", __func__);
@@ -395,7 +393,7 @@ int ec_disable_module(ProcessContext *context)
         case ModuleStateBroken:
             TRACE(DL_ERROR,  "%s Received an UNEXPECTED call to disable module while module is in broken state", __func__);
             ec_write_unlock(&g_module_state_info.module_state_lock, context);
-            return -EPERM;
+            return false;
     }
 
 
@@ -436,7 +434,7 @@ int ec_disable_module(ProcessContext *context)
 
     ENABLE_WAKE_UP(context);
 
-    return 0;
+    return true;
 }
 
 

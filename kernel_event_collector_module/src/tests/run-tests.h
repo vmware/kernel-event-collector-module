@@ -18,15 +18,15 @@
 // Test functions and global data must use the __init decorator. This allows
 // the kernel to unload these functions and data after initialization.
 //
-#define DECLARE_TEST() bool all_passed = true
-#define RETURN_RESULT() return all_passed
+#define DECLARE_TEST() int test_failures = 0
+#define RETURN_RESULT() return test_failures == 0
 #define RUN_TEST(test_stmt) do {\
-    TRACE(DL_INFO, "%s START", #test_stmt); \
+    TRACE(DL_INFO, "START %s ", #test_stmt); \
     if (test_stmt) { \
-        TRACE(DL_INFO, "%s PASSED", #test_stmt); \
+        TRACE(DL_INFO, "PASSED %s", #test_stmt); \
     } else { \
-        TRACE(DL_INFO, "%s FAILED", #test_stmt); \
-        all_passed = false; \
+        TRACE(DL_INFO, "FAILED %s", #test_stmt); \
+        ++test_failures; \
     } \
 } while (0);
 
