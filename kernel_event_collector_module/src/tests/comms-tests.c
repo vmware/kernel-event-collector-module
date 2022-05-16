@@ -16,7 +16,6 @@ bool __init test__oversize_payload(ProcessContext *context);
 bool __init test__normal_payload(ProcessContext *context);
 bool __init test__parse_large_dns(ProcessContext *context);
 
-
 bool __init test__comms(ProcessContext *context)
 {
     DECLARE_TEST();
@@ -267,3 +266,4 @@ CATCH_DEFAULT:
 
     return passed;
 }
+

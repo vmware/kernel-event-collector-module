@@ -5,8 +5,12 @@
 
 extern bool g_enable_hook_tracking;
 
+int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action);
+
 bool __init test__begin_finish_macros(ProcessContext *context);
 bool __init test__hook_tracking_add_del(ProcessContext *context);
+bool __init test__action_from_module_state(ModuleState current_state, CB_EVENT_ACTION_TYPE action, int expected_rc, ProcessContext *context);
+
 
 bool __init test__module_state(ProcessContext *context)
 {
@@ -14,6 +18,14 @@ bool __init test__module_state(ProcessContext *context)
 
     RUN_TEST(test__begin_finish_macros(context));
     RUN_TEST(test__hook_tracking_add_del(context));
+
+    // These tests check return code from invalid or noop enable/disable requests
+    RUN_TEST(test__action_from_module_state(ModuleStateDisabling, CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR, -EPERM, context));
+    RUN_TEST(test__action_from_module_state(ModuleStateEnabling, CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR, -EPERM, context));
+    RUN_TEST(test__action_from_module_state(ModuleStateEnabled, CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR, 0, context));
+    RUN_TEST(test__action_from_module_state(ModuleStateDisabling, CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR, -EPERM, context));
+    RUN_TEST(test__action_from_module_state(ModuleStateEnabling, CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR, -EPERM, context));
+    RUN_TEST(test__action_from_module_state(ModuleStateDisabled, CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR, 0, context));
 
     RETURN_RESULT();
 }
@@ -24,6 +36,8 @@ bool __init test__begin_finish_macros(ProcessContext *context)
 {
     bool passed = false;
     unsigned int cpu;
+
+    ModuleState module_state = g_module_state_info.module_state;
 
     // Initially we're enabled...
     g_module_state_info.module_state = ModuleStateEnabled;
@@ -57,8 +71,8 @@ CATCH_DISABLED:
     passed = true;
 
 CATCH_DEFAULT:
-    // Make sure the state is set back to disabled
-    g_module_state_info.module_state = ModuleStateDisabled;
+    // Set state back to original
+    g_module_state_info.module_state = module_state;
 
     return passed;
 }
@@ -94,3 +108,24 @@ CATCH_DEFAULT:
 
     return passed;
 }
+
+bool __init test__action_from_module_state(ModuleState current_state, CB_EVENT_ACTION_TYPE action, int expected_rc, ProcessContext *context)
+{
+    bool passed = false;
+    int rc;
+    ModuleState module_state = g_module_state_info.module_state;
+
+    g_module_state_info.module_state = current_state;
+
+    rc = __ec_DoAction(context, action);
+
+    ASSERT_TRY_MSG(rc == expected_rc, "rc: %d", rc);
+
+    passed = true;
+
+CATCH_DEFAULT:
+    g_module_state_info.module_state = module_state;
+
+    return passed;
+}
+
