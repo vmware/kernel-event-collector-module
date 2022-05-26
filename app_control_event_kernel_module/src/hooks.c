@@ -24,7 +24,7 @@
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0) || \
     (defined(RHEL_MAJOR) && defined(RHEL_MINOR) && \
-        RHEL_MAJOR == 8 && RHEL_MAJOR >= 6)
+        RHEL_MAJOR == 8 && RHEL_MINOR >= 6)
 // TODO: Determine if bprm_creds_from_file requires a new hook
 int dynsec_bprm_creds_for_exec(struct linux_binprm *bprm)
 #else
