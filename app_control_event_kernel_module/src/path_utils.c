@@ -123,7 +123,7 @@ char *dynsec_build_path_greedy(struct path *path,
 {
     size_t alloc_size = DEFAULT_PATH_ALLOC_SZ;
     char local_buf[DEFAULT_PATH_ALLOC_SZ];
-    char *buf = local_buf;
+    char *buf = NULL;
     const char *p = NULL;
     size_t len = 0;
 
@@ -132,24 +132,46 @@ char *dynsec_build_path_greedy(struct path *path,
     }
     memset(local_buf, 0, sizeof(local_buf));
 
-retry_d_path:
+    // Build path with local buffer
+    if (!has_gfp_atomic(mode))
+        path_get(path);
+    p = dynsec_d_path(path, local_buf, alloc_size);
+    if (!has_gfp_atomic(mode))
+        path_put(path);
+
+    // If no issues duplicate the string and return
+    if (!IS_ERR_OR_NULL(p)) {
+        len = strlen(p);
+        alloc_size = len + 1;
+        buf = kzalloc(alloc_size, mode);
+        if (!buf) {
+            goto out_err;
+        }
+        strlcpy(buf, p, len + 1);
+        if (file) {
+            file->path_size = len + 1;
+            file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
+        }
+        goto out;
+    } else if (!p || PTR_ERR(p) != -ENAMETOOLONG) {
+        goto out_err;
+    }
+
+    // Local buffer was too small. Retry with a large buffer.
+    alloc_size = DYNSEC_PATH_MAX;
+    buf = kzalloc(alloc_size, mode);
+    if (!buf) {
+        goto out_err;
+    }
+    // Retry path with dynamic buffer
     if (!has_gfp_atomic(mode))
         path_get(path);
     p = dynsec_d_path(path, buf, alloc_size);
     if (!has_gfp_atomic(mode))
         path_put(path);
-
     if (IS_ERR_OR_NULL(p)) {
+        // Handle the case of real truncation
         if (p && PTR_ERR(p) == -ENAMETOOLONG) {
-            if (buf == local_buf) {
-                alloc_size = DYNSEC_PATH_MAX;
-                buf = kzalloc(alloc_size, mode);
-                if (!buf) {
-                    goto out_err;
-                }
-                goto retry_d_path;
-            }
-
             p = find_trunc_path(buf, alloc_size);
             if (p) {
                 if (file) {
@@ -159,26 +181,10 @@ retry_d_path:
             }
         }
         goto out_err;
-    } else {
-        // The greedy case is to custom allocate the minimal buffer size
-        if (likely(local_buf == buf)) {
-            len = strlen(p);
-            alloc_size = len + 1;
-            buf = kzalloc(alloc_size, mode);
-            if (!buf) {
-                goto out_err;
-            }
-            strlcpy(buf, p, len + 1);
-
-            if (file) {
-                file->path_size = alloc_size;
-                file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
-            }
-            return buf;
-        }
     }
 
 found:
+    // Fix up path to be at start of buffer
     len = strlen(p);
     if (likely(p > buf)) {
         memmove(buf, p, len);
@@ -193,9 +199,7 @@ out:
     return buf;
 
 out_err:
-    if (buf && buf != local_buf) {
-        kfree(buf);
-    }
+    kfree(buf);
     buf = NULL;
     goto out;
 }
@@ -204,7 +208,7 @@ char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t
 {
     size_t alloc_size = DEFAULT_PATH_ALLOC_SZ;
     char local_buf[DEFAULT_PATH_ALLOC_SZ];
-    char *buf = local_buf;
+    char *buf = NULL;
     const char *p = NULL;
     size_t len = 0;
 
@@ -213,24 +217,46 @@ char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t
     }
     memset(local_buf, 0, sizeof(local_buf));
 
-retry_dentry_path:
+    // Build path with local buffer
+    if (!has_gfp_atomic(mode))
+        dget(dentry);
+    p = dynsec_dentry_path(dentry, local_buf, alloc_size);
+    if (!has_gfp_atomic(mode))
+        dput(dentry);
+
+    // If no issues duplicate the string and return
+    if (!IS_ERR_OR_NULL(p)) {
+        len = strlen(p);
+        alloc_size = len + 1;
+        buf = kzalloc(alloc_size, mode);
+        if (!buf) {
+            goto out_err;
+        }
+        strlcpy(buf, p, len + 1);
+        if (file) {
+            file->path_size = len + 1;
+            file->attr_mask |= DYNSEC_FILE_ATTR_PATH_DENTRY;
+        }
+        goto out;
+    } else if (!p || PTR_ERR(p) != -ENAMETOOLONG) {
+        goto out_err;
+    }
+
+    // Local buffer was too small. Retry with a large buffer.
+    alloc_size = DYNSEC_PATH_MAX;
+    buf = kzalloc(alloc_size, mode);
+    if (!buf) {
+        goto out_err;
+    }
+    // Retry path with dynamic buffer
     if (!has_gfp_atomic(mode))
         dget(dentry);
     p = dynsec_dentry_path(dentry, buf, alloc_size);
     if (!has_gfp_atomic(mode))
         dput(dentry);
-
     if (IS_ERR_OR_NULL(p)) {
+        // Handle the case of real truncation
         if (p && PTR_ERR(p) == -ENAMETOOLONG) {
-            if (buf == local_buf) {
-                alloc_size = DYNSEC_PATH_MAX;
-                buf = kzalloc(alloc_size, mode);
-                if (!buf) {
-                    goto out_err;
-                }
-                goto retry_dentry_path;
-            }
-
             p = find_trunc_path(buf, alloc_size);
             if (p) {
                 if (file) {
@@ -240,25 +266,10 @@ retry_dentry_path:
             }
         }
         goto out_err;
-    } else {
-        // The greedy case is to custom allocate the minimal buffer size
-        if (likely(local_buf == buf)) {
-            alloc_size = strlen(p) + 1;
-            buf = kmalloc(alloc_size, mode);
-            if (!buf) {
-                goto out_err;
-            }
-            strlcpy(buf, p, alloc_size);
-
-            if (file) {
-                file->path_size = alloc_size;
-                file->attr_mask |= DYNSEC_FILE_ATTR_PATH_DENTRY;
-            }
-            return buf;
-        }
     }
 
 found:
+    // Fix up path to be at start of buffer
     len = strlen(p);
     if (likely(p > buf)) {
         memmove(buf, p, len);
@@ -273,9 +284,7 @@ out:
     return buf;
 
 out_err:
-    if (unlikely(buf != local_buf)) {
-        kfree(buf);
-    }
+    kfree(buf);
     buf = NULL;
     goto out;
 }
