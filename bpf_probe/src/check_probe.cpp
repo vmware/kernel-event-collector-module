@@ -100,7 +100,7 @@ static void ReadProbeSource(const std::string &probe_source)
     if (!probe_source.empty())
     {
         auto fileHandle = open(probe_source.c_str(), O_RDONLY);
-        if (fileHandle <= 0)
+        if (fileHandle < 0)
         {
             return;
         }
@@ -112,9 +112,11 @@ static void ReadProbeSource(const std::string &probe_source)
         {
             std::unique_ptr<unsigned char []> buffer(new unsigned char[data.st_size + 1]);
 
-            IGNORE_UNUSED_RETURN_VALUE(read(fileHandle, buffer.get(), data.st_size));
-
-            s_bpf_program = (const char *)buffer.get();
+            if (read(fileHandle, buffer.get(), data.st_size) > 0)
+            {
+                buffer[data.st_size] = 0;
+                s_bpf_program = (const char *)buffer.get();
+            }
         }
 
         close(fileHandle);

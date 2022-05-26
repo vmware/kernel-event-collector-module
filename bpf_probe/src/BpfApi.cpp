@@ -344,7 +344,7 @@ int BpfApi::PollEvents()
 bool BpfApi::GetKptrRestrict(long &kptr_restrict_value)
 {
     auto fileHandle = open(m_kptr_restrict_path.c_str(), O_RDONLY);
-    if (fileHandle <= 0)
+    if (fileHandle < 0)
     {
         return false;
     }
@@ -383,7 +383,7 @@ void BpfApi::SetKptrRestrict(long value)
 
     auto fileHandle = open(m_kptr_restrict_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
                            S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (fileHandle <= 0)
+    if (fileHandle < 0)
     {
         return;
     }
