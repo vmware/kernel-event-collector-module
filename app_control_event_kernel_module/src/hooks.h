@@ -2,10 +2,13 @@
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 #pragma once
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,14,0)
-extern int dynsec_bprm_set_creds(struct linux_binprm *bprm);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0) || \
+    (defined(RHEL_MAJOR) && defined(RHEL_MINOR) && \
+        RHEL_MAJOR == 8 && RHEL_MAJOR >= 6)
+// TODO: Determine if bprm_creds_from_file requires a new hook
+int dynsec_bprm_creds_for_exec(struct linux_binprm *bprm);
 #else
-extern int dynsec_bprm_creds_for_exec(struct linux_binprm *bprm);
+int dynsec_bprm_set_creds(struct linux_binprm *bprm);
 #endif
 
 extern int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry);

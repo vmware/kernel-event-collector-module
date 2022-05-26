@@ -185,10 +185,12 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     //
     // Now add our hooks
     //
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
-    CB_LSM_SETUP_HOOK(bprm_set_creds); // process banning  (exec)
-#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0) || \
+    (defined(RHEL_MAJOR) && defined(RHEL_MINOR) && \
+        RHEL_MAJOR == 8 && RHEL_MAJOR >= 6)
     CB_LSM_SETUP_HOOK(bprm_creds_for_exec);
+#else
+    CB_LSM_SETUP_HOOK(bprm_set_creds); // process banning  (exec)
 #endif
     CB_LSM_SETUP_HOOK(inode_unlink);   // security_inode_unlink
     CB_LSM_SETUP_HOOK(inode_rmdir);   // security_inode_rmdir
