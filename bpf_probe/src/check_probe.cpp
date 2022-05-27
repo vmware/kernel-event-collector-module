@@ -114,8 +114,9 @@ static void ReadProbeSource(const std::string &probe_source)
 
             if (read(fileHandle, buffer.get(), data.st_size) > 0)
             {
-                buffer[data.st_size] = 0;
-                s_bpf_program = (const char *)buffer.get();
+                char* pTmp = (char *)buffer.get();
+                pTmp[data.st_size] = 0;
+                s_bpf_program = pTmp;
             }
         }
 
