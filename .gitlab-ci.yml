@@ -5,7 +5,7 @@
 # Include gitlab-ci-base.yml from cb-build-util.
 #  Update the git hash to use a newer version of the base yaml
 #  Note: This can be a branch name for testing but should be a git hash/tag for reproducibility
-include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/-/raw/a91acf11a2628ca81123ab10e47c3d7e984526e6/gitlab-ci-base.yml'
+include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/-/raw/kk_coverity2/gitlab-ci-base.yml'
 
 # Gitlab CI configuration script for event-collector-app.
 variables:
@@ -15,7 +15,8 @@ variables:
   MAKEFILE_TEST_KERNEL_VERSION: 3.10.0-1160.59.1.el7.x86_64
 
 stages:
-  - build_project
+  - build
+  - coverity
   - deploy
   - deploy_release
   - build_downstream
@@ -25,19 +26,19 @@ stages:
 # Build project
 build_triggered:
   extends: .build_triggered_template
-  stage: build_project
+  stage: build
 
 build_branch:
   extends: .build_branch_template
-  stage: build_project
+  stage: build
 
 build_release:
   extends: .build_release_template
-  stage: build_project
+  stage: build
 
 build_coverity:
   extends: .build_coverity_template
-  stage: build_project
+  stage: coverity
 
 deploy_release:
   extends: .deploy_release_template
@@ -73,7 +74,7 @@ deploy_release:
 makefile_test:
   script: *run_makefile_build
   extends: .build_no_artifacts_template
-  stage: build_project
+  stage: build
   when: on_success
   allow_failure: true
   only:
