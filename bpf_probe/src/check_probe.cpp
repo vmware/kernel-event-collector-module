@@ -112,10 +112,12 @@ static void ReadProbeSource(const std::string &probe_source)
         {
             std::unique_ptr<unsigned char []> buffer(new unsigned char[data.st_size + 1]);
 
-            if (read(fileHandle, buffer.get(), data.st_size) > 0)
+            ssize_t ret = read(fileHandle, buffer.get(), data.st_size);
+            if ((ret > 0) && (ret == data.st_size))
             {
-                buffer[data.st_size] = 0;
-                s_bpf_program = (const char *)buffer.get();
+                char* pTmp = (char *)buffer.get();
+                pTmp[data.st_size] = 0;
+                s_bpf_program = pTmp;
             }
         }
 
