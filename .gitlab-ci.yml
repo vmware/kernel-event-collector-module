@@ -93,6 +93,8 @@ deploy_probe_test:
     - artifactory-pub
   variables:
     GIT_STRATEGY: none
+  needs:
+    - job: build
 
 probe_test:
   stage: check_probe
@@ -108,7 +110,7 @@ build_endpoint_common:
     GIT_STRATEGY: none
     DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
   needs:
-    - job: build
+    - job: probe_test
 
 deploy_release:
   extends: .deploy_release_template
