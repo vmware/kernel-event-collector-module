@@ -107,20 +107,22 @@ build_endpoint_common:
   variables:
     GIT_STRATEGY: none
     DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
+  needs:
+    - job: build
 
 deploy_release:
   extends: .deploy_release_template
   stage: deploy
   when: on_success
   needs:
-    - job: probe_test # 
+    - job: probe_test
 
 deploy_branch:
   extends: .deploy_branch_template
   stage: deploy
   when: manual
   needs:
-    - job: probe_test # 
+    - job: probe_test
 
 
 publish_to_github:
