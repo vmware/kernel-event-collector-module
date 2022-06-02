@@ -16,34 +16,25 @@ variables:
 
 stages:
   - build
-  - coverity
-  - deploy
-  - deploy_release
+  - check_probe
   - build_downstream
-  - deploy_branch
+  - deploy
   - publish
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE != 'merge_request_event'
+
 # Build project
-build_triggered:
-  extends: .build_triggered_template
-  stage: build
-
-build_branch:
-  extends: .build_branch_template
-  stage: build
-
-build_release:
-  extends: .build_release_template
+build:
+  extends: .build_rule_template
   stage: build
 
 build_coverity:
   extends: .build_coverity_template
-  stage: coverity
-
-deploy_release:
-  extends: .deploy_release_template
-  stage: deploy_release
-  when: on_success
+  stage: build
+  needs:
+    - job: build
 
 .run_makefile_build: &run_makefile_build |
   ARTIFACTORY_KERNEL_RPM_PATH=$ARTIFACTORY_PATH/centos-yum-remote-cache/7/updates/x86_64/Packages/kernel-$MAKEFILE_TEST_KERNEL_VERSION.rpm
@@ -95,16 +86,19 @@ makefile_test:
       echo "Skipping deployment because no new version of bpf_probe was built"
   fi
 
-.deploy:
+deploy_probe_test:
   script: *deploy_check_probe_pkg
-  stage: deploy
+  stage: check_probe
   tags:
     - artifactory-pub
   variables:
     GIT_STRATEGY: none
 
-deploy_probe_test:
-  extends: .deploy
+probe_test:
+  stage: check_probe
+  script: echo "Placeholder for a real test"
+  needs:
+    - job: deploy_probe_test
 
 # Build downstream
 build_endpoint_common:
@@ -114,10 +108,20 @@ build_endpoint_common:
     GIT_STRATEGY: none
     DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
 
+deploy_release:
+  extends: .deploy_release_template
+  stage: deploy
+  when: on_success
+  needs:
+    - job: probe_test # 
+
 deploy_branch:
   extends: .deploy_branch_template
-  stage: deploy_branch
+  stage: deploy
   when: manual
+  needs:
+    - job: probe_test # 
+
 
 publish_to_github:
   stage: publish
