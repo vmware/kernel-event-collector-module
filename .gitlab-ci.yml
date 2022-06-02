@@ -110,7 +110,7 @@ build_endpoint_common:
     GIT_STRATEGY: none
     DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
   needs:
-    - job: probe_test
+    - job: build
 
 deploy_release:
   extends: .deploy_release_template
