@@ -117,14 +117,14 @@ deploy_release:
   stage: deploy
   when: on_success
   needs:
-    - job: probe_test
+    - job: build
 
 deploy_branch:
   extends: .deploy_branch_template
   stage: deploy
   when: manual
   needs:
-    - job: probe_test
+    - job: build
 
 
 publish_to_github:
