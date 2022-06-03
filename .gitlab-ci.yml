@@ -21,13 +21,9 @@ stages:
   - deploy
   - publish
 
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE != 'merge_request_event'
-
 # Build project
 build:
-  extends: .build_rule_template
+  extends: .build_template
   stage: build
 
 build_coverity:
