@@ -21,10 +21,6 @@ stages:
   - deploy
   - publish
 
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE != 'merge_request_event'
-
 # Build project
 build:
   extends: .build_template
@@ -35,6 +31,8 @@ build_coverity:
   stage: build
   needs:
     - job: build
+  dependencies:
+    - build
 
 .run_makefile_build: &run_makefile_build |
   ARTIFACTORY_KERNEL_RPM_PATH=$ARTIFACTORY_PATH/centos-yum-remote-cache/7/updates/x86_64/Packages/kernel-$MAKEFILE_TEST_KERNEL_VERSION.rpm
