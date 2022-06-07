@@ -38,6 +38,13 @@ char *ec_get_path_buffer(ProcessContext *context)
         node->path[0]        = 0;
         node->path[PATH_MAX] = 0;
     }
+
+    // Suppressing false positive coverity issue reporting that variable "node"
+    // going out of scope leaks the storage it points to which is not the case.
+    // Returning "node->path" inner member confuses coverity but "node" pointer
+    // will be retrieved and freed if ec_put_path_buffer() is used to release path_buffer.
+
+    // coverity[leaked_storage:SUPPRESS]
     return (node ? node->path : NULL);
 }
 
