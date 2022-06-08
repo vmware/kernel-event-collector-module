@@ -410,6 +410,12 @@ CATCH_DEFAULT:
     rcu_read_unlock();
     ec_put_path_buffer(path_buffer);
     ec_mem_free(stack);
+
+    // Suppressing false positive coverity issue reporting that variable "path_buffer"
+    // going out of scope leaks the storage it points to which is not the case.
+    // The memory is freed by ec_put_path_buffer() function call above.
+
+    // coverity[leaked_storage:SUPPRESS]
 }
 
 bool __ec_add_tracking_for_child_and_update_stack(
