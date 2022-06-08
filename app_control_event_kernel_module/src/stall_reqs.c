@@ -504,9 +504,9 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         // Ignore mode does nothing if stalling disabled
         lock_config();
         if (arg) {
-            global_config.send_files = 1;
+            global_config.ignore_mode = 1;
         } else {
-            global_config.send_files = 0;
+            global_config.ignore_mode = 0;
         }
         unlock_config();
 
