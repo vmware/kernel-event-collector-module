@@ -569,9 +569,8 @@ struct dynsec_config {
 
     // File system types to stall or ignore
     // Based on the definitions in linux/magic.h
-    // current requirement (per 5.18 kernel) is about 100 bits
-    // all enums defined in src/fs_utils.h
-    uint64_t file_system_stall_mask[2];
+    // enums defined in src/fs_utils.h
+    uint64_t file_system_stall_mask;
 
 };
 
