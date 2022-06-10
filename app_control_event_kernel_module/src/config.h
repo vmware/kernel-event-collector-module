@@ -38,7 +38,19 @@ extern struct dynsec_config preserved_config __read_mostly;
     .lsm_hooks = DYNSEC_LSM_HOOKS, \
     .process_hooks = DYNSEC_PROCESS_HOOKS, \
     .preaction_hooks = 0, \
+    .file_system_stall_mask = {0x001E090434880000, 0x20}, \
 }
+
+// Based on isSupportedFilesystem() LinuxLsmExposed.cpp
+// ORing of all the supported file system bits here
+// Bits 0-63 at index 0 and bits 64-127 at index 1.
+// file_system_stall_mask
+// Set bits at positions 19, 29, 51, 27, 50, 52, 49, 69, 43 
+// 40, 26, 28, 23, 34
+// MASK0= 0x001E090434880000; MASK1 = 0x20
+// missing NTFS, HFS_MFS, HFSPLUS, HFS, JFS 
+// missing VMSHARE, FUSE2
+
 
 #define lock_config() mutex_lock(&global_config_lock);
 #define unlock_config() mutex_unlock(&global_config_lock);
@@ -61,3 +73,11 @@ extern struct dynsec_config preserved_config __read_mostly;
 #define ignore_mode_enabled() (global_config.ignore_mode != DEFAULT_DISABLED)
 #define deny_on_timeout_enabled() (global_config.stall_timeout_deny != DEFAULT_DISABLED)
 #define get_continue_timeout() (global_config.stall_timeout_continue)
+
+static inline uint64_t get_file_system_stall_bit(uint8_t bit)
+{
+    if (bit < 64)
+        return (global_config.file_system_stall_mask[0] >> bit) & 1ULL;
+
+    return (global_config.file_system_stall_mask[1] >> (bit-64)) & 1ULL;
+}

@@ -651,6 +651,12 @@ static inline bool may_report_file(const struct file *file)
             if (__is_special_filesystem(file->f_path.dentry->d_sb)) {
                 return false;
             }
+
+            // check if conneted client is interested in this
+            // file system type
+            if (!__is_client_concerned_filesystem(file->f_path.dentry->d_sb)) {
+                return false;
+            }
         }
         return true;
     }

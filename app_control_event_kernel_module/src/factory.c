@@ -2280,6 +2280,12 @@ static inline bool may_read_from_file(const struct file *file)
         return false;
     }
 
+    // check if conneted client is interested in this
+    // file system type
+    if (!__is_client_concerned_filesystem(sb)) {
+        return false;
+    }
+
     // For performance reasons don't read from stacked file systems
     // except for overlayfs.
     if (__is_stacked_filesystem(sb)) {
