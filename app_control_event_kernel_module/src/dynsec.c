@@ -84,6 +84,8 @@ static void print_config(struct dynsec_config *dynsec_config)
     pr_info("dynsec_config: lsm_hooks:%#llx process_hooks:%#llx preaction_hooks:%#llx\n",
             dynsec_config->lsm_hooks, dynsec_config->process_hooks,
             dynsec_config->preaction_hooks);
+    pr_info("dynsec_config: file system stall mask: %#llx\n", 
+            dynsec_config->file_system_stall_mask);
 }
 
 static void setup_lsm_hooks(void)

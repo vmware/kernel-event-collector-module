@@ -443,6 +443,8 @@ struct dynsec_task_dump_umsg {
 // Explicitly set a task's label
 #define DYNSEC_IOC_LABEL_TASK      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 12)
 #define DYNSEC_IOC_STALL_OPTS      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 13)
+// Set file system specific stall mask
+#define DYNSEC_IOC_FS_STALL_MASK   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 14)
 
 // May want a request to print out what kernel objects
 // that are blocking a clean rmmod.

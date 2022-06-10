@@ -541,6 +541,32 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         break;
     }
 
+    case DYNSEC_IOC_FS_STALL_MASK: {
+        struct dynsec_config new_config;
+
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+        if (!arg) {
+            return -EINVAL;
+        }
+        if (copy_from_user(&new_config, (void *)arg, sizeof(new_config))) {
+            return -EFAULT;
+        }
+
+        ret = 0;
+        lock_config();
+
+        if (global_config.file_system_stall_mask != new_config.file_system_stall_mask) {
+            pr_info("dynsec_config: Changing file_system_stall_mask to %llx",
+                     new_config.file_system_stall_mask);
+            global_config.file_system_stall_mask = new_config.file_system_stall_mask;
+        }
+
+        unlock_config();
+        break;
+    }
+
     default:
         break;
     }
