@@ -576,5 +576,24 @@ struct dynsec_config {
 
 };
 
+// enums based on MAGIC definitions of file system types
+// from linux/magic.h kernel version 5.18
+enum file_system_magic_bits_e {
+     EXT2_SUPER_MAGIC_BIT,  // 0
+     BTRFS_SUPER_MAGIC_BIT,
+     HPFS_SUPER_MAGIC_BIT,
+     ISOFS_SUPER_MAGIC_BIT,
+     JFFS2_SUPER_MAGIC_BIT,
+     XFS_SUPER_MAGIC_BIT,
+     FUSE_SUPER_MAGIC_BIT,
+     MSDOS_SUPER_MAGIC_BIT,
+     NFS_SUPER_MAGIC_BIT,
+     REISERFS_SUPER_MAGIC_BIT,
+     SMB_SUPER_MAGIC_BIT,  // 10
+     CIFS_SUPER_MAGIC_BIT,
+     SMB2_SUPER_MAGIC_BIT,
+     USBDEVICE_SUPER_MAGIC_BIT,
+};
+
 #pragma pack(pop)
 

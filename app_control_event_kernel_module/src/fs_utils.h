@@ -6,6 +6,7 @@
 #include <linux/fs.h>
 #include <linux/magic.h>
 #include "config.h"
+#include "dynsec.h"
 
 static inline const struct inode * __file_inode(const struct file *file)
 {
@@ -109,25 +110,6 @@ static inline bool __is_stacked_filesystem(const struct super_block *sb)
     }
     return false;
 }
-
-// enums based on MAGIC definitions of file system types
-// from linux/magic.h kernel version 5.18
-enum file_system_magic_bits_e {
-     EXT2_SUPER_MAGIC_BIT,  // 0
-     BTRFS_SUPER_MAGIC_BIT,
-     HPFS_SUPER_MAGIC_BIT,
-     ISOFS_SUPER_MAGIC_BIT,
-     JFFS2_SUPER_MAGIC_BIT,
-     XFS_SUPER_MAGIC_BIT,
-     FUSE_SUPER_MAGIC_BIT,
-     MSDOS_SUPER_MAGIC_BIT,
-     NFS_SUPER_MAGIC_BIT,
-     REISERFS_SUPER_MAGIC_BIT,
-     SMB_SUPER_MAGIC_BIT,  // 10
-     CIFS_SUPER_MAGIC_BIT,
-     SMB2_SUPER_MAGIC_BIT,
-     USBDEVICE_SUPER_MAGIC_BIT,
-};
 
 // check if client is concerned about this file system type
 static inline bool __is_client_concerned_filesystem(const struct super_block *sb)
