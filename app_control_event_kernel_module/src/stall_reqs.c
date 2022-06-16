@@ -504,9 +504,9 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         // Ignore mode does nothing if stalling disabled
         lock_config();
         if (arg) {
-            global_config.send_files = 1;
+            global_config.ignore_mode = 1;
         } else {
-            global_config.send_files = 0;
+            global_config.ignore_mode = 0;
         }
         unlock_config();
 
@@ -538,6 +538,32 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         }
 
         ret = handle_stall_ioc(&hdr);
+        break;
+    }
+
+    case DYNSEC_IOC_FS_STALL_MASK: {
+        struct dynsec_config new_config;
+
+        if (!capable(CAP_SYS_ADMIN)) {
+            return -EPERM;
+        }
+        if (!arg) {
+            return -EINVAL;
+        }
+        if (copy_from_user(&new_config, (void *)arg, sizeof(new_config))) {
+            return -EFAULT;
+        }
+
+        ret = 0;
+        lock_config();
+
+        if (global_config.file_system_stall_mask != new_config.file_system_stall_mask) {
+            pr_info("dynsec_config: Changing file_system_stall_mask to %llx",
+                     new_config.file_system_stall_mask);
+            global_config.file_system_stall_mask = new_config.file_system_stall_mask;
+        }
+
+        unlock_config();
         break;
     }
 
