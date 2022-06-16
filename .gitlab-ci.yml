@@ -60,9 +60,8 @@ deploy_release:
 makefile_test:
   script: *run_makefile_build
   extends: .build_no_artifacts_template
-  stage: build_project
+  stage: deploy
   when: on_success
-  needs: ["build_branch"] 
   allow_failure: false
   tags:
     - docker-socket
