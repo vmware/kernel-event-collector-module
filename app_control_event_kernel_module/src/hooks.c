@@ -100,6 +100,11 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
     }
 #endif
 
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
@@ -168,6 +173,11 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
     }
 #endif
 
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
@@ -231,6 +241,13 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
         }
     }
 #endif
+
+    // check if client is interested in this file system
+    // check both old and new for links.
+    if ((!__is_client_concerned_filesystem(old_dentry->d_sb)) &&
+        (!__is_client_concerned_filesystem(new_dentry->d_sb))) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -357,6 +374,11 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
         goto out;
     }
 
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
@@ -410,6 +432,11 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry, int mode)
         }
     }
 #endif
+
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
@@ -465,6 +492,11 @@ int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
     }
 #endif
 
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
@@ -514,6 +546,13 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
     }
 #endif
 
+    // check if client is interested in this file system
+    // check both old and new for links.
+    if ((!__is_client_concerned_filesystem(old_dentry->d_sb)) &&
+        (!__is_client_concerned_filesystem(new_dentry->d_sb))) {
+        goto out;
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
@@ -562,6 +601,11 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
         }
     }
 #endif
+
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
 
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;

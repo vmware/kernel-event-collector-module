@@ -124,6 +124,13 @@ static inline bool __is_client_concerned_filesystem(const struct super_block *sb
 
     uint64_t result = 0;
 
+    if (!sb) {
+        if (stall_mode_enabled())
+            return true;
+        else
+            return false;
+    }
+
     switch (sb->s_magic) {
     case EXT2_SUPER_MAGIC:  // EXT3 and EXT4 are the same magic
         result = get_file_system_stall_bit(EXT2_SUPER_MAGIC_BIT);
