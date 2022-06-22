@@ -86,10 +86,6 @@ extern int dynsec_task_fix_setuid(struct cred *new, const struct cred *old, int 
 
 extern int dynsec_task_fix_setgid(struct cred *new, const struct cred *old, int flags);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-extern void dynsec_task_free(struct task_struct *task);
-#endif
-
 extern int dynsec_task_dump_all(uint16_t opts, pid_t start_tgid);
 
 extern ssize_t dynsec_task_dump_one(uint16_t opts, pid_t start_tgid,
