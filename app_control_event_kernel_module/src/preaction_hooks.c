@@ -13,6 +13,7 @@
 #include "preaction_hooks.h"
 #include "symbols.h"
 #include "dynsec.h"
+#include "fs_utils.h"
 #include "lsm_mask.h"
 
 #include "stall_tbl.h"
@@ -134,6 +135,11 @@ static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *re
         goto out;
     }
 
+    // check if connected client is interested in this
+    if (!__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        goto out;
+    }
+
     memset(&iattr, 0, sizeof(iattr));
     if (path->dentry && path->dentry->d_inode) {
         umode_t umode = path->dentry->d_inode->i_mode;
@@ -162,6 +168,11 @@ static int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *re
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    // check if connected client is interested in this
+    if (!__is_client_concerned_filesystem(path->dentry->d_sb)) {
         goto out;
     }
 

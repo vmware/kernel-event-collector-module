@@ -1104,6 +1104,8 @@ static void __dynsec_task_exit(struct task_struct *task,
         return;
     }
 
+    // the task->fs might be NULL, as exit_fs()
+    // gets called from do_exit()
     if (task->fs && task->fs->root.dentry) {
         // check if connected client is interested in this
         // file system type

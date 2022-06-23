@@ -2500,6 +2500,8 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                               int flags, umode_t umode)
 {
     struct dynsec_create_event *create = NULL;
+    struct dynsec_file *dynsec_file;
+    struct super_block sb;
 
     if (!dynsec_event ||
         !(dynsec_event->report_flags & DYNSEC_REPORT_INTENT) ||
@@ -2516,6 +2518,21 @@ bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
     if (IS_ERR(create->path)) {
         create->path = NULL;
         return false;
+    }
+
+    // file system magic check after adding path
+    // find from the event for comparison.
+    dynsec_file = &create->kmsg.msg.file;
+    if (dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
+        // we need superblock to pass
+        // rest of fields are not filled
+        sb.s_magic = dynsec_file->sb_magic;
+
+        // check if connected client is interested in this
+        // file system type
+        if (!__is_client_concerned_filesystem(&sb)) {
+            return false;
+        }
     }
 
     create->kmsg.msg.file.umode = (uint16_t)(umode & ~current_umask());
@@ -2543,6 +2560,8 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
     struct path oldpath;
     struct path newpath;
     struct dynsec_rename_event *rename = NULL;
+    struct dynsec_file *old_file, *new_file;
+    struct super_block old_sb, new_sb;
 
     if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_RENAME) {
@@ -2597,6 +2616,25 @@ bool fill_in_preaction_rename(struct dynsec_event *dynsec_event,
         rename->kmsg.hdr.payload += rename->kmsg.msg.new_file.path_size;
     }
 
+    // file system magic check after adding path
+    // find from the event for comparison.
+    old_file = &rename->kmsg.msg.old_file;
+    new_file = &rename->kmsg.msg.new_file;
+    if ((old_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) &&
+        (new_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE)) {
+        // we need superblock to pass
+        // rest of fields are not filled
+        old_sb.s_magic = old_file->sb_magic;
+        new_sb.s_magic = new_file->sb_magic;
+
+        // check if connected client is interested in this
+        // file system type
+        if ((!__is_client_concerned_filesystem(&old_sb)) &&
+            (!__is_client_concerned_filesystem(&new_sb))) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -2604,6 +2642,8 @@ bool fill_in_preaction_unlink(struct dynsec_event *dynsec_event,
                               struct path *path, gfp_t mode)
 {
     struct dynsec_unlink_event *unlink = NULL;
+    struct dynsec_file *dynsec_file;
+    struct super_block sb;
 
     if (!dynsec_event ||
         !(dynsec_event->event_type == DYNSEC_EVENT_TYPE_UNLINK ||
@@ -2621,6 +2661,22 @@ bool fill_in_preaction_unlink(struct dynsec_event *dynsec_event,
         unlink->kmsg.msg.file.path_offset = unlink->kmsg.hdr.payload;
         unlink->kmsg.hdr.payload += unlink->kmsg.msg.file.path_size;
     }
+
+    // file system magic check after adding path
+    // find from the event for comparison.
+    dynsec_file = &unlink->kmsg.msg.file;
+    if (dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
+        // we need superblock to pass
+        // rest of fields are not filled
+        sb.s_magic = dynsec_file->sb_magic;
+
+        // check if connected client is interested in this
+        // file system type
+        if (!__is_client_concerned_filesystem(&sb)) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -2630,6 +2686,8 @@ bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
                                int newdfd, const char __user *newname)
 {
     struct dynsec_symlink_event *symlink = NULL;
+    struct dynsec_file *dynsec_file;
+    struct super_block sb;
 
     if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_SYMLINK) {
@@ -2646,6 +2704,22 @@ bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
         symlink->path = NULL;
         return false;
     }
+
+    // file system magic check after adding path
+    // find from the event for comparison.
+    dynsec_file = &symlink->kmsg.msg.file;
+    if (dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
+        // we need superblock to pass
+        // rest of fields are not filled
+        sb.s_magic = dynsec_file->sb_magic;
+
+        // check if connected client is interested in this
+        // file system type
+        if (!__is_client_concerned_filesystem(&sb)) {
+            return false;
+        }
+    }
+
     symlink->kmsg.msg.file.umode |= S_IFLNK;
 
     if (symlink->path && symlink->kmsg.msg.file.path_size) {
@@ -2674,6 +2748,8 @@ bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
                             int newdfd, const char __user *newname)
 {
     struct dynsec_link_event *link = NULL;
+    struct dynsec_file *old_file, *new_file;
+    struct super_block old_sb, new_sb;
 
     if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_LINK) {
@@ -2706,6 +2782,25 @@ bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
         link->kmsg.hdr.payload += link->kmsg.msg.new_file.path_size;
     }
 
+    // file system magic check after adding path
+    // find from the event for comparison.
+    old_file = &link->kmsg.msg.old_file;
+    new_file = &link->kmsg.msg.new_file;
+    if ((old_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) &&
+        (new_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE)) {
+        // we need superblock to pass
+        // rest of fields are not filled
+        old_sb.s_magic = old_file->sb_magic;
+        new_sb.s_magic = new_file->sb_magic;
+
+        // check if connected client is interested in this
+        // file system type
+        if ((!__is_client_concerned_filesystem(&old_sb)) &&
+            (!__is_client_concerned_filesystem(&new_sb))) {
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -2714,6 +2809,8 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
                                struct iattr *attr, struct path *path)
 {
     struct dynsec_setattr_event *setattr = NULL;
+    struct dynsec_file *dynsec_file;
+    struct super_block sb;
 
     if (!dynsec_event ||
         dynsec_event->event_type != DYNSEC_EVENT_TYPE_SETATTR) {
@@ -2743,6 +2840,21 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
     if (path) {
         // Tells user this is the full filepath
         fill_in_file_data(&setattr->kmsg.msg.file, path);
+
+        // file system magic check after adding path
+        // find from the event for comparison.
+        dynsec_file = &setattr->kmsg.msg.file;
+        if (dynsec_file->attr_mask & DYNSEC_FILE_ATTR_DEVICE) {
+            // we need superblock to pass
+            // rest of fields are not filled
+            sb.s_magic = dynsec_file->sb_magic;
+
+            // check if connected client is interested in this
+            // file system type
+            if (!__is_client_concerned_filesystem(&sb)) {
+                return false;
+            }
+        }
 
         // MUST Be GFP_ATOMIC
         setattr->path = dynsec_build_path(path,
