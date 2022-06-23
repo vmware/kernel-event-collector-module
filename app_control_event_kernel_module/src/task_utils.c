@@ -26,13 +26,9 @@ bool dynsec_task_utils_init(void)
     find_symbol_indirect("find_ge_pid",
                          (unsigned long *)&task_syms.find_ge_pid);
 
-    // Could directly be used in newer kernels
-#if LINUX_VERSION_CODE <= KERNEL_VERSION(3, 10, 0)
+    // Exportability is erratic
     find_symbol_indirect("get_mm_exe_file",
                          (unsigned long *)&task_syms.get_mm_exe_file);
-#else
-    task_syms.get_mm_exe_file = get_mm_exe_file;
-#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
     find_symbol_indirect("pid_nr_ns",
@@ -104,6 +100,7 @@ retry:
     if (pid) {
         local_tgid = dynsec_pid_nr_ns(pid, ns);
 // TODO: Find when PIDTYPE_TGID is really defined
+// TODO: Fix macro conditional
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(3,10,0) || defined(RHEL_MAJOR) && RHEL_MAJOR == 8 && RHEL_MINOR == 0
         task = pid_task(pid, PIDTYPE_PID);
         if (!task || !has_group_leader_pid(task)) {
