@@ -3,3 +3,7 @@ builder: centos6
 allow-sub-docker-builds:
 file-replacements:
     KERNEL_OVERRIDE_LIST:
+builders:
+    override:
+        - gcc73-relwithdebinfo
+
