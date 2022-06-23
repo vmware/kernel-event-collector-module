@@ -25,7 +25,7 @@ bool BpfProgram::InstallHooks(
             {
                 isInsterted = status_map.at(hook_list[i].name);
             }
-            catch (std::out_of_range)
+            catch (std::out_of_range const&)
             {
                 //pass
             }

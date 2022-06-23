@@ -6,4 +6,7 @@ file-replacements:
 options:
     - module_name=event_collector
     - module_name=cbsensor
+builders:
+    override:
+        - gcc73-relwithdebinfo
 
