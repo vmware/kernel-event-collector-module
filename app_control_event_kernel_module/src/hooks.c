@@ -1015,6 +1015,15 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
         goto out;
     }
 
+    // using task_struct p ; not current
+    if (p->fs && p->fs->root.dentry) {
+        // check if connected client is interested in this
+        // file system type
+        if (!__is_client_concerned_filesystem(p->fs->root.dentry->d_sb)) {
+            goto out;
+        }
+    }
+
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
@@ -1140,6 +1149,10 @@ static void __dynsec_task_exit(struct task_struct *task,
     }
 
     (void)enqueue_nonstall_event(stall_tbl, event);
+}
+void dynsec_task_free(struct task_struct *task, uint32_t exit_hook_type)
+{
+    __dynsec_task_exit(task, DYNSEC_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
 }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
