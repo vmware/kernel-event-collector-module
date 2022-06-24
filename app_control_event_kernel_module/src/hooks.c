@@ -1015,15 +1015,6 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
         goto out;
     }
 
-    // using task_struct p ; not current
-    if (p->fs && p->fs->root.dentry) {
-        // check if connected client is interested in this
-        // file system type
-        if (!__is_client_concerned_filesystem(p->fs->root.dentry->d_sb)) {
-            goto out;
-        }
-    }
-
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
