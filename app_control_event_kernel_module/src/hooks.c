@@ -1221,6 +1221,16 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         report_flags &= ~(DYNSEC_REPORT_STALL);
     }
 
+    // file system mask check...skip high prio events
+    if ((!(report_flags & DYNSEC_REPORT_HI_PRI)) &&
+          (report_flags & DYNSEC_REPORT_STALL) &&
+          (file->f_path.dentry)) {
+        // check if client is interested in this file system
+        if (!__is_client_concerned_filesystem(file->f_path.dentry->d_sb)) {
+            goto out;
+        }
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MMAP, DYNSEC_HOOK_TYPE_MMAP,
                                report_flags, GFP_KERNEL);
     if (!fill_in_file_mmap(event, file, prot, flags, GFP_KERNEL)) {

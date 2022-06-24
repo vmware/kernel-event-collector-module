@@ -142,7 +142,7 @@ static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *re
     }
 
     // check if connected client is interested in this
-    if (!__is_client_concerned_filesystem(path->dentry->d_sb)) {
+    if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
         goto out;
     }
 
