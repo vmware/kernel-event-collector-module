@@ -4,7 +4,6 @@
 #include <linux/sched.h>
 #include <linux/version.h>
 #include <linux/fs.h>
-#include <linux/fs_struct.h>
 #include <linux/dcache.h>
 #include <linux/ptrace.h>
 #include <linux/mman.h>
@@ -47,14 +46,6 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
 
     if (!bprm || !bprm->file) {
         goto out;
-    }
-
-    if (bprm->file->f_path.dentry) {
-        // check if connected client is interested in this
-        // file system type
-        if (!__is_client_concerned_filesystem(bprm->file->f_path.dentry->d_sb)) {
-            goto out;
-        }
     }
 
     if (!stall_tbl_enabled(stall_tbl)) {
@@ -1057,15 +1048,6 @@ void dynsec_sched_process_fork_tp(struct task_struct *parent,
     if (!child) {
         return;
     }
-
-    if (parent->fs && parent->fs->root.dentry) {
-        // check if connected client is interested in this
-        // file system type
-        if (!__is_client_concerned_filesystem(parent->fs->root.dentry->d_sb)) {
-            return;
-        }
-    }
-
     if (!stall_tbl_enabled(stall_tbl)) {
         return;
     }
@@ -1102,16 +1084,6 @@ static void __dynsec_task_exit(struct task_struct *task,
 
     if (!task) {
         return;
-    }
-
-    // the task->fs might be NULL, as exit_fs()
-    // gets called from do_exit()
-    if (task->fs && task->fs->root.dentry) {
-        // check if connected client is interested in this
-        // file system type
-        if (!__is_client_concerned_filesystem(task->fs->root.dentry->d_sb)) {
-            return;
-        }
     }
 
     if (!stall_tbl_enabled(stall_tbl)) {
@@ -1206,14 +1178,6 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         goto out;
     }
 
-    if (file->f_path.dentry) {
-        // check if connected client is interested in this
-        // file system type
-        if (!__is_client_concerned_filesystem(file->f_path.dentry->d_sb)) {
-            goto out;
-        }
-    }
-
     // // Remove read-only entry if PROT_WRITE requested
     // TODO: verify other mmap args to remove entry
     // if (prot & PROT_WRITE) {
@@ -1300,15 +1264,6 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
     if (!p) {
         goto out;
     }
-
-    if (p->fs && p->fs->root.dentry) {
-        // check if connected client is interested in this
-        // file system type
-        if (!__is_client_concerned_filesystem(p->fs->root.dentry->d_sb)) {
-            goto out;
-        }
-    }
-
     if (!stall_tbl_enabled(stall_tbl)) {
         goto out;
     }
