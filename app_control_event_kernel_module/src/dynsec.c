@@ -9,7 +9,6 @@
 #include "symbols.h"
 
 #include "stall_reqs.h"
-#include "logging.h"
 #include "path_utils.h"
 #include "task_utils.h"
 #include "tracepoints.h"
@@ -114,7 +113,7 @@ static void setup_lsm_hooks(void)
 
 static int __init dynsec_init(void)
 {
-    DS_LOG(DS_INFO, "Initializing Dynamic Security Module Brand(%s)",
+    pr_info("Initializing Dynamic Security Module Brand(%s)",
            CB_APP_MODULE_NAME);
 
     // Explicitly enable protection on connect
@@ -132,12 +131,12 @@ static int __init dynsec_init(void)
     dynsec_task_utils_init();
 
     if (!dynsec_init_tp(&global_config)) {
-        pr_info("Unable to load process tracepoints\n");
+        pr_err("Unable to load process tracepoints\n");
         return -EINVAL;
     }
 
     if (!dynsec_init_lsmhooks(&global_config)) {
-        pr_info("Unable to load LSM hooks\n");
+        pr_err("Unable to load LSM hooks\n");
         dynsec_tp_shutdown();
         return -EINVAL;
     }
@@ -170,8 +169,7 @@ static int __init dynsec_init(void)
 
 static void __exit dynsec_exit(void)
 {
-    DS_LOG(DS_INFO, "Exiting: %s",
-           CB_APP_MODULE_NAME);
+    pr_info("Exiting: %s", CB_APP_MODULE_NAME);
 
     dynsec_protect_shutdown();
 

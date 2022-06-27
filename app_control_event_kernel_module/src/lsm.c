@@ -266,9 +266,9 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
 
 out_fail:
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
-    pr_info("LSM: Failed to find security_ops\n");
+    pr_err("LSM: Failed to find security_ops\n");
 #else  //}{
-    pr_info("LSM: Failed to find security_hook_heads\n");
+    pr_err("LSM: Failed to find security_hook_heads\n");
 #endif  //}
     dynsec_config->lsm_hooks = enabled_lsm_hooks;
 

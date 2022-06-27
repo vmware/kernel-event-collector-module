@@ -91,7 +91,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
     ret = copy_dynsec_event_to_user(event, ubuf, count);
     if (ret < 0) {
         struct stall_key key;
-        pr_info("%s:%d size:%u failed copy:%ld\n", __func__, __LINE__,
+        pr_err("%s:%d size:%u failed copy:%ld\n", __func__, __LINE__,
                 stall_queue_size(stall_tbl), ret);
 
         memset(&key, 0, sizeof(key));
@@ -133,7 +133,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         ret = copy_dynsec_event_to_user(event, ubuf, count);
         if (ret < 0) {
             struct stall_key key;
-            pr_info("%s:%d size:%u failed copy:%ld\n", __func__, __LINE__,
+            pr_err("%s:%d size:%u failed copy:%ld\n", __func__, __LINE__,
                     stall_queue_size(stall_tbl), ret);
 
             memset(&key, 0, sizeof(key));
