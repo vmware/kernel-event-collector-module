@@ -38,7 +38,7 @@ extern struct dynsec_config preserved_config __read_mostly;
     .lsm_hooks = DYNSEC_LSM_HOOKS, \
     .process_hooks = DYNSEC_PROCESS_HOOKS, \
     .preaction_hooks = 0, \
-    .file_system_stall_mask = 0x3FFF, \
+    .file_system_stall_mask = 0, \
 }
 
 // Based on isSupportedFilesystem() LinuxLsmExposed.cpp
