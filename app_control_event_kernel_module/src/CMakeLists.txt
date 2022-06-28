@@ -31,8 +31,6 @@ else()
     get_filename_component(ROOT_SOURCE_DIR "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 endif()
 
-include(constants.cmake)
-
 # Variables determined from build type
 if (${LOCAL_BUILD})
     message("Building using variables defined locally in this CMake")
@@ -107,20 +105,20 @@ find_package(CbKernelUtil REQUIRED)
 # Common variable definitions
 set(INCLUDE_DIR $ENV{ORIGINAL_SOURCE}/include)
 
-set(CBSENSOR_AFLAGS "")
-set(CBSENSOR_AFLAGS "${CBSENSOR_AFLAGS} -I${PROJECT_SOURCE_DIR}")
-set(CBSENSOR_AFLAGS "${CBSENSOR_AFLAGS} -I${PROJECT_BINARY_DIR}")
-set(CBSENSOR_AFLAGS "${CBSENSOR_AFLAGS} -I${INCLUDE_DIR}")
+set(DYNSEC_AFLAGS "")
+set(DYNSEC_AFLAGS "${DYNSEC_AFLAGS} -I${PROJECT_SOURCE_DIR}")
+set(DYNSEC_AFLAGS "${DYNSEC_AFLAGS} -I${PROJECT_BINARY_DIR}")
+set(DYNSEC_AFLAGS "${DYNSEC_AFLAGS} -I${INCLUDE_DIR}")
 
-set(CBSENSOR_FLAGS "")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -Wall")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -Wformat")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -Werror")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${PROJECT_SOURCE_DIR}")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${PROJECT_SOURCE_DIR}/tests")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${PROJECT_BINARY_DIR}")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -I${INCLUDE_DIR}")
-set(CBSENSOR_FLAGS "${CBSENSOR_FLAGS} -include \"version.h\"")
+set(DYNSEC_FLAGS "")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -Wall")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -Wformat")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -Werror")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -I${PROJECT_SOURCE_DIR}")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -I${PROJECT_SOURCE_DIR}/tests")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -I${PROJECT_BINARY_DIR}")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -I${INCLUDE_DIR}")
+set(DYNSEC_FLAGS "${DYNSEC_FLAGS} -include \"version.h\"")
 
 # Prepare source files (and remove configured files from a previous build)
 set(CONFIGURED_VERSION_FILE ${PROJECT_BINARY_DIR}/version.h)
@@ -179,8 +177,8 @@ foreach(KERNEL_NAME ${KERNEL_LIST})
             MODULE_SOURCE_DIR   ${PROJECT_SOURCE_DIR}
             MODULE_BUILD_DIR    ${PROJECT_BINARY_DIR}
             KERNEL_BUILD_DIR    ${KERNEL_BUILD_DIR}
-            FLAGS               ${CBSENSOR_FLAGS}
-            AFLAGS              ${CBSENSOR_AFLAGS}
+            FLAGS               ${DYNSEC_FLAGS}
+            AFLAGS              ${DYNSEC_AFLAGS}
             SOURCE_FILES        ${SOURCE_FILES}
             USE_NATIVE_COMPILER)
 endforeach()
