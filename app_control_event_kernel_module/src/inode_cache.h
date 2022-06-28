@@ -2,8 +2,6 @@
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
 #pragma once
 
-extern int debug_inode_cache;
-
 extern int inode_cache_register(void);
 extern void inode_cache_clear(void);
 extern void inode_cache_enable(void);

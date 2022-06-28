@@ -3,8 +3,6 @@
 
 #pragma once
 
-extern int dynsec_debug_stall;
-
 extern int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event,
                                      int *response, gfp_t mode);
 

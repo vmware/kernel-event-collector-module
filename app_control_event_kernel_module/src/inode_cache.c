@@ -44,8 +44,6 @@ struct inode_cache {
 
 static struct inode_cache *inode_cache = NULL;
 
-int debug_inode_cache = 0;
-
 static inline u32 inode_hash(struct inode_key *key, u32 secret)
 {
     return jhash(key, sizeof(*key), secret);
@@ -89,14 +87,12 @@ static void inode_cache_free_entries(void)
         inode_cache->bkt[i].size = 0;
         unlock_bucket(&inode_cache->bkt[i], flags);
 
-        if (debug_inode_cache) {
-            total_entries += size;
-            if (size) {
-                bkts_used += 1;
-            }
+        total_entries += size;
+        if (size) {
+            bkts_used += 1;
         }
     }
-    if (debug_inode_cache && total_entries) {
+    if (total_entries) {
         pr_info("inode hashtbl: total entries:%u bkts_used:%u\n",
                 total_entries, bkts_used);
     }
@@ -239,7 +235,7 @@ int inode_cache_lookup(unsigned long inode_addr, u64 *hits,
     entry = __lookup_entry_safe(hash, &key, &bkt->list);
     if (entry) {
         ret = 0;
-        if (debug_inode_cache && !is_entry_disabled(entry)) {
+        if (!is_entry_disabled(entry)) {
             entry->hits += 1;
         }
         if (hits) {

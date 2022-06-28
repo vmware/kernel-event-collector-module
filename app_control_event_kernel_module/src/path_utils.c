@@ -20,8 +20,6 @@
 
 #define DYNSEC_PATH_MAX (PATH_MAX)
 
-int debug_append_component = 0;
-
 struct path_symz {
     char *(* dentry_path_raw)(const struct dentry *dentry, char *buf, int buflen);
     char *(* dentry_path)(const struct dentry *dentry, char *buf, int buflen);
@@ -475,12 +473,10 @@ static int append_component(const char *bufhead, size_t bufsize,
                     return 1;
                 }
 
-                if (debug_append_component) {
-                    pr_info("%s:%d bufsize:%lu og_len:%lu newlen:%lu "
-                            "offset:%lu comp_len:%lu mv_len:%lu\n",
-                            __func__, __LINE__, bufsize, og_len,
-                            len, offset, component_len, mv_len);
-                }
+                pr_info("%s:%d bufsize:%lu og_len:%lu newlen:%lu "
+                        "offset:%lu comp_len:%lu mv_len:%lu\n",
+                        __func__, __LINE__, bufsize, og_len,
+                        len, offset, component_len, mv_len);
                 return -EINVAL;
             }
             else {
