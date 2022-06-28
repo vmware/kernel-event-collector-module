@@ -138,7 +138,7 @@ int dynsec_module_name(unsigned long addr, char *modname, size_t size)
     mod = dynsec__module_address(addr);
     if (mod) {
         ret = 0;
-        if (mod->name && modname && size) {
+        if (mod->name[0] && modname && size) {
             strlcpy(modname, mod->name, size);
         }
     }

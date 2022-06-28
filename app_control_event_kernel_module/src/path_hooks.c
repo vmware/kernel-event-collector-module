@@ -4,6 +4,10 @@
 // File is intented to support kernels with CONFIG_SECURITY_PATH enabled
 
 #ifdef CONFIG_SECURITY_PATH
+#include <linux/version.h>
+#include <linux/uidgid.h>
+#include <linux/fs.h>
+#include <linux/path.h>
 
 int dynsec_path_mknod(const struct path *dir, struct dentry *dentry, umode_t mode,
                       unsigned int dev)
@@ -38,9 +42,14 @@ int dynsec_path_link(struct dentry *old_dentry, const struct path *new_dir,
     return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+int dynsec_path_rename(const struct path *old_dir, struct dentry *old_dentry,
+                       const struct path *new_dir, struct dentry *new_dentry)
+#else
 int dynsec_path_rename(const struct path *old_dir, struct dentry *old_dentry,
                        const struct path *new_dir, struct dentry *new_dentry,
                        unsigned int flags)
+#endif
 {
     return 0;
 }

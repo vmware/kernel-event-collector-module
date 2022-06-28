@@ -57,6 +57,7 @@ $(MODULE_NAME)-objs := \
 	stall_reqs.o \
 	stall_tbl.o \
 	protect.o \
+	path_hooks.o \
 	path_utils.o \
 	task_utils.o \
 	wait.o \
