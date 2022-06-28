@@ -113,6 +113,7 @@ static void dynsec_do_setattr(struct iattr *iattr, const struct path *path)
     // check if connected client is interested in this
     // file system type
     if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         return;
     }
 
@@ -143,6 +144,7 @@ static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *re
 
     // check if connected client is interested in this
     if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         goto out;
     }
 
@@ -179,6 +181,7 @@ static int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *re
 
     // check if connected client is interested in this
     if (!__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         goto out;
     }
 
@@ -726,6 +729,7 @@ static void dynsec_do_unlink(int dfd, const char __user *pathname,
     // file system type
     if (!__is_client_concerned_filesystem(path.dentry->d_sb)) {
         path_put(&path);
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
         return;
     }
 
