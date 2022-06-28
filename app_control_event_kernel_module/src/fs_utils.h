@@ -124,6 +124,11 @@ static inline bool __is_client_concerned_filesystem_by_magic(const unsigned long
 
     uint64_t result = 0;
 
+    // If none are set, don't filter by file system type
+    if (!global_config.file_system_stall_mask) {
+        return true;
+    }
+
     switch (magic) {
     case EXT2_SUPER_MAGIC:  // EXT3 and EXT4 are the same magic
         result = get_file_system_stall_bit(EXT2_SUPER_MAGIC_BIT);

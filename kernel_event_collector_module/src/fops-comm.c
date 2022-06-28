@@ -394,7 +394,8 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     {
         if (readyCount < s_fops_config.high_queue_size
             || msg->eventType == CB_EVENT_TYPE_PROCESS_START
-            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT)
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
             llist_add(&(eventNode->llistEntry), &msg_queue_in);
             percpu_counter_inc(&tx_ready);
@@ -417,7 +418,8 @@ CATCH_DEFAULT:
         ++tx_dropped;
 
         if (msg->eventType == CB_EVENT_TYPE_PROCESS_START
-            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT)
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
             ++tx_pdropped;
         }

@@ -371,7 +371,7 @@ void prepare_non_report_event(enum dynsec_event_type event_type, gfp_t mode)
     if (current->pid == current->tgid) {
         is_thread = false;
         (void)task_cache_set_last_event(current->pid,
-                                        current->real_parent ? current->real_parent->tgid : 0,
+                                        task_parent_tgid(current),
                                         is_thread, &dummy_track, NULL, mode);
     } else {
         is_thread = true;
@@ -419,7 +419,7 @@ void prepare_dynsec_event(struct dynsec_event *dynsec_event, gfp_t mode)
     if (current->pid == current->tgid) {
         is_thread = false;
         err = task_cache_set_last_event(current->pid,
-                                        current->real_parent ? current->real_parent->tgid : 0,
+                                        task_parent_tgid(current),
                                         is_thread, &event, &prev_event, mode);
     } else {
         is_thread = true;
@@ -1701,11 +1701,21 @@ static void __fill_in_task_ctx(const struct task_struct *task,
     }
     task_ctx->tid = task->pid;
     task_ctx->pid = task->tgid;
-    if (check_parent && task->parent) {
-        task_ctx->ppid = task->parent->tgid;
-    }
-    if (check_parent && task->real_parent) {
-        task_ctx->real_parent_id = task->real_parent->tgid;
+
+    // Set parent info with rcu protections
+    if (check_parent) {
+        struct task_struct *parent;
+
+        rcu_read_lock();
+        parent = rcu_dereference(task->parent);
+        if (parent) {
+            task_ctx->ppid = parent->tgid;
+        }
+        parent = rcu_dereference(task->real_parent);
+        if (parent) {
+            task_ctx->real_parent_id = parent->tgid;
+        }
+        rcu_read_unlock();
     }
 
     // user DAC context
