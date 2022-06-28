@@ -9,8 +9,10 @@
 //      EL7         3.10.0
 //      EL8         4.18.0
 //      EL9         5.14.0
+//      Fedora      5.17.x
 //
 // TODO: Improve kernel version ABI checks
+// TODO: Utilize CONFIG_SECURITY_PATH on older kernels
 //
 
 #include <linux/version.h>
@@ -23,6 +25,7 @@
 #include "lsm_mask.h"
 #include "dynsec.h"
 #include "hooks.h"
+#include "path_hooks.h"
 #include "mem.h"
 
 // checkpatch-ignore: AVOID_EXTERNS
@@ -63,6 +66,18 @@
 #define DYNSEC_LSM_mmap_file            DYNSEC_HOOK_TYPE_MMAP
 #define DYNSEC_LSM_file_mmap            DYNSEC_HOOK_TYPE_MMAP
 
+#define DYNSEC_LSM_path_mknod           DYNSEC_HOOK_TYPE_CREATE
+#define DYNSEC_LSM_path_mkdir           DYNSEC_HOOK_TYPE_MKDIR
+#define DYNSEC_LSM_path_rmdir           DYNSEC_HOOK_TYPE_RMDIR
+#define DYNSEC_LSM_path_unlink          DYNSEC_HOOK_TYPE_UNLINK
+#define DYNSEC_LSM_path_symlink         DYNSEC_HOOK_TYPE_SYMLINK
+#define DYNSEC_LSM_path_link            DYNSEC_HOOK_TYPE_LINK
+#define DYNSEC_LSM_path_rename          DYNSEC_HOOK_TYPE_RENAME
+#define DYNSEC_LSM_path_truncate        DYNSEC_HOOK_TYPE_SETATTR
+#define DYNSEC_LSM_path_chmod           DYNSEC_HOOK_TYPE_SETATTR
+#define DYNSEC_LSM_path_chown           DYNSEC_HOOK_TYPE_SETATTR
+#define DYNSEC_LSM_path_chroot
+
 
 static bool g_lsmRegistered;
 
@@ -87,10 +102,14 @@ struct lsm_symbols {
 static struct lsm_symbols lsm_syms;
 static struct lsm_symbols *p_lsm;
 static uint64_t enabled_lsm_hooks;
+#ifdef CONFIG_SECURITY_PATH
+static uint64_t enabled_lsm_path_hooks;
+#endif /* CONFIG_SECURITY_PATH */
 
 bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
 {
     uint64_t enableHooks = 0;
+    uint64_t preactionHooks = 0;
 
     enabled_lsm_hooks = 0;
     p_lsm = NULL;
@@ -103,6 +122,7 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
         return false;
     }
     enableHooks = dynsec_config->lsm_hooks;
+    preactionHooks = dynsec_config->lsm_hooks;
 
     // Add check when implementing LSM hooks
     BUILD_BUG_ON(DYNSEC_LSM_bprm_set_creds != DYNSEC_HOOK_TYPE_EXEC);
@@ -166,6 +186,7 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
         } \
     } while (0)
 
+    #define CB_LSM_PATH_SETUP_HOOK(NAME) do { } while(0)
 #else  // }{ LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
     cblsm_hooks_count = 0;
     memset(cblsm_hooks, 0, sizeof(cblsm_hooks));
@@ -180,6 +201,21 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
             cblsm_hooks_count++; \
         } \
     } while (0)
+
+#ifdef CONFIG_SECURITY_PATH
+    #define CB_LSM_PATH_SETUP_HOOK(NAME) do { \
+        if (p_lsm->security_hook_heads && preactionHooks & DYNSEC_LSM_##NAME) { \
+            enabled_lsm_path_hooks |= DYNSEC_LSM_##NAME; \
+            pr_info("Hooking %u@" PR_p " %s\n", cblsm_hooks_count, &p_lsm->security_hook_heads->NAME, #NAME); \
+            cblsm_hooks[cblsm_hooks_count].head = &p_lsm->security_hook_heads->NAME; \
+            cblsm_hooks[cblsm_hooks_count].hook.NAME = dynsec_##NAME; \
+            cblsm_hooks[cblsm_hooks_count].lsm = "dynsec"; \
+            cblsm_hooks_count++; \
+        } \
+    } while (0)
+#else
+    #define CB_LSM_PATH_SETUP_HOOK(NAME) do { } while(0)
+#endif /* CONFIG_SECURITY_PATH */
 #endif  // }
 
     //
@@ -215,7 +251,19 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     CB_LSM_SETUP_HOOK(ptrace_access_check);
     CB_LSM_SETUP_HOOK(task_kill);
 
+    CB_LSM_PATH_SETUP_HOOK(path_mknod);
+    CB_LSM_PATH_SETUP_HOOK(path_mkdir);
+    CB_LSM_PATH_SETUP_HOOK(path_rmdir);
+    CB_LSM_PATH_SETUP_HOOK(path_unlink);
+    CB_LSM_PATH_SETUP_HOOK(path_symlink);
+    CB_LSM_PATH_SETUP_HOOK(path_link);
+    CB_LSM_PATH_SETUP_HOOK(path_rename);
+    CB_LSM_PATH_SETUP_HOOK(path_truncate);
+    CB_LSM_PATH_SETUP_HOOK(path_chmod);
+    CB_LSM_PATH_SETUP_HOOK(path_chown);
+
 #undef CB_LSM_SETUP_HOOK
+#undef CB_LSM_PATH_SETUP_HOOK
 
 
 
@@ -335,9 +383,11 @@ int check_lsm_hooks_changed(void)
 #else
     check_lsm_hook(file_open);
     check_lsm_hook(mmap_file);
-    // check_lsm_hook(task_free);
 #endif
     check_lsm_hook(file_free_security);
+    check_lsm_hook(ptrace_traceme);
+    check_lsm_hook(ptrace_access_check);
+    check_lsm_hook(task_kill);
 
 #undef check_lsm_hook
 

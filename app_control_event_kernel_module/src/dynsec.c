@@ -155,7 +155,9 @@ static int __init dynsec_init(void)
     if (may_enable_inode_cache()) {
         inode_cache_register();
     }
+#ifndef CONFIG_SECURITY_PATH
     register_preaction_hooks(&global_config);
+#endif /* ! CONFIG_SECURITY_PATH */
 
     pr_info("Loaded: %s\n", CB_APP_MODULE_NAME);
     print_config(&global_config);
@@ -184,8 +186,9 @@ static void __exit dynsec_exit(void)
     dynsec_tp_shutdown();
 
     dynsec_lsm_shutdown();
-
+#ifndef CONFIG_SECURITY_PATH
     preaction_hooks_shutdown();
+#endif /* ! CONFIG_SECURITY_PATH */
 }
 
 module_init(dynsec_init);

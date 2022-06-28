@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (c) 2021 VMware, Inc. All rights reserved.
+
+#ifdef CONFIG_SECURITY_PATH
+#else
 #include <linux/kprobes.h>
 #include <linux/module.h>
 #include <linux/kallsyms.h>
@@ -1345,3 +1348,4 @@ void preaction_hooks_shutdown(void)
     restore_syscalls();
     mutex_unlock(&lookup_lock);
 }
+#endif /* CONFIG_SECURITY_PATH */

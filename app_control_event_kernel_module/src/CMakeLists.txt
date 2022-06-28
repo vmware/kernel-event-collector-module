@@ -150,6 +150,8 @@ set(SOURCE_FILES
     stall_tbl.h
     protect.c
     protect.h
+    path_hooks.c
+    path_hooks.h
     path_utils.c
     path_utils.h
     task_utils.c
