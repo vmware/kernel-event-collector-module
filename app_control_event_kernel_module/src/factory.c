@@ -2631,6 +2631,9 @@ bool fill_in_preaction_unlink(struct dynsec_event *dynsec_event,
         unlink->kmsg.msg.file.path_offset = unlink->kmsg.hdr.payload;
         unlink->kmsg.hdr.payload += unlink->kmsg.msg.file.path_size;
     }
+
+    // file system stall mask check on path done by caller.
+
     return true;
 }
 
@@ -2656,6 +2659,7 @@ bool fill_in_preaction_symlink(struct dynsec_event *dynsec_event,
         symlink->path = NULL;
         return false;
     }
+
     symlink->kmsg.msg.file.umode |= S_IFLNK;
 
     if (symlink->path && symlink->kmsg.msg.file.path_size) {
@@ -2753,6 +2757,8 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
     if (path) {
         // Tells user this is the full filepath
         fill_in_file_data(&setattr->kmsg.msg.file, path);
+
+        // file system stall mask check on path done by caller.
 
         // MUST Be GFP_ATOMIC
         setattr->path = dynsec_build_path(path,

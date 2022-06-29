@@ -112,7 +112,7 @@ static inline bool __is_stacked_filesystem(const struct super_block *sb)
 }
 
 // check if client is concerned about this file system type
-static inline bool __is_client_concerned_filesystem(const struct super_block *sb)
+static inline bool __is_client_concerned_filesystem_by_magic(const unsigned long magic)
 {
 #ifndef XFS_SUPER_MAGIC
 #define XFS_SUPER_MAGIC 0x58465342
@@ -129,7 +129,7 @@ static inline bool __is_client_concerned_filesystem(const struct super_block *sb
         return true;
     }
 
-    switch (sb->s_magic) {
+    switch (magic) {
     case EXT2_SUPER_MAGIC:  // EXT3 and EXT4 are the same magic
         result = get_file_system_stall_bit(EXT2_SUPER_MAGIC_BIT);
         break;
@@ -189,4 +189,16 @@ static inline bool __is_client_concerned_filesystem(const struct super_block *sb
     if (result) return true;
 
     return false;
+}
+
+// check if client is concerned about this file system type
+static inline bool __is_client_concerned_filesystem(const struct super_block *sb)
+{
+    if (!sb) {
+        if (stall_mode_enabled())
+            return true;
+        else
+            return false;
+    }
+    return __is_client_concerned_filesystem_by_magic(sb->s_magic);
 }

@@ -17,6 +17,7 @@
 #include "symbols.h"
 #include "path_utils.h"
 #include "dynsec.h"
+#include "fs_utils.h"
 
 #define DYNSEC_PATH_MAX (PATH_MAX)
 
@@ -624,6 +625,13 @@ char *build_preaction_path(int dfd, const char __user *filename,
         goto out_err;
     }
 
+    // check if connected client is interested in this
+    // file system type
+    if (!__is_client_concerned_filesystem(parent_path.dentry->d_sb)) {
+        err_ret = -EINVAL;
+        goto out_err;
+    }
+
     if (file) {
         fill_in_preaction_data(file, &parent_path);
     }
@@ -657,6 +665,7 @@ char *build_preaction_path(int dfd, const char __user *filename,
         file->path_size = strlen(pathbuf) + 1;
         file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
     }
+
     return pathbuf;
 
 do_raw:
