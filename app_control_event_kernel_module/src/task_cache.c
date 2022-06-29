@@ -541,7 +541,7 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
         }
     } else {
         if (has_parent && task_label_flags) {
-            pr_info("%s: %s:%d Not inheriting parent %s:%d label: %#x",
+            pr_info("%s: %s:%d Not inheriting parent %s:%d label: %#x\n",
                     __func__,
                     is_thread ? "tid" : "pid", tid,
                     is_thread ? "pid" : "ppid", parent_pid,

@@ -74,7 +74,7 @@ static void print_config(struct dynsec_config *dynsec_config)
             dynsec_config->stall_timeout_continue);
     pr_info("dynsec_config: stall_timeout_deny:%u\n",
             dynsec_config->stall_timeout_deny);
-    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d",
+    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d\n",
             dynsec_config->lazy_notifier, dynsec_config->queue_threshold,
             dynsec_config->notify_threshold);
     pr_info("dynsec_config: send_files %#x\n", dynsec_config->send_files);
@@ -113,7 +113,7 @@ static void setup_lsm_hooks(void)
 
 static int __init dynsec_init(void)
 {
-    pr_info("Initializing Dynamic Security Module Brand(%s)",
+    pr_info("Initializing Dynamic Security Module Brand(%s)\n",
            CB_APP_MODULE_NAME);
 
     // Explicitly enable protection on connect
@@ -169,7 +169,7 @@ static int __init dynsec_init(void)
 
 static void __exit dynsec_exit(void)
 {
-    pr_info("Exiting: %s", CB_APP_MODULE_NAME);
+    pr_info("Exiting: %s\n", CB_APP_MODULE_NAME);
 
     dynsec_protect_shutdown();
 

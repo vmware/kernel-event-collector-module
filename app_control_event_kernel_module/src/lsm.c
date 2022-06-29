@@ -157,7 +157,7 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
     {
         g_combined_ops = *g_original_ops_ptr;
     }
-    pr_info("Other LSM named %s", g_original_ops_ptr->name);
+    pr_info("Other LSM named %s\n", g_original_ops_ptr->name);
 
     #define CB_LSM_SETUP_HOOK(NAME) do { \
         if (enableHooks & DYNSEC_LSM_##NAME) {\
@@ -354,7 +354,7 @@ void dynsec_lsm_shutdown(void)
 #endif  //}
     )
     {
-        pr_info("Unregistering dynsec LSM...");
+        pr_info("Unregistering dynsec LSM...\n");
         g_lsmRegistered = false;
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
         *(p_lsm->security_ops) = g_original_ops_ptr;
@@ -387,7 +387,7 @@ void dynsec_lsm_shutdown(void)
 #endif  //}
     } else
     {
-        pr_info("dynsec LSM not registered so not unregistering");
+        pr_info("dynsec LSM not registered so not unregistering\n");
     }
 }
 

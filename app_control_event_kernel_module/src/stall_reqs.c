@@ -429,7 +429,7 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         // When enabled, notifying is much more frequent. Strictest
         // option to controlling queueing.
         if (global_config.lazy_notifier != new_config.lazy_notifier) {
-            pr_info("dynsec_config: Changing lazy_notifier %u to %u",
+            pr_info("dynsec_config: Changing lazy_notifier %u to %u\n",
                     global_config.lazy_notifier, new_config.lazy_notifier);
             global_config.lazy_notifier = new_config.lazy_notifier;
         }
@@ -439,7 +439,7 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         // Soft limit for controlling when to notify userspace.
         // Good for controlling to many big bursts.
         if (global_config.notify_threshold != new_config.notify_threshold) {
-            pr_info("dynsec_config: Changing notify_threshold %u to %u",
+            pr_info("dynsec_config: Changing notify_threshold %u to %u\n",
                     global_config.notify_threshold, new_config.notify_threshold);
             global_config.notify_threshold = new_config.notify_threshold;
         }
@@ -558,7 +558,7 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         lock_config();
 
         if (global_config.file_system_stall_mask != new_config.file_system_stall_mask) {
-            pr_info("dynsec_config: Changing file_system_stall_mask to %llx",
+            pr_info("dynsec_config: Changing file_system_stall_mask to %llx\n",
                      new_config.file_system_stall_mask);
             global_config.file_system_stall_mask = new_config.file_system_stall_mask;
         }
