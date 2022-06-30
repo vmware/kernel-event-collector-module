@@ -120,4 +120,9 @@ Use followig procedure to tracing the code path:
  e. debug stalling code 
     echo 'file wait.c +p' > /sys/kernel/debug/dynamic_debug/control
 
+  OR
+
+  f. debug all dynamic logs
+    echo 'module cb_appc_events_<NNNNN> +p' > /sys/kernel/debug/dynamic_debug/control
+
 4. Check kernel logs using dmesg command.
