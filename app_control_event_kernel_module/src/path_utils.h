@@ -15,15 +15,21 @@ extern char *dynsec_dentry_path(const struct dentry *dentry, char *buf, int bufl
 
 extern char *dynsec_d_path(const struct path *path, char *buf, int buflen);
 
+#ifndef CONFIG_SECURITY_PATH
 extern char *build_preaction_path(int dfd, const char __user *filename,
                                   int lookup_flags,
                                   struct dynsec_file *file);
+#endif /* !CONFIG_SECURITY_PATH */
 
 extern char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode);
 extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file,
                                  gfp_t mode);
 extern char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file,
                                       gfp_t mode);
+extern char *dynsec_path_from_parent(const struct path *parent_path,
+                                     struct dentry *dentry,
+                                     struct dynsec_file *file);
+
 static inline bool has_gfp_atomic(gfp_t mode)
 {
 #ifdef __GFP_ATOMIC

@@ -2504,7 +2504,7 @@ bool fill_in_task_kill(struct dynsec_event *dynsec_event,
     return true;
 }
 
-
+#ifndef CONFIG_SECURITY_PATH
 bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                               int dfd, const char __user *filename,
                               int flags, umode_t umode)
@@ -2770,7 +2770,7 @@ bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
     return true;
 }
 #endif
-//#endif /* ! CONFIG_SECURITY_PATH */
+#endif /* ! CONFIG_SECURITY_PATH */
 
 static char *fill_in_task_exe(struct task_struct *task,
                               struct dynsec_file *dynsec_file, gfp_t mode)
@@ -2836,3 +2836,274 @@ struct dynsec_event *fill_in_dynsec_task_dump(struct task_struct *task, gfp_t mo
     }
     return dynsec_event;
 }
+
+#ifdef CONFIG_SECURITY_PATH
+static void fill_in_lsm_path_data(struct dynsec_file *dynsec_file,
+                                   const struct path *dir, struct dentry *dentry)
+{
+    if (dynsec_file && dir && dentry) {
+        fill_in_inode_data(dynsec_file, dentry->d_inode);
+        fill_in_sb_data(dynsec_file, dentry->d_sb);
+        fill_in_preaction_data(dynsec_file, dir);
+    }
+}
+
+bool fill_in_path_create(struct dynsec_event *dynsec_event,
+                         const struct path *dir, struct dentry *dentry, umode_t umode)
+{
+    struct dynsec_create_event *create = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_CREATE) {
+        return false;
+    }
+
+    create = dynsec_event_to_create(dynsec_event);
+
+    fill_in_task_ctx(&create->kmsg.msg.task);
+    fill_in_lsm_path_data(&create->kmsg.msg.file, dir, dentry);
+    // Potentially may support special devices if we wanted to
+    // TODO: Debug the umode value more
+    create->kmsg.msg.file.umode = umode | S_IFREG;
+
+    create->path = dynsec_path_from_parent(dir, dentry, &create->kmsg.msg.file);
+    if (create->path && create->kmsg.msg.file.path_size) {
+        create->kmsg.msg.file.path_offset = create->kmsg.hdr.payload;
+        create->kmsg.hdr.payload += create->kmsg.msg.file.path_size;
+    }
+
+    return true;
+}
+
+bool fill_in_path_mkdir(struct dynsec_event *dynsec_event,
+                        const struct path *dir, struct dentry *dentry, umode_t umode)
+{
+    struct dynsec_create_event *mkdir = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_MKDIR) {
+        return false;
+    }
+
+    mkdir = dynsec_event_to_create(dynsec_event);
+
+    fill_in_task_ctx(&mkdir->kmsg.msg.task);
+    fill_in_lsm_path_data(&mkdir->kmsg.msg.file, dir, dentry);
+    mkdir->kmsg.msg.file.umode = umode | S_IFDIR;
+
+    mkdir->path = dynsec_path_from_parent(dir, dentry, &mkdir->kmsg.msg.file);
+    if (mkdir->path && mkdir->kmsg.msg.file.path_size) {
+        mkdir->kmsg.msg.file.path_offset = mkdir->kmsg.hdr.payload;
+        mkdir->kmsg.hdr.payload += mkdir->kmsg.msg.file.path_size;
+    }
+    return true;
+}
+
+bool fill_in_path_rmdir(struct dynsec_event *dynsec_event,
+                        const struct path *dir, struct dentry *dentry)
+{
+    struct dynsec_unlink_event *rmdir = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_RMDIR) {
+        return false;
+    }
+
+    rmdir = dynsec_event_to_unlink(dynsec_event);
+
+    fill_in_task_ctx(&rmdir->kmsg.msg.task);
+    fill_in_lsm_path_data(&rmdir->kmsg.msg.file, dir, dentry);
+
+    rmdir->path = dynsec_path_from_parent(dir, dentry, &rmdir->kmsg.msg.file);
+    if (rmdir->path && rmdir->kmsg.msg.file.path_size) {
+        rmdir->kmsg.msg.file.path_offset = rmdir->kmsg.hdr.payload;
+        rmdir->kmsg.hdr.payload += rmdir->kmsg.msg.file.path_size;
+    }
+    return true;
+}
+
+bool fill_in_path_unlink(struct dynsec_event *dynsec_event,
+                         const struct path *dir, struct dentry *dentry)
+{
+    struct dynsec_unlink_event *unlink = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_UNLINK) {
+        return false;
+    }
+
+    unlink = dynsec_event_to_unlink(dynsec_event);
+
+    fill_in_task_ctx(&unlink->kmsg.msg.task);
+    fill_in_lsm_path_data(&unlink->kmsg.msg.file, dir, dentry);
+
+    unlink->path = dynsec_path_from_parent(dir, dentry, &unlink->kmsg.msg.file);
+    if (unlink->path && unlink->kmsg.msg.file.path_size) {
+        unlink->kmsg.msg.file.path_offset = unlink->kmsg.hdr.payload;
+        unlink->kmsg.hdr.payload += unlink->kmsg.msg.file.path_size;
+    }
+    return true;
+}
+
+bool fill_in_path_symlink(struct dynsec_event *dynsec_event,
+                          const struct path *dir, struct dentry *dentry,
+                          const char *old_name)
+{
+    struct dynsec_symlink_event *symlink = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_SYMLINK) {
+        return false;
+    }
+
+    symlink = dynsec_event_to_symlink(dynsec_event);
+
+    fill_in_task_ctx(&symlink->kmsg.msg.task);
+    fill_in_lsm_path_data(&symlink->kmsg.msg.file, dir, dentry);
+    symlink->kmsg.msg.file.umode |= S_IFLNK;
+
+    symlink->path = dynsec_path_from_parent(dir, dentry,
+                                            &symlink->kmsg.msg.file);
+    if (symlink->path && symlink->kmsg.msg.file.path_size) {
+        symlink->kmsg.msg.file.path_offset = symlink->kmsg.hdr.payload;
+        symlink->kmsg.hdr.payload += symlink->kmsg.msg.file.path_size;
+    }
+
+    if (old_name && *old_name) {
+        size_t size = strlen(old_name) + 1;
+
+        symlink->target_path = kmalloc(size, GFP_KERNEL);
+        if (symlink->target_path) {
+            memcpy(symlink->target_path, old_name, size);
+            symlink->target_path[size - 1] = 0;
+            symlink->kmsg.msg.target.size = (uint16_t)size;
+            symlink->kmsg.msg.target.offset = symlink->kmsg.hdr.payload;
+            symlink->kmsg.hdr.payload += symlink->kmsg.msg.target.size;
+        }
+    }
+
+    return true;
+}
+
+bool fill_in_path_link(struct dynsec_event *dynsec_event,
+                       struct dentry *old_dentry,
+                       const struct path *new_dir,
+                       struct dentry *new_dentry)
+{
+    struct dynsec_link_event *link = NULL;
+    struct path fake_old_path;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_LINK) {
+        return false;
+    }
+
+    // Doesn't give path for old dentry
+    fake_old_path = *new_dir;
+    fake_old_path.dentry = old_dentry;
+
+    link = dynsec_event_to_link(dynsec_event);
+
+    fill_in_task_ctx(&link->kmsg.msg.task);
+
+    // Should be complete info
+    fill_in_file_data(&link->kmsg.msg.old_file, &fake_old_path);
+    fill_in_lsm_path_data(&link->kmsg.msg.new_file, new_dir, new_dentry);
+
+    link->old_path = dynsec_build_path(&fake_old_path,
+                                       &link->kmsg.msg.old_file,
+                                       GFP_ATOMIC);
+    if (link->old_path && link->kmsg.msg.old_file.path_size) {
+        link->kmsg.msg.old_file.path_offset = link->kmsg.hdr.payload;
+        link->kmsg.hdr.payload += link->kmsg.msg.old_file.path_size;
+    }
+
+    link->new_path = dynsec_path_from_parent(new_dir, new_dentry,
+                                             &link->kmsg.msg.new_file);
+    if (link->new_path && link->kmsg.msg.new_file.path_size) {
+        link->kmsg.msg.new_file.path_offset = link->kmsg.hdr.payload;
+        link->kmsg.hdr.payload += link->kmsg.msg.new_file.path_size;
+    }
+
+    return true;
+}
+
+bool fill_in_path_rename(struct dynsec_event *dynsec_event,
+                         const struct path *old_dir, struct dentry *old_dentry,
+                         const struct path *new_dir, struct dentry *new_dentry)
+{
+    struct dynsec_rename_event *rename = NULL;
+
+    if (!dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_RENAME) {
+        return false;
+    }
+    rename = dynsec_event_to_rename(dynsec_event);
+
+    fill_in_task_ctx(&rename->kmsg.msg.task);
+    fill_in_lsm_path_data(&rename->kmsg.msg.old_file, old_dir, old_dentry);
+    fill_in_lsm_path_data(&rename->kmsg.msg.new_file, new_dir, new_dentry);
+
+    rename->old_path = dynsec_path_from_parent(old_dir, old_dentry,
+                                               &rename->kmsg.msg.old_file);
+    if (rename->old_path && rename->kmsg.msg.old_file.path_size) {
+        rename->kmsg.msg.old_file.path_offset = rename->kmsg.hdr.payload;
+        rename->kmsg.hdr.payload += rename->kmsg.msg.old_file.path_size;
+    }
+
+    rename->new_path = dynsec_path_from_parent(new_dir, new_dentry,
+                                               &rename->kmsg.msg.new_file);
+    if (rename->new_path && rename->kmsg.msg.new_file.path_size) {
+        rename->kmsg.msg.new_file.path_offset = rename->kmsg.hdr.payload;
+        rename->kmsg.hdr.payload += rename->kmsg.msg.new_file.path_size;
+    }
+
+    return true;
+}
+
+bool fill_in_path_setattr(struct dynsec_event *dynsec_event,
+                          const struct path *path, const struct iattr *attr)
+{
+    struct dynsec_setattr_event *setattr = NULL;
+
+    if (!attr || !path || !dynsec_event ||
+        dynsec_event->event_type != DYNSEC_EVENT_TYPE_SETATTR) {
+        return false;
+    }
+    setattr = dynsec_event_to_setattr(dynsec_event);
+
+    fill_in_task_ctx(&setattr->kmsg.msg.task);
+
+    if (attr->ia_valid & ATTR_MODE) {
+        setattr->kmsg.msg.attr_umode = attr->ia_mode;
+        setattr->kmsg.msg.attr_mask |= ATTR_MODE;
+    }
+    if (attr->ia_valid & ATTR_UID) {
+        setattr->kmsg.msg.attr_uid =
+            from_kuid(&init_user_ns, attr->ia_uid);
+        setattr->kmsg.msg.attr_mask |= ATTR_UID;
+    }
+    if (attr->ia_valid & ATTR_GID) {
+        setattr->kmsg.msg.attr_gid =
+            from_kgid(&init_user_ns, attr->ia_gid);
+        setattr->kmsg.msg.attr_mask |= ATTR_GID;
+    }
+
+    // Fill in file path related info
+    // Tells user this is the full filepath
+    fill_in_file_data(&setattr->kmsg.msg.file, path);
+
+    setattr->path = dynsec_build_path((struct path *)path,
+                                      &setattr->kmsg.msg.file,
+                                      GFP_ATOMIC);
+    if (setattr->path && setattr->kmsg.msg.file.path_size) {
+        setattr->kmsg.msg.file.path_offset = setattr->kmsg.hdr.payload;
+        setattr->kmsg.hdr.payload += setattr->kmsg.msg.file.path_size;
+
+        // Not truly ATTR_FILE but it's fine
+        setattr->kmsg.msg.attr_mask |= ATTR_FILE;
+    }
+
+    return true;
+}
+#endif /* CONFIG_SECURITY_PATH */

@@ -325,7 +325,7 @@ extern bool fill_in_ptrace(struct dynsec_event *dynsec_event,
 extern bool fill_in_task_kill(struct dynsec_event *dynsec_event,
                               const struct task_struct *target, int sig);
 
-//#ifndef CONFIG_SECURITY_PATH
+#ifndef CONFIG_SECURITY_PATH
 extern bool fill_in_preaction_create(struct dynsec_event *dynsec_event,
                                      int dfd, const char __user *filename,
                                      int flags, umode_t umode);
@@ -347,7 +347,42 @@ extern bool fill_in_preaction_link(struct dynsec_event *dynsec_event,
 extern bool fill_in_preaction_setattr(struct dynsec_event *dynsec_event,
                                       struct iattr *attr, struct path *path);
 #endif
-//#endif /* ! CONFIG_SECURITY_PATH */
+#endif /* ! CONFIG_SECURITY_PATH */
+
+#ifdef CONFIG_SECURITY_PATH
+extern bool fill_in_path_create(struct dynsec_event *dynsec_event,
+                                const struct path *dir, struct dentry *dentry,
+                                umode_t umode);
+
+extern bool fill_in_path_mkdir(struct dynsec_event *dynsec_event,
+                               const struct path *dir, struct dentry *dentry,
+                               umode_t umode);
+
+extern bool fill_in_path_rmdir(struct dynsec_event *dynsec_event,
+                               const struct path *dir, struct dentry *dentry);
+
+extern bool fill_in_path_unlink(struct dynsec_event *dynsec_event,
+                                const struct path *dir, struct dentry *dentry);
+
+extern bool fill_in_path_symlink(struct dynsec_event *dynsec_event,
+                                 const struct path *dir, struct dentry *dentry,
+                                 const char *old_name);
+
+extern bool fill_in_path_link(struct dynsec_event *dynsec_event,
+                              struct dentry *old_dentry,
+                              const struct path *new_dir,
+                              struct dentry *new_dentry);
+
+extern bool fill_in_path_rename(struct dynsec_event *dynsec_event,
+                                const struct path *old_dir,
+                                struct dentry *old_dentry,
+                                const struct path *new_dir,
+                                struct dentry *new_dentry);
+
+extern bool fill_in_path_setattr(struct dynsec_event *dynsec_event,
+                                 const struct path *path,
+                                 const struct iattr *attr);
+#endif /* CONFIG_SECURITY_PATH */
 
 extern struct dynsec_event *fill_in_dynsec_task_dump(struct task_struct *task,
                                                      gfp_t mode);

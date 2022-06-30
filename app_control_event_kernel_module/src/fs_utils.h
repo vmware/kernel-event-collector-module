@@ -8,6 +8,14 @@
 #include "config.h"
 #include "dynsec.h"
 
+static inline const struct inode * __path_inode(const struct path *path)
+{
+    if (path && path->dentry) {
+        return path->dentry->d_inode;
+    }
+    return NULL;
+}
+
 static inline const struct inode * __file_inode(const struct file *file)
 {
     if (file && file->f_path.dentry) {

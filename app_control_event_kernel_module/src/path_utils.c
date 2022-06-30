@@ -289,6 +289,7 @@ out_err:
     goto out;
 }
 
+#ifndef CONFIG_SECURITY_PATH
 static char *dynsec_prepend_dfd(int dfd, char *pathbuf, int buflen,
                                 int *err)
 {
@@ -687,4 +688,37 @@ out_err:
         pathbuf = NULL;
     }
     return ERR_PTR(err_ret);
+}
+#endif /* !CONFIG_SECURITY_PATH */
+
+
+// Should be GFP_ATOMIC most of the time
+static char *__dynsec_path_from_parent(const struct path *parent_path,
+                                       struct dentry *dentry,
+                                       struct dynsec_file *file,
+                                       gfp_t gfp_mode)
+{
+    struct path fake_path;
+
+    if (!parent_path ||!dentry) {
+        return NULL;
+    }
+
+    if (!parent_path->mnt) {
+        return dynsec_build_dentry(dentry, file, gfp_mode);
+    }
+
+    fake_path = (struct path) {
+        .mnt = parent_path->mnt,
+        .dentry = dentry,
+    };
+
+    return dynsec_build_path(&fake_path, file, gfp_mode);
+}
+
+char *dynsec_path_from_parent(const struct path *parent_path,
+                              struct dentry *dentry,
+                              struct dynsec_file *file)
+{
+    return __dynsec_path_from_parent(parent_path, dentry, file, GFP_ATOMIC);
 }
