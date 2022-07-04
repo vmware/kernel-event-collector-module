@@ -156,6 +156,8 @@ static int __init dynsec_init(void)
     }
     register_preaction_hooks(&global_config);
 
+    dynsec_register_proc_entries();
+
     pr_info("Loaded: %s\n", CB_APP_MODULE_NAME);
     print_config(&global_config);
 
@@ -170,6 +172,8 @@ static int __init dynsec_init(void)
 static void __exit dynsec_exit(void)
 {
     pr_info("Exiting: %s\n", THIS_MODULE->name);
+
+    dynsec_cleanup_proc_entries();
 
     dynsec_protect_shutdown();
 

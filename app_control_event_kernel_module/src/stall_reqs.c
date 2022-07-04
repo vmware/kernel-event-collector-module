@@ -8,6 +8,7 @@
 #include <linux/slab.h>
 #include <linux/sched.h>
 #include <linux/module.h>
+#include <linux/proc_fs.h>
 #ifndef SINGLE_READ_ONLY
 #include <linux/version.h>
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
@@ -627,4 +628,64 @@ bool dynsec_chrdev_init(void)
     }
 
     return true;
+}
+
+    // Globals
+    const char *event_stats = CB_APP_MODULE_NAME "_stats";
+
+// function to cleanup entries in /proc file system
+void dynsec_cleanup_proc_entries(void)
+{
+    remove_proc_entry(event_stats, NULL);
+}
+
+// function when echo (write) gets executed on proc file
+ssize_t dynsec_proc_write(struct file *file, const char *buf, size_t size, loff_t *ppos)
+{
+    // no effect this time
+    return 0;
+}
+
+// function when cat (read) gets executed on proc file
+int dynsec_proc_read(struct seq_file *m, void *v)
+{
+    seq_printf(m, " %20s %d", "stall queue size: ", stall_queue_size(stall_tbl));
+    seq_puts(m, "\n");
+
+    stall_tbl_display_buckets(stall_tbl, m);
+
+    return 0;
+}
+
+// proc file operation for open syscall
+int dynsec_proc_open(struct inode *inode, struct file *file)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+#define PDE_DATA(a) container_of((a), struct proc_inode, vfs_inode)->pde->data
+#endif
+    return single_open(file, dynsec_proc_read, PDE_DATA(inode));
+}
+
+// dynsec proc file operations
+const struct file_operations dynsec_proc_fops = {
+    .owner      = THIS_MODULE,
+    .open       = dynsec_proc_open,
+    .read       = seq_read,
+    .write      = dynsec_proc_write,
+    .release    = single_release,
+};
+
+// function to create entries in /proc file system
+void dynsec_register_proc_entries(void)
+{
+    static struct proc_dir_entry *ent;
+
+#define PROC_FILE_MODE_RD  0400
+#define PROC_FILE_MODE_WR  0200
+
+    ent = proc_create_data(event_stats, PROC_FILE_MODE_RD, NULL,
+                        &dynsec_proc_fops, (void *)stall_tbl);
+    if (!ent) {
+        pr_err("Unable to create proc file entries\n");
+    }
 }
