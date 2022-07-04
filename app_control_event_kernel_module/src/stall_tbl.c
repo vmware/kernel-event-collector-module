@@ -552,7 +552,7 @@ void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m)
     unsigned long flags;
     u32 i, size;
 
-    pr_info("Display stall table non-zero bucket sizes\n");
+    pr_debug("Display stall table non-zero bucket sizes\n");
     for (i = 0; i < STALL_BUCKETS; i++) {
         size = 0;
         flags = lock_stall_bkt(&stall_tbl->bkt[i], flags);
