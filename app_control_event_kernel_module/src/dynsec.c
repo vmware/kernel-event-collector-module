@@ -114,7 +114,7 @@ static void setup_lsm_hooks(void)
 static int __init dynsec_init(void)
 {
     pr_info("Initializing Dynamic Security Module Brand(%s)\n",
-           CB_APP_MODULE_NAME);
+           THIS_MODULE->name);
 
     // Explicitly enable protection on connect
     (void)dynsec_protect_init();
@@ -169,7 +169,7 @@ static int __init dynsec_init(void)
 
 static void __exit dynsec_exit(void)
 {
-    pr_info("Exiting: %s\n", CB_APP_MODULE_NAME);
+    pr_info("Exiting: %s\n", THIS_MODULE->name);
 
     dynsec_protect_shutdown();
 

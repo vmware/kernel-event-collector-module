@@ -94,6 +94,7 @@ form of label retention and is meant to label process trees.
 The source code uses dynamic debug macros which can be enabled at run
 time to trace the code flow. This works only if the kernel is compiled
 with CONFIG\_DYNAMIC\_DEBUG flag.
+Refer to dynamic-debug-howto.txt from kernel Documentation.
 
 Use followig procedure to tracing the code path:
 1. mount the debug file system if it not mounted already.
@@ -115,10 +116,12 @@ Use followig procedure to tracing the code path:
     echo 'file protect.c +p' > /sys/kernel/debug/dynamic_debug/control
 
  d. debug task labeling
-    echo 'file task_cache.c +p' > /sys/kernel/debug/dynamic_debug/control
+    echo 'module cb_appc_events_<NNNNN> file task_cache.c +p' > /sys/kernel/debug/dynamic_debug/control
 
  e. debug stalling code 
-    echo 'file wait.c +p' > /sys/kernel/debug/dynamic_debug/control
+    echo 'module cb_appc_events_<NNNNN> file wait.c +p' > /sys/kernel/debug/dynamic_debug/control
+
+   In order to avoid conflicts with files having same names, module name can be prepended to  file.
 
   OR
 
