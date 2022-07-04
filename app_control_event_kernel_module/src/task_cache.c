@@ -970,7 +970,7 @@ void task_cache_display_buckets(struct seq_file *m)
         return;
     }
 
-    pr_info("Display task cache non-zero bucket sizes\n");
+    pr_debug("Display task cache non-zero bucket sizes\n");
     for (i = 0; i < TASK_BUCKETS; i++) {
         size = 0;
         spin_lock_irqsave(&task_cache->bkt[i].lock, flags);

@@ -362,7 +362,7 @@ void inode_cache_display_buckets(struct seq_file *m)
         return;
     }
 
-    pr_info("Display inode cache non-zero bucket sizes\n");
+    pr_debug("Display inode cache non-zero bucket sizes\n");
     for (i = 0; i < INODE_BUCKETS; i++) {
         size = 0;
         flags = lock_bucket(&inode_cache->bkt[i], flags);
