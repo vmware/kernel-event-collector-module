@@ -30,7 +30,6 @@
 ))
 
 static DEFINE_MUTEX(protect_lock);
-int debug_protect_matching = 0;
 
 struct protect {
     spinlock_t lock;
@@ -454,9 +453,7 @@ static u64 __protect_match_path(const struct protect_entry *entry,
     // Matches turn into strcmp if lengths are equal
     if (path_len == entry->blob_len) {
         if (strcmp(path, entry->blob) == 0) {
-            if (debug_protect_matching) {
-                pr_info("%s: matched eq %s\n", __func__, entry->blob);
-            }
+            pr_info("%s: matched eq %s\n", __func__, entry->blob);
             return entry->match_flags;
         }
         return 0;
@@ -464,9 +461,7 @@ static u64 __protect_match_path(const struct protect_entry *entry,
 
     if (entry->match_flags & DYNSEC_MATCHING_PATH_STARTS_WITH) {
         if (strncmp(path, entry->blob, entry->blob_len) == 0) {
-            if (debug_protect_matching) {
-                pr_info("%s: matched starts_with %s\n", __func__, entry->blob);
-            }
+            pr_info("%s: matched starts_with %s\n", __func__, entry->blob);
             return entry->match_flags;
         }
     }
@@ -474,9 +469,7 @@ static u64 __protect_match_path(const struct protect_entry *entry,
         const char *path_pos = path + (path_len - entry->blob_len);
 
         if (strncmp(path_pos, entry->blob, entry->blob_len) == 0) {
-            if (debug_protect_matching) {
-                pr_info("%s: matched ends_with %s\n", __func__, entry->blob);
-            }
+            pr_info("%s: matched ends_with %s\n", __func__, entry->blob);
             return entry->match_flags;
         }
     }
@@ -484,9 +477,7 @@ static u64 __protect_match_path(const struct protect_entry *entry,
     if (entry->match_flags & DYNSEC_MATCHING_PATH_CONTAINS) {
         // Find the first substring occurence
         if (strstr(path, entry->blob) != NULL) {
-            if (debug_protect_matching) {
-                pr_info("%s: matched substr %s\n", __func__, entry->blob);
-            }
+            pr_info("%s: matched substr %s\n", __func__, entry->blob);
             return entry->match_flags;
         }
     }

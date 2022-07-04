@@ -139,7 +139,6 @@ set(SOURCE_FILES
     task_cache.h
     lsm.c
     lsm_mask.h
-    logging.h
     symbols.c
     symbols.h
     factory.c

@@ -13,8 +13,6 @@
 
 #define MAX_CONTINUE_RESPONSES 256
 
-int dynsec_debug_stall = 0;
-
 // counter to track consecutive stall timeouts
 atomic_t  stall_timeout_ctr = ATOMIC_INIT(0);
 
@@ -54,9 +52,7 @@ retry:
         // We could opt for a non-deny response here or
         // set back to safe value.
 
-        if (dynsec_debug_stall) {
-            pr_info("%s: interruped %d\n", __func__, wait_ret);
-        }
+        pr_info("%s: interruped %d\n", __func__, wait_ret);
     }
     // Timedout and conditional not met in time
     else if (wait_ret == 0) {
@@ -76,10 +72,8 @@ retry:
             pr_warn("Stalling disabled after many events timed out.\n");
         }
 
-        if (dynsec_debug_stall) {
-            pr_info("%s:%d response:%d timedout:%lu jiffies\n", __func__, __LINE__,
-                    local_response, timeout);
-        }
+        pr_info("%s:%d response:%d timedout:%lu jiffies\n", __func__, __LINE__,
+                local_response, timeout);
     }
     // Conditional was true, likely wake_up
     else {
@@ -105,10 +99,8 @@ retry:
                 timeout = msecs_to_jiffies(get_continue_timeout());
             }
             continue_count += 1;
-            if (dynsec_debug_stall) {
-                pr_info("%s:%d continue:%u extending stall:%lu jiffies\n",
-                        __func__, __LINE__, continue_count, timeout);
-            }
+            pr_info("%s:%d continue:%u extending stall:%lu jiffies\n",
+                    __func__, __LINE__, continue_count, timeout);
 
             // Don't let userspace ping/pong for too long
             if (continue_count < MAX_CONTINUE_RESPONSES) {

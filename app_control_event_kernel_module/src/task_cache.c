@@ -88,9 +88,6 @@ struct task_cache {
 
 static struct task_cache *task_cache = NULL;
 
-int debug_task_cache = 0;
-int debug_task_labeling = 0;
-
 static inline u32 task_hash(struct task_key *key, u32 secret)
 {
     return jhash(key, sizeof(*key), secret);
@@ -125,18 +122,14 @@ static void task_cache_free_entries(void)
         task_cache->bkt[i].size = 0;
         spin_unlock_irqrestore(&task_cache->bkt[i].lock, flags);
 
-        if (debug_task_cache) {
-            total_entries += size;
-            if (size) {
-                bkts_used += 1;
-            }
+        total_entries += size;
+        if (size) {
+            bkts_used += 1;
         }
     }
 
-    if (debug_task_cache && total_entries) {
-        pr_info("task hashtbl: entries:%u bkts used:%u\n",
-                total_entries, bkts_used);
-    }
+    pr_info("task hashtbl: entries:%u bkts used:%u\n",
+            total_entries, bkts_used);
 }
 
 int task_cache_register(void)
@@ -453,9 +446,7 @@ static int set_task_label_flags(pid_t tid, u32 task_label_flags, gfp_t mode)
         kfree(new_entry);
     }
 
-    if (debug_task_labeling && task_label_flags && !ret) {
-        pr_info("%s: %#x for tid:%d\n", __func__, task_label_flags, tid);
-    }
+    pr_info("%s: %#x for tid:%d\n", __func__, task_label_flags, tid);
 
     return ret;
 }
@@ -523,14 +514,12 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
     }
 
     has_parent = find_parent_task_labels(parent_pid, &task_label_flags);
-    if (debug_task_labeling) {
-        pr_info("%s: %s %s:%d %s:%d %#x\n", __func__,
-                has_parent ? "has_parent" : "parent not found",
-                    is_thread ? "tid" : "pid", tid,
-                    is_thread ? "pid" : "ppid", parent_pid,
-                    task_label_flags
-        );
-    }
+    pr_info("%s: %s %s:%d %s:%d %#x\n", __func__,
+            has_parent ? "has_parent" : "parent not found",
+                is_thread ? "tid" : "pid", tid,
+                is_thread ? "pid" : "ppid", parent_pid,
+                task_label_flags
+    );
     if (has_parent && (task_label_flags & DYNSEC_CACHE_INHERIT)) {
         // Unset inheritability if not a thread.
         // Threads retain same label as main thread for simplicity.
@@ -538,31 +527,25 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
             !(task_label_flags & DYNSEC_CACHE_INHERIT_RECURSE)) {
 
             task_label_flags &= ~(DYNSEC_CACHE_INHERIT);
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d dropping inherit from %s:%d: %#x\n",
-                        __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
+            pr_info("%s: %s:%d dropping inherit from %s:%d: %#x\n",
+                    __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
         } else {
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d inheriting from %s:%d %#x\n",
-                        __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
+            pr_info("%s: %s:%d inheriting from %s:%d %#x\n",
+                    __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
         }
     } else {
         if (has_parent && task_label_flags) {
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d Not inheriting parent %s:%d label: %#x",
-                        __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
+            pr_info("%s: %s:%d Not inheriting parent %s:%d label: %#x\n",
+                    __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
 
             // Parent label was not inheritable. Insert later on as needed.
             return 0;
@@ -621,9 +604,7 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
         entry = NULL;
     }
 
-    if (debug_task_labeling) {
-        pr_info("%s: inserted tid:%d ret:%d\n", __func__, tid, ret);
-    }
+    pr_info("%s: inserted tid:%d ret:%d\n", __func__, tid, ret);
 
     return ret;
 }
@@ -682,26 +663,22 @@ int task_cache_set_last_event(pid_t tid, pid_t parent_pid, bool is_thread,
     INIT_LIST_HEAD(&entry->list);
 
     has_parent = find_parent_task_labels(parent_pid, &task_label_flags);
-    if (debug_task_labeling) {
-        pr_info("%s: %s %s:%d %s:%d %#x\n", __func__,
-                has_parent ? "has_parent" : "parent not found",
-                is_thread ? "tid" : "pid", tid,
-                is_thread ? "pid" : "ppid", parent_pid,
-                task_label_flags
-        );
-    }
+    pr_info("%s: %s %s:%d %s:%d %#x\n", __func__,
+            has_parent ? "has_parent" : "parent not found",
+            is_thread ? "tid" : "pid", tid,
+            is_thread ? "pid" : "ppid", parent_pid,
+            task_label_flags
+    );
     if (has_parent && (task_label_flags & DYNSEC_CACHE_INHERIT)) {
         // Unset inheritability if not a thread
         if (!is_thread &&
             !(task_label_flags & DYNSEC_CACHE_INHERIT_RECURSE)) {
             task_label_flags &= ~(DYNSEC_CACHE_INHERIT);
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d dropping inherit from %s:%d: %#x\n", __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
-        } else if (debug_task_labeling) {
+            pr_info("%s: %s:%d dropping inherit from %s:%d: %#x\n", __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
+        } else {
             pr_info("%s: %s:%d inheriting from %s:%d %#x\n", __func__,
                     is_thread ? "tid" : "pid", tid,
                     is_thread ? "pid" : "ppid", parent_pid,
@@ -865,10 +842,8 @@ int task_cache_handle_response(struct dynsec_response *response)
         return 0;
     }
 
-    if (debug_task_labeling && task_label_flags) {
-        pr_info("%s: tid:%u task_label_flags:%#x\n", __func__,
-                response->tid, task_label_flags);
-    }
+    pr_info("%s: tid:%u task_label_flags:%#x\n", __func__,
+            response->tid, task_label_flags);
 
     key.tid = response->tid;
     hash = task_hash(&key, task_cache->seed);

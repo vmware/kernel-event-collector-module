@@ -5,8 +5,6 @@
 
 extern bool protect_on_connect;
 
-extern int debug_protect_matching;
-
 extern int dynsec_protect_init(void);
 
 extern void dynsec_protect_shutdown(void);

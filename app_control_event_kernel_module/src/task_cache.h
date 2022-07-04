@@ -16,8 +16,6 @@ struct event_track {
     uint64_t req_id;
 };
 
-extern int debug_task_cache;
-
 extern int task_cache_register(void);
 extern void task_cache_shutdown(void);
 #ifdef DYNSEC_IOC_LABEL_TASK
