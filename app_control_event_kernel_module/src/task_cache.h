@@ -32,3 +32,5 @@ extern void task_cache_remove_entry(pid_t tid);
 extern void task_cache_clear(void);
 extern void task_cache_disable(void);
 extern void task_cache_enable(void);
+
+extern void task_cache_display_buckets(struct seq_file *m);

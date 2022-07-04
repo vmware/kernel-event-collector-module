@@ -10,6 +10,7 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 #include <linux/version.h>
+#include <linux/seq_file.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
 #include <linux/sched/task.h>
 #endif
@@ -932,5 +933,29 @@ void task_cache_remove_entry(pid_t tid)
 
     if (entry) {
         kfree(entry);
+    }
+}
+
+void task_cache_display_buckets(struct seq_file *m)
+{
+    unsigned long flags;
+    u32 i, size;
+
+    if (!task_cache || !task_cache->bkt) {
+        return;
+    }
+
+    pr_info("Display task cache non-zero bucket sizes\n");
+    for (i = 0; i < TASK_BUCKETS; i++) {
+        size = 0;
+        spin_lock_irqsave(&task_cache->bkt[i].lock, flags);
+        if (task_cache->bkt[i].size) {
+            size = task_cache->bkt[i].size;
+        }
+        spin_unlock_irqrestore(&task_cache->bkt[i].lock, flags);
+        if (size) {
+            seq_printf(m, "TaskCache Bucket %06d: size: %d", i, size);
+            seq_puts(m, "\n");
+        }
     }
 }

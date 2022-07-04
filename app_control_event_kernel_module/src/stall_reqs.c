@@ -653,6 +653,7 @@ int dynsec_proc_read(struct seq_file *m, void *v)
     seq_puts(m, "\n");
 
     stall_tbl_display_buckets(stall_tbl, m);
+    task_cache_display_buckets(m);
     inode_cache_display_buckets(m);
 
     return 0;
