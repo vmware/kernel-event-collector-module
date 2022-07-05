@@ -175,8 +175,6 @@ static void __exit dynsec_exit(void)
 
     dynsec_cleanup_proc_entries();
 
-    dynsec_cleanup_proc_entries();
-
     dynsec_protect_shutdown();
 
     dynsec_chrdev_shutdown();

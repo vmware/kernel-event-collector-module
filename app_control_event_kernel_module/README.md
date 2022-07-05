@@ -90,6 +90,12 @@ When the inherit recursive option is set in a label, it will retain the
 inherit options that normally are unset on a fork. This is the greediest
 form of label retention and is meant to label process trees.
 
+### statistics in proc file
+The module creates an entry in the proc file system 
+/proc/cb\_appc\_events\_NNNNN\_stats file contains information about 
+current sizes of stall queue, stall buckets, inode cache buckets,
+task cache buckets for non-zero values only.
+
 ### Dynamic debugging
 The source code uses dynamic debug macros which can be enabled at run
 time to trace the code flow. This works only if the kernel is compiled
