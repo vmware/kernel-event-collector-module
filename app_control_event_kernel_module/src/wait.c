@@ -18,6 +18,7 @@ atomic_t  stall_timeout_ctr = ATOMIC_INIT(0);
 
 static int do_stall_interruptible(struct stall_entry *entry, int *response)
 {
+    bool disable_stall_tbl = false;
     int ret = 0;
     int wait_ret;
     int local_response;
@@ -25,10 +26,20 @@ static int do_stall_interruptible(struct stall_entry *entry, int *response)
     unsigned long timeout;
     unsigned int continue_count = 0;
     int default_reponse = entry->response;
+    // saved event hdr data
+    uint32_t tid;
+    uint64_t req_id, intent_req_id;
+    enum dynsec_event_type event_type;
+    uint16_t report_flags;
 
     // Initial values before we might perform a continuation
     timeout = msecs_to_jiffies(get_wait_timeout());
     local_response = entry->response;
+    tid = entry->key.tid;
+    req_id = entry->key.req_id;
+    event_type = entry->key.event_type;
+    report_flags = entry->report_flags;
+    intent_req_id = entry->intent_req_id;
 
 retry:
     if (!stall_tbl_enabled(stall_tbl)) {
@@ -62,13 +73,15 @@ retry:
         // for timed_out events.
         atomic_inc(&stall_timeout_ctr);
 
+        // TODO: Generate a GENERIC_AUDIT event here.
+        // This is something we should not frequently, observe so send these
+        // to userspace.
+        pr_info("%s: timedout: tid:%u req_id:%llu event_type:%d report_flags:%#x"
+                "intent_req_id:%llu\n", __func__, tid, req_id, event_type,
+                report_flags, intent_req_id);
+
         if (atomic_read(&stall_timeout_ctr) >= DYNSEC_STALL_TIMEOUT_CTR_LIMIT) {
-            stall_tbl_disable(stall_tbl);
-            task_cache_clear();
-            inode_cache_clear();
-            lock_config();
-            global_config.stall_mode = DEFAULT_DISABLED;
-            unlock_config();
+            disable_stall_tbl = true;
             pr_warn("Stalling disabled after many events timed out.\n");
         }
 
@@ -117,6 +130,16 @@ retry:
     // Must always attempt to remove from the table unless some entry
     // state in the future tells we don't have to.
     stall_tbl_remove_entry(stall_tbl, entry);
+
+    // Call last to prevent potential use-after-free
+    if (disable_stall_tbl) {
+        stall_tbl_disable(stall_tbl);
+        task_cache_clear();
+        inode_cache_clear();
+        lock_config();
+        global_config.stall_mode = DEFAULT_DISABLED;
+        unlock_config();
+    }
 
     return ret;
 }

@@ -387,6 +387,12 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     // Copy over inode_addr data
     entry->inode_addr = event->inode_addr;
 
+    // Copy extra dynsec_event header related data
+    entry->report_flags = event->report_flags;
+    if (entry->report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        entry->intent_req_id = event->intent_req_id;
+    }
+
     // Build bucket lookup data
     entry->hash = stall_hash(tbl->secret, &entry->key);
     index = stall_bkt_index(entry->hash);

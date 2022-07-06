@@ -43,6 +43,10 @@ struct stall_entry {
     spinlock_t lock;    // likely not needed but shouldn't hurt
     int response;
     unsigned int stall_timeout;
+
+    // Extra DynSec event header data
+    uint16_t report_flags;
+    uint64_t intent_req_id;
 };
 
 struct stall_q {
