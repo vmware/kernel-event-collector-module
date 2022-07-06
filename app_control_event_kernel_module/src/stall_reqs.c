@@ -9,6 +9,7 @@
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 #ifndef SINGLE_READ_ONLY
 #include <linux/version.h>
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
@@ -669,12 +670,20 @@ int dynsec_proc_open(struct inode *inode, struct file *file)
 }
 
 // dynsec proc file operations
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 6, 0)
 const struct file_operations dynsec_proc_fops = {
     .owner      = THIS_MODULE,
     .open       = dynsec_proc_open,
     .read       = seq_read,
     .write      = dynsec_proc_write,
     .release    = single_release,
+#else
+const struct proc_ops dynsec_proc_fops = {
+    .proc_open    = dynsec_proc_open,
+    .proc_read    = seq_read,
+    .proc_write   = dynsec_proc_write,
+    .proc_release = single_release,
+#endif
 };
 
 // function to create entries in /proc file system
