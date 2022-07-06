@@ -12,3 +12,5 @@ extern int inode_cache_lookup(unsigned long inode_addr, u64 *hits,
 extern int inode_cache_update(unsigned long inode_addr,
                               unsigned long cache_flags);
 extern void inode_cache_remove_entry(unsigned long inode_addr);
+
+extern void inode_cache_display_buckets(struct seq_file *m);

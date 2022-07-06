@@ -96,3 +96,5 @@ extern int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *ent
 extern u32 stall_queue_size(struct stall_tbl *tbl);
 
 extern struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space);
+
+extern void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m);

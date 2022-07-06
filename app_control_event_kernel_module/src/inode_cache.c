@@ -9,6 +9,8 @@
 #include <linux/vmalloc.h>
 #include <linux/random.h>
 #include <linux/sched.h>
+#include <linux/seq_file.h>
+
 #include "inode_cache.h"
 #include "dynsec.h"
 
@@ -344,5 +346,29 @@ void inode_cache_remove_entry(unsigned long inode_addr)
 
     if (entry) {
         kfree(entry);
+    }
+}
+
+void inode_cache_display_buckets(struct seq_file *m)
+{
+    unsigned long flags;
+    u32 i, size;
+
+    if (!inode_cache || !inode_cache->bkt) {
+        return;
+    }
+
+    pr_debug("Display inode cache non-zero bucket sizes\n");
+    for (i = 0; i < INODE_BUCKETS; i++) {
+        size = 0;
+        flags = lock_bucket(&inode_cache->bkt[i], flags);
+        if (inode_cache->bkt[i].size) {
+            size = inode_cache->bkt[i].size;
+        }
+        unlock_bucket(&inode_cache->bkt[i], flags);
+        if (size) {
+            seq_printf(m, "InodeCache Bucket %06d: size: %d", i, size);
+            seq_puts(m, "\n");
+        }
     }
 }
