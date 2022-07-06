@@ -31,6 +31,11 @@ int dynsec_path_mknod(const struct path *dir, struct dentry *dentry, umode_t mod
         return 0;
     }
 
+    if (!__is_client_concerned_filesystem(__path_sb(dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_CREATE, GFP_ATOMIC);
+        return 0;
+    }
+
     local_mode = mode;
     if (!(local_mode & S_IFMT)) {
         local_mode |= S_IFREG;
@@ -65,6 +70,10 @@ int dynsec_path_mkdir(const struct path *dir, struct dentry *dentry, umode_t mod
     if (!stall_tbl_enabled(stall_tbl)) {
         return 0;
     }
+    if (!__is_client_concerned_filesystem(__path_sb(dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_MKDIR, GFP_ATOMIC);
+        return 0;
+    }
 
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
@@ -91,6 +100,10 @@ int dynsec_path_rmdir(const struct path *dir, struct dentry *dentry)
     if (!stall_tbl_enabled(stall_tbl)) {
         return 0;
     }
+    if (!__is_client_concerned_filesystem(__path_sb(dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_RMDIR, GFP_ATOMIC);
+        return 0;
+    }
 
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
@@ -115,6 +128,10 @@ int dynsec_path_unlink(const struct path *dir, struct dentry *dentry)
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
 
     if (!stall_tbl_enabled(stall_tbl)) {
+        return 0;
+    }
+    if (!__is_client_concerned_filesystem(__path_sb(dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_ATOMIC);
         return 0;
     }
 
@@ -144,6 +161,10 @@ int dynsec_path_symlink(const struct path *dir, struct dentry *dentry,
     if (!stall_tbl_enabled(stall_tbl)) {
         return 0;
     }
+    if (!__is_client_concerned_filesystem(__path_sb(dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SYMLINK, GFP_ATOMIC);
+        return 0;
+    }
 
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
@@ -168,6 +189,10 @@ int dynsec_path_link(struct dentry *old_dentry, const struct path *new_dir,
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
 
     if (!stall_tbl_enabled(stall_tbl)) {
+        return 0;
+    }
+    if (!__is_client_concerned_filesystem(__path_sb(new_dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_LINK, GFP_ATOMIC);
         return 0;
     }
 
@@ -201,6 +226,10 @@ int dynsec_path_rename(const struct path *old_dir, struct dentry *old_dentry,
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
 
     if (!stall_tbl_enabled(stall_tbl)) {
+        return 0;
+    }
+    if (!__is_client_concerned_filesystem(__path_sb(old_dir))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_RENAME, GFP_ATOMIC);
         return 0;
     }
 
@@ -239,6 +268,10 @@ static int do_path_setattr(const struct path *path, const struct iattr *iattr)
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
 
+    if (task_in_connected_tgid(current)) {
+        report_flags |= DYNSEC_REPORT_SELF;
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SETATTR,
                                DYNSEC_EVENT_TYPE_SETATTR,
                                report_flags, GFP_ATOMIC);
@@ -262,6 +295,10 @@ int dynsec_path_chmod(const struct path *path, umode_t mode)
     if (!stall_tbl_enabled(stall_tbl)) {
         return 0;
     }
+    if (!__is_client_concerned_filesystem(__path_sb(path))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
+        return 0;
+    }
 
     memset(&iattr, 0, sizeof(iattr));
     iattr.ia_valid = ATTR_MODE;
@@ -281,6 +318,10 @@ int dynsec_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
     const struct inode *inode;
 
     if (!stall_tbl_enabled(stall_tbl)) {
+        return 0;
+    }
+    if (!__is_client_concerned_filesystem(__path_sb(path))) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         return 0;
     }
 

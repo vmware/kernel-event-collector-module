@@ -4,6 +4,7 @@
 #pragma once
 
 #include <linux/fs.h>
+#include <linux/mount.h>
 #include <linux/magic.h>
 #include "config.h"
 #include "dynsec.h"
@@ -21,6 +22,20 @@ static inline const struct inode * __file_inode(const struct file *file)
     if (file && file->f_path.dentry) {
         return file->f_path.dentry->d_inode;
     }
+    return NULL;
+}
+
+static inline const struct super_block *__path_sb(const struct path *path)
+{
+    const struct inode *inode = __path_inode(path);
+
+    if (inode && inode->i_sb) {
+        return inode->i_sb;
+    }
+    if (path->mnt) {
+        return path->mnt->mnt_sb;
+    }
+
     return NULL;
 }
 
@@ -202,6 +217,8 @@ static inline bool __is_client_concerned_filesystem_by_magic(const unsigned long
 // check if client is concerned about this file system type
 static inline bool __is_client_concerned_filesystem(const struct super_block *sb)
 {
+    // It would be better to downgrade the event to non-stall
+    // if we could not find a super block at all.
     if (!sb) {
         if (stall_mode_enabled())
             return true;
