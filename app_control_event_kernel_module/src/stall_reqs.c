@@ -679,10 +679,8 @@ const struct file_operations dynsec_proc_fops = {
     .release    = single_release,
 #else
 const struct proc_ops dynsec_proc_fops = {
-    .open       = dynsec_proc_open,
     .proc_read  = seq_read,
     .proc_write = dynsec_proc_write,
-    .release    = single_release,
 #endif
 };
 
