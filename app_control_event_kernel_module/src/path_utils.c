@@ -17,10 +17,9 @@
 #include "symbols.h"
 #include "path_utils.h"
 #include "dynsec.h"
+#include "fs_utils.h"
 
 #define DYNSEC_PATH_MAX (PATH_MAX)
-
-int debug_append_component = 0;
 
 struct path_symz {
     char *(* dentry_path_raw)(const struct dentry *dentry, char *buf, int buflen);
@@ -476,12 +475,10 @@ static int append_component(const char *bufhead, size_t bufsize,
                     return 1;
                 }
 
-                if (debug_append_component) {
-                    pr_info("%s:%d bufsize:%lu og_len:%lu newlen:%lu "
-                            "offset:%lu comp_len:%lu mv_len:%lu\n",
-                            __func__, __LINE__, bufsize, og_len,
-                            len, offset, component_len, mv_len);
-                }
+                pr_info("%s:%d bufsize:%lu og_len:%lu newlen:%lu "
+                        "offset:%lu comp_len:%lu mv_len:%lu\n",
+                        __func__, __LINE__, bufsize, og_len,
+                        len, offset, component_len, mv_len);
                 return -EINVAL;
             }
             else {
@@ -625,6 +622,13 @@ char *build_preaction_path(int dfd, const char __user *filename,
         goto out_err;
     }
 
+    // check if connected client is interested in this
+    // file system type
+    if (!__is_client_concerned_filesystem(parent_path.dentry->d_sb)) {
+        err_ret = -EINVAL;
+        goto out_err;
+    }
+
     if (file) {
         fill_in_preaction_data(file, &parent_path);
     }
@@ -658,6 +662,7 @@ char *build_preaction_path(int dfd, const char __user *filename,
         file->path_size = strlen(pathbuf) + 1;
         file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
     }
+
     return pathbuf;
 
 do_raw:

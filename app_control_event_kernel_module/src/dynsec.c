@@ -9,7 +9,6 @@
 #include "symbols.h"
 
 #include "stall_reqs.h"
-#include "logging.h"
 #include "path_utils.h"
 #include "task_utils.h"
 #include "tracepoints.h"
@@ -75,7 +74,7 @@ static void print_config(struct dynsec_config *dynsec_config)
             dynsec_config->stall_timeout_continue);
     pr_info("dynsec_config: stall_timeout_deny:%u\n",
             dynsec_config->stall_timeout_deny);
-    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d",
+    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d\n",
             dynsec_config->lazy_notifier, dynsec_config->queue_threshold,
             dynsec_config->notify_threshold);
     pr_info("dynsec_config: send_files %#x\n", dynsec_config->send_files);
@@ -114,8 +113,8 @@ static void setup_lsm_hooks(void)
 
 static int __init dynsec_init(void)
 {
-    DS_LOG(DS_INFO, "Initializing Dynamic Security Module Brand(%s)",
-           CB_APP_MODULE_NAME);
+    pr_info("Initializing Dynamic Security Module Brand(%s)\n",
+           THIS_MODULE->name);
 
     // Explicitly enable protection on connect
     (void)dynsec_protect_init();
@@ -132,12 +131,12 @@ static int __init dynsec_init(void)
     dynsec_task_utils_init();
 
     if (!dynsec_init_tp(&global_config)) {
-        pr_info("Unable to load process tracepoints\n");
+        pr_err("Unable to load process tracepoints\n");
         return -EINVAL;
     }
 
     if (!dynsec_init_lsmhooks(&global_config)) {
-        pr_info("Unable to load LSM hooks\n");
+        pr_err("Unable to load LSM hooks\n");
         dynsec_tp_shutdown();
         return -EINVAL;
     }
@@ -159,6 +158,8 @@ static int __init dynsec_init(void)
     register_preaction_hooks(&global_config);
 #endif /* ! CONFIG_SECURITY_PATH */
 
+    dynsec_register_proc_entries();
+
     pr_info("Loaded: %s\n", CB_APP_MODULE_NAME);
     print_config(&global_config);
 
@@ -172,8 +173,9 @@ static int __init dynsec_init(void)
 
 static void __exit dynsec_exit(void)
 {
-    DS_LOG(DS_INFO, "Exiting: %s",
-           CB_APP_MODULE_NAME);
+    pr_info("Exiting: %s\n", THIS_MODULE->name);
+
+    dynsec_cleanup_proc_entries();
 
     dynsec_protect_shutdown();
 

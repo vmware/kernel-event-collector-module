@@ -9,6 +9,8 @@
 #include <linux/vmalloc.h>
 #include <linux/random.h>
 #include <linux/sched.h>
+#include <linux/seq_file.h>
+
 #include "inode_cache.h"
 #include "dynsec.h"
 
@@ -43,8 +45,6 @@ struct inode_cache {
 #define INODE_BUCKETS BIT(INODE_BUCKET_BITS)
 
 static struct inode_cache *inode_cache = NULL;
-
-int debug_inode_cache = 0;
 
 static inline u32 inode_hash(struct inode_key *key, u32 secret)
 {
@@ -89,14 +89,12 @@ static void inode_cache_free_entries(void)
         inode_cache->bkt[i].size = 0;
         unlock_bucket(&inode_cache->bkt[i], flags);
 
-        if (debug_inode_cache) {
-            total_entries += size;
-            if (size) {
-                bkts_used += 1;
-            }
+        total_entries += size;
+        if (size) {
+            bkts_used += 1;
         }
     }
-    if (debug_inode_cache && total_entries) {
+    if (total_entries) {
         pr_info("inode hashtbl: total entries:%u bkts_used:%u\n",
                 total_entries, bkts_used);
     }
@@ -239,7 +237,7 @@ int inode_cache_lookup(unsigned long inode_addr, u64 *hits,
     entry = __lookup_entry_safe(hash, &key, &bkt->list);
     if (entry) {
         ret = 0;
-        if (debug_inode_cache && !is_entry_disabled(entry)) {
+        if (!is_entry_disabled(entry)) {
             entry->hits += 1;
         }
         if (hits) {
@@ -348,5 +346,29 @@ void inode_cache_remove_entry(unsigned long inode_addr)
 
     if (entry) {
         kfree(entry);
+    }
+}
+
+void inode_cache_display_buckets(struct seq_file *m)
+{
+    unsigned long flags;
+    u32 i, size;
+
+    if (!inode_cache || !inode_cache->bkt) {
+        return;
+    }
+
+    pr_debug("Display inode cache non-zero bucket sizes\n");
+    for (i = 0; i < INODE_BUCKETS; i++) {
+        size = 0;
+        flags = lock_bucket(&inode_cache->bkt[i], flags);
+        if (inode_cache->bkt[i].size) {
+            size = inode_cache->bkt[i].size;
+        }
+        unlock_bucket(&inode_cache->bkt[i], flags);
+        if (size) {
+            seq_printf(m, "InodeCache Bucket %06d: size: %d", i, size);
+            seq_puts(m, "\n");
+        }
     }
 }

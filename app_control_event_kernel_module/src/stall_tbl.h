@@ -43,6 +43,10 @@ struct stall_entry {
     spinlock_t lock;    // likely not needed but shouldn't hurt
     int response;
     unsigned int stall_timeout;
+
+    // Extra DynSec event header data
+    uint16_t report_flags;
+    uint64_t intent_req_id;
 };
 
 struct stall_q {
@@ -96,3 +100,5 @@ extern int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *ent
 extern u32 stall_queue_size(struct stall_tbl *tbl);
 
 extern struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space);
+
+extern void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m);

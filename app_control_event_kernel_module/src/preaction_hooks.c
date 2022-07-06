@@ -16,6 +16,7 @@
 #include "preaction_hooks.h"
 #include "symbols.h"
 #include "dynsec.h"
+#include "fs_utils.h"
 #include "lsm_mask.h"
 
 #include "stall_tbl.h"
@@ -112,6 +113,13 @@ static void dynsec_do_setattr(struct iattr *iattr, const struct path *path)
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
+    // check if connected client is interested in this
+    // file system type
+    if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
+        return;
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SETATTR, DYNSEC_HOOK_TYPE_SETATTR,
                                report_flags, GFP_ATOMIC);
 
@@ -134,6 +142,12 @@ static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *re
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    // check if connected client is interested in this
+    if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         goto out;
     }
 
@@ -165,6 +179,12 @@ static int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *re
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    // check if connected client is interested in this
+    if (!__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         goto out;
     }
 
@@ -705,6 +725,14 @@ static void dynsec_do_unlink(int dfd, const char __user *pathname,
     }
     else if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
         path_put(&path);
+        return;
+    }
+
+    // check if connected client is interested in this
+    // file system type
+    if (!__is_client_concerned_filesystem(path.dentry->d_sb)) {
+        path_put(&path);
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
         return;
     }
 
