@@ -102,7 +102,9 @@ struct lsm_symbols {
 static struct lsm_symbols lsm_syms;
 static struct lsm_symbols *p_lsm;
 static uint64_t enabled_lsm_hooks;
+
 #ifdef CONFIG_SECURITY_PATH
+// Use to set preaction hooks in dynsec_config
 static uint64_t enabled_lsm_path_hooks;
 #endif /* CONFIG_SECURITY_PATH */
 
@@ -309,6 +311,9 @@ bool dynsec_init_lsmhooks(struct dynsec_config *dynsec_config)
 
     if (dynsec_config) {
         dynsec_config->lsm_hooks = enabled_lsm_hooks;
+#ifdef CONFIG_SECURITY_PATH
+        dynsec_config->preaction_hooks = enabled_lsm_path_hooks;
+#endif
     }
     return true;
 
@@ -319,6 +324,9 @@ out_fail:
     pr_err("LSM: Failed to find security_hook_heads\n");
 #endif  //}
     dynsec_config->lsm_hooks = enabled_lsm_hooks;
+#ifdef CONFIG_SECURITY_PATH
+    dynsec_config->preaction_hooks = enabled_lsm_path_hooks;
+#endif
 
     return false;
 }
