@@ -16,15 +16,18 @@
 #include <linux/poll.h>
 #include <linux/version.h>
 #include <linux/seq_file.h>
+#include <linux/kthread.h>
+#include <linux/module.h>
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "factory.h"
 #include "inode_cache.h"
 
-
 #define STALL_BUCKET_BITS 12
 #define STALL_BUCKETS BIT(STALL_BUCKET_BITS)
+
+static int stall_tbl_watchdog_thread(void *args);
 
 static u32 stall_hash(u32 secret, struct stall_key *key)
 {
@@ -137,6 +140,30 @@ struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space)
     return event;
 }
 
+static bool stall_tbl_size_req_id(struct stall_tbl *tbl,
+                                  uint64_t *req_id, u32 *queue_size)
+{
+    struct dynsec_event *event = NULL;
+    unsigned long flags = 0;
+
+    if (!req_id || !queue_size || !stall_tbl_enabled(tbl)) {
+        return false;
+    }
+
+    *req_id = 0;
+    *queue_size = 0;
+
+    flags = lock_stall_queue(&tbl->queue, flags);
+    event = list_first_entry_or_null(&tbl->queue.list, struct dynsec_event, list);
+    if (event) {
+        *req_id = event->req_id;
+        *queue_size = tbl->queue.size;
+    }
+    unlock_stall_queue(&tbl->queue, flags);
+
+    return true;
+}
+
 static void stall_tbl_wake_entries(struct stall_tbl *stall_tbl)
 {
     unsigned long flags;
@@ -235,6 +262,8 @@ struct stall_tbl *stall_tbl_alloc(gfp_t mode)
     init_waitqueue_head(&tbl->queue.wq);
     init_waitqueue_head(&tbl->queue.pre_wq);
     init_irq_work(&tbl->queue.defer_wakeup, stall_queue_defer_wakeup);
+    init_waitqueue_head(&tbl->timed_wq);
+    tbl->watchdog = NULL;
 
     return tbl;
 }
@@ -244,6 +273,16 @@ void stall_tbl_enable(struct stall_tbl *tbl)
     if (tbl) {
         tbl->enabled = true;
         tbl->tgid = current->tgid;
+
+        if (!tbl->watchdog) {
+            tbl->watchdog = kthread_create(stall_tbl_watchdog_thread, tbl,
+                                           "dynsec-wd-%d", current->tgid);
+            if (IS_ERR_OR_NULL(tbl->watchdog)) {
+                tbl->watchdog = NULL;
+            } else {
+                wake_up_process(tbl->watchdog);
+            }
+        }
     }
 }
 
@@ -251,6 +290,11 @@ void stall_tbl_disable(struct stall_tbl *tbl)
 {
     if (tbl) {
         tbl->enabled = false;
+
+        if (tbl->watchdog) {
+            kthread_stop(tbl->watchdog);
+            tbl->watchdog = NULL;
+        }
 
         // Stalled tasks should take responsibility to free
         stall_tbl_wake_entries(tbl);
@@ -523,34 +567,157 @@ int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry)
     return ret;
 }
 
-int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
+// Computes the coarse number of events for a period
+static inline u64 diff_req_id(u64 period_start, u64 period_end)
 {
-    struct stall_entry *entry = NULL;
-    unsigned long flags;
-    u32 hash;
-    int index;
-    int ret = -ENOENT;
+    if (unlikely(period_start > period_end)) {
+        return (ULLONG_MAX - period_start) + period_end;
+    }
+    return period_end - period_start;
+}
 
-    if (!tbl || !key) {
-        return -EINVAL;
+static int stall_tbl_watchdog_thread(void *args)
+{
+    static bool log_limited = false;
+    unsigned int nonread_count = 0;
+    u32 last_queue_size = 0;
+    u64 head_req_id  = 0;
+    u64 checkin_count = 0;
+    struct stall_tbl *tbl = args;
+
+// Helper constants that could be configurable
+#define _MSEC_IN_SEC                1000
+#define HARD_MAX_QUEUE_ENTRIES      BIT(19)
+#define SOFT_MAX_QUEUE_ENTRIES      BIT(18)
+#define WATCHDOG_TIMER_SEC          10
+#define MAX_UNRESPONSE_SEC          30
+    
+#define WATCHDOG_TIMER_MS           (WATCHDOG_TIMER_SEC * _MSEC_IN_SEC)
+
+#define HOURS_TO_SECONDS(hours) ((hours) * 60 * 60)
+#define LOG_RATE_PER_HOUR(hours) (HOURS_TO_SECONDS(hours) / WATCHDOG_TIMER_SEC)
+
+    BUILD_BUG_ON(MAX_UNRESPONSE_SEC < WATCHDOG_TIMER_SEC);
+    if (!tbl) {
+        return 0;
     }
 
-    hash = stall_hash(tbl->secret, key);
-    index = stall_bkt_index(hash);
-    flags = lock_stall_bkt(&tbl->bkt[index], flags);
-    entry = lookup_entry_safe(hash, key, &tbl->bkt[index].list);
-    if (entry) {
-        list_del_init(&entry->list);
-        tbl->bkt[index].size += -1;
-        ret = 0;
-    }
-    unlock_stall_bkt(&tbl->bkt[index], flags);
+    // Get the oldest event id
+    stall_tbl_size_req_id(tbl, &head_req_id, &last_queue_size);
 
-    if (entry) {
-        kfree(entry);
+    while (!kthread_should_stop() || stall_tbl_enabled(tbl))
+    {
+        bool should_clear_queue = false;
+        u32 queue_size = 0;
+        u64 coarse_total_ids = 0;
+        u64 id_before_wait;
+        u64 id_after_wait;
+        u64 req_id = 0;
+        int rc;
+
+        // Before timeout, get the newest event id
+        id_before_wait = atomic64_read(&global_req_id);
+        rc = wait_event_interruptible_timeout(tbl->timed_wq,
+                                    kthread_should_stop() || !stall_tbl_enabled(tbl),
+                                    msecs_to_jiffies(WATCHDOG_TIMER_MS));
+        // Condition met. So shutdown task.
+        if (rc > 0) {
+            break;
+        }
+        // Interrupted, Likely going to shutdown
+        if (rc < 0) {
+            continue;
+        }
+        checkin_count += 1;
+
+        // After timeout, Get the newest event id
+        id_after_wait = atomic64_read(&global_req_id);
+        // Get coarse number of events generated during wait
+        coarse_total_ids = diff_req_id(id_before_wait, id_after_wait);
+
+        // Obtains the current queue size and oldest event id
+        if (!stall_tbl_size_req_id(tbl, &req_id, &queue_size)) {
+            nonread_count = 0;
+            continue;
+        }
+
+        // Usual case where the userspace event reader is healthy
+        // and can read faster than events can be generated.
+        if (queue_size <= 0) {
+            nonread_count = 0;
+            head_req_id = atomic64_read(&global_req_id);
+            continue;
+        }
+
+        // Keep track of the number of checkins without a read
+        // on a non-empty queue.
+        // Tells us roughly how long client has been unresponsive
+        if (head_req_id == req_id) {
+            nonread_count += 1;
+        }
+
+        // Reset log limiter after a certain amount of hours
+        if ((checkin_count % LOG_RATE_PER_HOUR(2)) == 0) {
+            log_limited = false;
+        }
+
+        // Dump the core raw data
+        pr_debug("%s: oldest event id:%llu newest event:%llu "
+                 "size:%u nonread_count:%u events since last checkin:%llu\n",
+                 THIS_MODULE->name, head_req_id, req_id,
+                 queue_size, nonread_count, coarse_total_ids);
+
+        // If we hit max queue size...
+        if (queue_size > HARD_MAX_QUEUE_ENTRIES) {
+            should_clear_queue = true;
+            pr_debug("%s: Event Queue Watchdog: "
+                     "Hit max event queue size! "
+                     "max size:%lu actual size:%u\n",
+                     THIS_MODULE->name, HARD_MAX_QUEUE_ENTRIES, queue_size);
+        }
+        // we have not read from queue in several checks
+        if ((nonread_count * WATCHDOG_TIMER_SEC) >= MAX_UNRESPONSE_SEC) {
+            should_clear_queue = true;
+            pr_debug("%s: Event Queue Watchdog: "
+                     "No reads in %u seconds! "
+                     "Checked every %d seconds\n", THIS_MODULE->name,
+                     nonread_count * WATCHDOG_TIMER_SEC,
+                     WATCHDOG_TIMER_SEC);
+        }
+        // Check soft max queue client has not read any events.
+        // We have over soft max events in queue
+        if (nonread_count && queue_size > SOFT_MAX_QUEUE_ENTRIES) {
+            should_clear_queue = true;
+            pr_debug("%s: Event Queue Watchdog: "
+                     "Soft max event queue size hit! "
+                     "soft max size:%lu actual size:%u\n",
+                     THIS_MODULE->name, SOFT_MAX_QUEUE_ENTRIES, queue_size);
+        }
+
+        if (should_clear_queue) {
+            if (log_limited) {
+                pr_debug("%s: Event Queue Watchdog: "
+                        "Clearing stalled events and event queue\n",
+                        THIS_MODULE->name);
+            } else {
+                pr_info("%s: Event Queue Watchdog: "
+                        "Clearing stalled events and event queue\n",
+                        THIS_MODULE->name);
+                log_limited = true;
+            }
+
+            stall_tbl_wake_entries(tbl);
+            stall_queue_clear(tbl);
+
+            // Reset to newest event id
+            head_req_id = atomic64_read(&global_req_id);
+        } else {
+            // Ensure the the oldest event is preserved
+            head_req_id = req_id;
+        }
     }
 
-    return ret;
+    return 0;
 }
 
 void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m)
