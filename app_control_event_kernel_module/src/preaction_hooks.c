@@ -1271,7 +1271,7 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
         if (ret >= 0) {
             enabled_chmod_common = true;
         } else {
-            pr_info("Unable to hook kretprobe: %d %s\n", ret,
+            pr_err("Unable to hook kretprobe: %d %s\n", ret,
                     kret_dynsec_chmod_common.kp.symbol_name);
             success = false;
         }
@@ -1281,7 +1281,7 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
             enabled_chown_common = true;
             preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
         } else {
-            pr_info("Unable to hook kretprobe: %d %s\n", ret,
+            pr_err("Unable to hook kretprobe: %d %s\n", ret,
                     kret_dynsec_chown_common.kp.symbol_name);
             success = false;
         }
@@ -1328,7 +1328,7 @@ bool register_preaction_hooks(struct dynsec_config *dynsec_config)
     mutex_lock(&lookup_lock);
     get_syscall_tbl();
     if (!sys_call_table) {
-        pr_info("Failed to grab syscall hooks\n");
+        pr_err("Failed to grab syscall hooks\n");
         mutex_unlock(&lookup_lock);
         return false;
     }

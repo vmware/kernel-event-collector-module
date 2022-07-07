@@ -588,7 +588,7 @@ void dynsec_chrdev_shutdown(void)
 {
     cdev_del(&dynsec_cdev);
     unregister_chrdev_region(g_maj_t, 1);
-    pr_info("%s: major: %d\n", __func__, maj_no);
+    pr_debug("%s: major: %d\n", __func__, maj_no);
 
     if (stall_tbl) {
         stall_tbl_shutdown(stall_tbl);
@@ -619,7 +619,7 @@ bool dynsec_chrdev_init(void)
         return false;
     }
 
-    pr_info("%s: major: %d\n", __func__, maj_no);
+    pr_debug("%s: major: %d\n", __func__, maj_no);
     stall_tbl = stall_tbl_alloc(GFP_KERNEL);
     if (!stall_tbl) {
         dynsec_chrdev_shutdown();
