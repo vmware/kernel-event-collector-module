@@ -12,6 +12,8 @@ extern struct dynsec_config global_config __read_mostly;
 // Use to reset global_config on client disconnect. Immutable for now.
 extern struct dynsec_config preserved_config __read_mostly;
 
+extern atomic64_t global_req_id;
+
 #define DEFAULT_DISABLED 0
 #define DEFAULT_ENABLED  1
 #define DEFAULT_QUEUE_WATERMARK 64

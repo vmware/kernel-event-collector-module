@@ -60,6 +60,7 @@ module_param(protect_on_connect, bool, 0644);
 DEFINE_MUTEX(global_config_lock);
 DEFINE_DYNSEC_CONFIG(global_config);
 DEFINE_DYNSEC_CONFIG(preserved_config);
+atomic64_t global_req_id = ATOMIC64_INIT(0);
 
 static void print_config(struct dynsec_config *dynsec_config)
 {
