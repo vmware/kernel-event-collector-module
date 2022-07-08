@@ -42,7 +42,7 @@ int dynsec_proc_read(struct seq_file *m, void *v)
     pr_debug("Display stalled timed out event counter\n");
     ctr = atomic_read(&stall_timeout_ctr);
     if (ctr) {
-        seq_printf(m, " %24s %d", "stall timeout events: ", stall_queue_size(stall_tbl));
+        seq_printf(m, " %24s %d", "stall timeout events: ", ctr);
         seq_puts(m, "\n");
     }
 

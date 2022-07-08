@@ -59,6 +59,7 @@ $(MODULE_NAME)-objs := \
 	protect.o \
 	path_utils.o \
 	task_utils.o \
+	proc_stats.o \
 	wait.o \
 
 
