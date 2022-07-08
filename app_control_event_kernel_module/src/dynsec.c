@@ -11,6 +11,7 @@
 #include "stall_reqs.h"
 #include "path_utils.h"
 #include "task_utils.h"
+#include "mem_utils.h"
 #include "tracepoints.h"
 #include "inode_cache.h"
 #include "task_cache.h"
@@ -123,6 +124,11 @@ static int __init dynsec_init(void)
     setup_lsm_hooks();
 
     if (!dynsec_sym_init()) {
+        return -EINVAL;
+    }
+
+    if (!dynsec_mem_utils_init()) {
+        pr_err("Failed to init mem_utils\n");
         return -EINVAL;
     }
 
