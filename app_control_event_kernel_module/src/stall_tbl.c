@@ -398,8 +398,7 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     entry->hash = stall_hash(tbl->secret, &entry->key);
     index = stall_bkt_index(entry->hash);
 
-    // TODO: use new large timespec
-    // getrawmonotonic(&entry->start);
+    entry->start = dynsec_current_ktime;
 
     flags = lock_stall_bkt(&stall_tbl->bkt[index], flags);
     list_add(&entry->list, &tbl->bkt[index].list);
@@ -523,6 +522,7 @@ int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry)
     return ret;
 }
 
+#if 0
 int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
 {
     struct stall_entry *entry = NULL;
@@ -552,6 +552,7 @@ int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
 
     return ret;
 }
+#endif
 
 void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m)
 {

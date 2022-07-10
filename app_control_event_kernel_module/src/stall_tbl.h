@@ -5,6 +5,7 @@
 #include "dynsec.h"
 #include "config.h"
 #include <linux/irq_work.h>
+#include <linux/ktime.h>
 
 struct stall_bkt {
     spinlock_t lock;
@@ -35,8 +36,10 @@ struct stall_entry {
 // Client disconnect or kmod shutdown
 #define DYNSEC_STALL_MODE_SHUTDOWN  0x00000008
     u32 mode;  // switch to atomic or test_bit/set_bit?
-    // TODO: use new large timespec
-    // struct timespec start; // rough duration of in tbl/stalled
+
+    // time event got added to queue
+    ktime_t start; // rough duration of entry in tbl/stalled
+
     wait_queue_head_t wq; // Optionally we could have this be per-bucket not per-entry
 
     unsigned long inode_addr;
@@ -48,6 +51,9 @@ struct stall_entry {
     uint16_t report_flags;
     uint64_t intent_req_id;
 };
+
+// TODO check ktime_get_raw
+#define dynsec_current_ktime  ktime_get_real()
 
 struct stall_q {
     spinlock_t lock;
@@ -102,3 +108,4 @@ extern u32 stall_queue_size(struct stall_tbl *tbl);
 extern struct dynsec_event *stall_queue_shift(struct stall_tbl *tbl, size_t space);
 
 extern void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m);
+extern void stall_tbl_wait_statistics(struct seq_file *m);
