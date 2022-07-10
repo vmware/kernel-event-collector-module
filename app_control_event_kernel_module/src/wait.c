@@ -158,7 +158,7 @@ static void do_stall_timing_records(struct stall_entry *entry)
     static int ctr = 0;
     static u64 sum = 0;
     static u64 stall_times[DYNSEC_RECORDS_TO_AVERAGE];
-    int divisor = 0;
+    int divisor = DYNSEC_RECORDS_TO_AVERAGE;
     ktime_t event_done;
 
     // stall time calculations.
@@ -166,6 +166,9 @@ static void do_stall_timing_records(struct stall_entry *entry)
     if (flag) {
         // rotating average of DYNSEC_RECORDS_TO_AVERAGE entries
         sum -= stall_times[ctr]; 
+    } else {
+        // till ctr reaches DYNSEC_RECORDS_TO_AVERAGE
+        divisor = ctr + 1;
     }
     stall_times[ctr] = ktime_to_ns(ktime_sub(event_done, entry->start));
 
@@ -173,13 +176,7 @@ static void do_stall_timing_records(struct stall_entry *entry)
         g_max_stall_time = stall_times[ctr];
     }
 
-    sum += stall_times[ctr];
-    ctr++;
-    if (flag) {
-        divisor = DYNSEC_RECORDS_TO_AVERAGE;
-    } else {
-        divisor = ctr;
-    }
+    sum += stall_times[ctr++];
     g_avg_stall_time = (sum / divisor); 
 
     if (ctr == DYNSEC_RECORDS_TO_AVERAGE) {
