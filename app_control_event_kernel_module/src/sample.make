@@ -60,7 +60,6 @@ $(MODULE_NAME)-objs := \
 	path_utils.o \
 	task_utils.o \
 	wait.o \
-	mem_utils.o \
 
 
 .PHONY: clean
