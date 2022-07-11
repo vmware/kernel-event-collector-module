@@ -150,6 +150,7 @@ retry:
 
 #define  DYNSEC_RECORDS_TO_AVERAGE    64
 
+DEFINE_SPINLOCK(g_stall_timing_lock);
 static u64 g_avg_stall_time, g_max_stall_time;
 
 static void do_stall_timing_records(struct stall_entry *entry)
@@ -172,27 +173,34 @@ static void do_stall_timing_records(struct stall_entry *entry)
     }
     stall_times[ctr] = ktime_to_ns(ktime_sub(event_done, entry->start));
 
+    spin_lock(&g_stall_timing_lock);
     if (stall_times[ctr] > g_max_stall_time) {
         g_max_stall_time = stall_times[ctr];
     }
 
     sum += stall_times[ctr++];
     g_avg_stall_time = (sum / divisor); 
+    spin_unlock(&g_stall_timing_lock);
 
     if (ctr == DYNSEC_RECORDS_TO_AVERAGE) {
         ctr = 0;
         // flag indicates counter beyond DYNSEC_RECORDS_TO_AVERAGE
         flag = true;
     }
-    pr_debug("Stall time logs: %d: sum: %lld avg: %lld max: %lld\n",
+    pr_debug("Stall time logs: %02d: sum: %lld avg: %lld max: %lld\n",
               ctr, sum, g_avg_stall_time, g_max_stall_time);
 }
 
 void stall_tbl_wait_statistics(struct seq_file *m)
 {
-    seq_printf(m, "   stall table average wait time: %lld ns", g_avg_stall_time);
+    u64 avg, max;
+    spin_lock(&g_stall_timing_lock);
+    avg = g_avg_stall_time;
+    max = g_max_stall_time;
+    spin_unlock(&g_stall_timing_lock);
+    seq_printf(m, "   stall table average wait time: %12lld ns", avg);
     seq_puts(m, "\n");
-    seq_printf(m, "   stall table maximum wait time: %lld ns", g_max_stall_time);
+    seq_printf(m, "   stall table maximum wait time: %12lld ns", max);
     seq_puts(m, "\n");
 }
 
