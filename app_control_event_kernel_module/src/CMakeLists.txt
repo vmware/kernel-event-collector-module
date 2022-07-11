@@ -157,8 +157,6 @@ set(SOURCE_FILES
     wait.h
     ../include/dynsec.h
     config.h
-    mem_utils.c
-    mem_utils.h
 )
 
 foreach(KERNEL_NAME ${KERNEL_LIST})
