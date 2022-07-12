@@ -92,10 +92,23 @@ form of label retention and is meant to label process trees.
 
 ### statistics in proc file
 The module creates an entry in the proc file system 
-/proc/cb\_appc\_events\_NNNNN\_stats file contains information about 
-current sizes of stall queue, stall buckets, inode cache buckets,
-task cache buckets for non-zero values only.
-
+/proc/cb\_appc\_events\_NNNNN\_stats file contains the following
+information:
+ * stall queue size: shows current size of stall queue.
+ * stall timeout events: shows number of continous events for which user
+                         space does not respond within 5 seconds.
+ * stall table average wait time: average of time for 64 events in msec
+                       each value is amount of time a event stays in the
+                       stall queue of kernel module.
+ * stall table maximum wait time: maximum time spend in the stall queue
+                       in milliseconds
+ * StallTable buckets: number of (non-zero) entries in stall table hash buckets.
+                       hash bucket number and number of entries
+ * TaskCache buckets : number of (non-zero) entries in task cache hash buckets.
+                       hash bucket number and number of entries
+ * InodeCache buckets: number of (non-zero) entries in inode cache hash buckets.
+                       hash bucket number and number of entries
+ 
 ### Dynamic debugging
 The source code uses dynamic debug macros which can be enabled at run
 time to trace the code flow. This works only if the kernel is compiled
