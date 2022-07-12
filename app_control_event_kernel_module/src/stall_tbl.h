@@ -66,8 +66,6 @@ struct stall_tbl {
 
     pid_t tgid;
     struct stall_q queue;
-    struct task_struct *watchdog;
-    wait_queue_head_t timed_wq;
 };
 
 struct dynsec_event;

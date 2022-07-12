@@ -134,13 +134,4 @@ Use followig procedure to tracing the code path:
   f. debug all dynamic logs
     echo 'module cb_appc_events_<NNNNN> +p' > /sys/kernel/debug/dynamic_debug/control
 
- g. debug watchdog
-    echo "module cb_appc_events_<NNNNN> func stall_tbl_watchdog_thread +p" > /sys/kernel/debug/dynamic_debug/control
-
- h. finding specific lines to log
-    grep cb_appc_events_<NNNNN> /sys/kernel/debug/dynamic_debug/control
-
- i. clear all debug for a module
-    echo "module cb_appc_events_<NNNNN> -p" > /sys/kernel/debug/dynamic_debug/control
-
 4. Check kernel logs using dmesg command.
