@@ -41,10 +41,8 @@ int dynsec_proc_read(struct seq_file *m, void *v)
     // write the timeout value (if non-zero) to proc file
     pr_debug("Display stalled timed out event counter\n");
     ctr = atomic_read(&stall_timeout_ctr);
-    if (ctr) {
-        seq_printf(m, " %24s %d", "stall timeout events: ", ctr);
-        seq_puts(m, "\n");
-    }
+    seq_printf(m, " %24s %d", "stall timeout events: ", ctr);
+    seq_puts(m, "\n");
 
     stall_tbl_wait_statistics(m);
     stall_tbl_display_buckets(stall_tbl, m);

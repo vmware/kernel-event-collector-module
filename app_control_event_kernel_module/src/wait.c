@@ -198,9 +198,11 @@ void stall_tbl_wait_statistics(struct seq_file *m)
     avg = g_avg_stall_time;
     max = g_max_stall_time;
     spin_unlock(&g_stall_timing_lock);
-    seq_printf(m, "   stall table average wait time: %12lld ns", avg);
+    seq_printf(m, "   stall table average wait time: %lld.%06lld msec",
+                  avg/1000000, avg % 1000000);
     seq_puts(m, "\n");
-    seq_printf(m, "   stall table maximum wait time: %12lld ns", max);
+    seq_printf(m, "   stall table average wait time: %lld.%06lld msec",
+                  max/1000000, max % 1000000);
     seq_puts(m, "\n");
 }
 
