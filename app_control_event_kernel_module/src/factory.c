@@ -31,9 +31,11 @@
 #include "fs_utils.h"
 #include "config.h"
 
+static atomic64_t req_id = ATOMIC64_INIT(0);
+
 static uint64_t dynsec_next_req_id(void)
 {
-    return atomic64_inc_return(&global_req_id);
+    return atomic64_inc_return(&req_id);
 }
 
 static void init_dynsec_event(enum dynsec_event_type event_type, struct dynsec_event *event)

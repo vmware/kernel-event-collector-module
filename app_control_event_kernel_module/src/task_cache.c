@@ -447,7 +447,7 @@ static int set_task_label_flags(pid_t tid, u32 task_label_flags, gfp_t mode)
         kfree(new_entry);
     }
 
-    pr_info("%s: %#x for tid:%d\n", __func__, task_label_flags, tid);
+    pr_debug("%s: %#x for tid:%d\n", __func__, task_label_flags, tid);
 
     return ret;
 }
@@ -843,7 +843,7 @@ int task_cache_handle_response(struct dynsec_response *response)
         return 0;
     }
 
-    pr_debug("%s: tid:%u task_label_flags:%#x\n", __func__,
+    pr_info("%s: tid:%u task_label_flags:%#x\n", __func__,
             response->tid, task_label_flags);
 
     key.tid = response->tid;

@@ -95,7 +95,7 @@ static void inode_cache_free_entries(void)
         }
     }
     if (total_entries) {
-        pr_debug("inode hashtbl: total entries:%u bkts_used:%u\n",
+        pr_info("inode hashtbl: total entries:%u bkts_used:%u\n",
                 total_entries, bkts_used);
     }
 }
