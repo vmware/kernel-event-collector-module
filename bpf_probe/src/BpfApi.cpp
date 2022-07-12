@@ -209,6 +209,7 @@ bool BpfApi::AttachProbe(const char * name,
     {
         m_ErrorMessage = result.msg();
     }
+    m_BPF->free_bcc_memory(); 
 
     return result.ok();
 }
