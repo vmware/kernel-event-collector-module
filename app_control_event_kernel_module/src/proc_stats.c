@@ -16,7 +16,7 @@
 
     // Externs
     extern struct stall_tbl *stall_tbl;
-    extern atomic_t  stall_timeout_ctr;
+    extern atomic_t  stall_timeout_ctr, access_denied_ctr;
 
 // function to cleanup entries in /proc file system
 void dynsec_cleanup_proc_entries(void)
@@ -28,7 +28,7 @@ void dynsec_cleanup_proc_entries(void)
 ssize_t dynsec_proc_write(struct file *file, const char *buf, size_t size, loff_t *ppos)
 {
     // no effect this time
-    return 0;
+    return -EPERM;
 }
 
 // function when cat (read) gets executed on proc file
@@ -42,6 +42,9 @@ int dynsec_proc_read(struct seq_file *m, void *v)
     pr_debug("Display stalled timed out event counter\n");
     ctr = atomic_read(&stall_timeout_ctr);
     seq_printf(m, " %24s %d", "stall timeout events: ", ctr);
+    seq_puts(m, "\n");
+    ctr = atomic_read(&access_denied_ctr);
+    seq_printf(m, " %24s %d", "access denied events: ", ctr);
     seq_puts(m, "\n");
 
     stall_tbl_wait_statistics(m);
