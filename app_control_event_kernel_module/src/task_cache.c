@@ -843,7 +843,7 @@ int task_cache_handle_response(struct dynsec_response *response)
         return 0;
     }
 
-    pr_info("%s: tid:%u task_label_flags:%#x\n", __func__,
+    pr_debug("%s: tid:%u task_label_flags:%#x\n", __func__,
             response->tid, task_label_flags);
 
     key.tid = response->tid;

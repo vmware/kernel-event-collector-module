@@ -4,6 +4,7 @@
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 #include <linux/wait.h>
+#include <linux/seq_file.h>
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
@@ -144,6 +145,67 @@ retry:
     return ret;
 }
 
+// handling calculations to find average time
+// maximum time spent in stall table etc.
+
+#define  DYNSEC_RECORDS_TO_AVERAGE    64
+
+DEFINE_SPINLOCK(g_stall_timing_lock);
+static u64 g_avg_stall_time, g_max_stall_time;
+
+static void do_stall_timing_records(struct stall_entry *entry)
+{
+    static bool flag = false;
+    static int ctr = 0;
+    static u64 sum = 0;
+    static u64 stall_times[DYNSEC_RECORDS_TO_AVERAGE];
+    int divisor = DYNSEC_RECORDS_TO_AVERAGE;
+    ktime_t event_done;
+
+    // stall time calculations.
+    event_done = dynsec_current_ktime;
+    if (flag) {
+        // rotating average of DYNSEC_RECORDS_TO_AVERAGE entries
+        sum -= stall_times[ctr]; 
+    } else {
+        // till ctr reaches DYNSEC_RECORDS_TO_AVERAGE
+        divisor = ctr + 1;
+    }
+    stall_times[ctr] = ktime_to_ns(ktime_sub(event_done, entry->start));
+
+    spin_lock(&g_stall_timing_lock);
+    if (stall_times[ctr] > g_max_stall_time) {
+        g_max_stall_time = stall_times[ctr];
+    }
+
+    sum += stall_times[ctr++];
+    g_avg_stall_time = (sum / divisor); 
+    spin_unlock(&g_stall_timing_lock);
+
+    if (ctr == DYNSEC_RECORDS_TO_AVERAGE) {
+        ctr = 0;
+        // flag indicates counter beyond DYNSEC_RECORDS_TO_AVERAGE
+        flag = true;
+    }
+    pr_debug("Stall time logs: %02d: sum: %lld avg: %lld max: %lld\n",
+              ctr, sum, g_avg_stall_time, g_max_stall_time);
+}
+
+void stall_tbl_wait_statistics(struct seq_file *m)
+{
+    u64 avg, max;
+    spin_lock(&g_stall_timing_lock);
+    avg = g_avg_stall_time;
+    max = g_max_stall_time;
+    spin_unlock(&g_stall_timing_lock);
+    seq_printf(m, "   stall table average wait time: %lld.%06lld msec",
+                  avg/1000000, avg % 1000000);
+    seq_puts(m, "\n");
+    seq_printf(m, "   stall table average wait time: %lld.%06lld msec",
+                  max/1000000, max % 1000000);
+    seq_puts(m, "\n");
+}
+
 int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
                               gfp_t mode)
 {
@@ -177,6 +239,12 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
 
     if (entry) {
         (void)do_stall_interruptible(entry, response);
+
+        // stall table timing calculations
+        if (*response == 0)
+            do_stall_timing_records(entry);
+
+        // free entry memory here
         kfree(entry);
     }
 
