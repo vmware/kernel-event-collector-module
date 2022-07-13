@@ -95,10 +95,12 @@ The module creates an entry in the proc file system
 /proc/cb\_appc\_events\_NNNNN\_stats file contains the following
 information:
  * stall queue size: shows current size of stall queue.
- * stall timeout events: shows number of continous events for which user
+ * stall timeout events: shows number of continuous events for which user
                          space does not respond within 5 seconds.
- * stall table average wait time: average of time for 64 events in msec
-                       each value is amount of time a event stays in the
+ * access denied events: shows number of events for which access
+                         was denied.
+ * stall table average wait time: time average for 64 events (in msec)
+                       Each value is amount of time a event stays in the
                        stall queue of kernel module.
  * stall table maximum wait time: maximum time spend in the stall queue
                        in milliseconds

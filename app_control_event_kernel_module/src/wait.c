@@ -16,6 +16,7 @@
 
 // counter to track consecutive stall timeouts
 atomic_t  stall_timeout_ctr = ATOMIC_INIT(0);
+atomic_t  access_denied_ctr = ATOMIC_INIT(0);
 
 static int do_stall_interruptible(struct stall_entry *entry, int *response)
 {
@@ -126,6 +127,7 @@ retry:
 
     if (local_response == DYNSEC_RESPONSE_EPERM) {
         *response = -EPERM;
+        atomic_inc(&access_denied_ctr);
     }
 
     // Must always attempt to remove from the table unless some entry
@@ -291,6 +293,7 @@ int handle_stall_ioc(const struct dynsec_stall_ioc_hdr *hdr)
                 global_config.stall_mode = DEFAULT_ENABLED;
                 // reset counter
                 atomic_set(&stall_timeout_ctr, 0);
+                atomic_set(&access_denied_ctr, 0);
             }
         }
     }
