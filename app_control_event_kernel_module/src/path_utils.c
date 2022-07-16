@@ -150,11 +150,8 @@ static char *__dynsec_build_path_greedy(struct path *path,
     }
 
     // Local buffer was too small. Retry with a large buffer.
-    if (buf) {
-        kfree(buf);
-    }
     alloc_size = DYNSEC_PATH_MAX;
-    buf = kzalloc(alloc_size, mode);
+    buf = krealloc(buf, alloc_size, mode);
     if (!buf) {
         return NULL;
     }
@@ -241,11 +238,8 @@ char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t
     }
 
     // Local buffer was too small. Retry with a large buffer.
-    if (buf) {
-        kfree(buf);
-    }
     alloc_size = DYNSEC_PATH_MAX;
-    buf = kzalloc(alloc_size, mode);
+    buf = krealloc(buf, alloc_size, mode);
     if (!buf) {
         return NULL;
     }
