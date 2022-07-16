@@ -22,8 +22,6 @@ extern char *build_preaction_path(int dfd, const char __user *filename,
 extern char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode);
 extern char *dynsec_build_dentry(struct dentry *dentry,struct dynsec_file *file,
                                  gfp_t mode);
-extern char *dynsec_build_path_greedy(struct path *path, struct dynsec_file *file,
-                                      gfp_t mode);
 static inline bool has_gfp_atomic(gfp_t mode)
 {
 #ifdef __GFP_ATOMIC

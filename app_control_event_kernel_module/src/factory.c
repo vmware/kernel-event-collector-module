@@ -2802,7 +2802,7 @@ static char *fill_in_task_exe(struct task_struct *task,
 
     if (!IS_ERR_OR_NULL(exe_file)) {
         fill_in_file_data(dynsec_file, &exe_file->f_path);
-        exe_path = dynsec_build_path_greedy(&exe_file->f_path,
+        exe_path = dynsec_build_path(&exe_file->f_path,
                                             dynsec_file, mode);
         if (!has_gfp_atomic(mode)) {
             fput(exe_file);

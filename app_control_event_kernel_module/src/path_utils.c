@@ -112,16 +112,10 @@ static const char *find_trunc_path(const char *buf, int buflen)
     return NULL;
 }
 
-char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode)
-{
-    return dynsec_build_path_greedy(path, file, mode);
-}
-
-char *dynsec_build_path_greedy(struct path *path,
+static char *__dynsec_build_path_greedy(struct path *path,
                                struct dynsec_file *file, gfp_t mode)
 {
     size_t alloc_size = DEFAULT_PATH_ALLOC_SZ;
-    char local_buf[DEFAULT_PATH_ALLOC_SZ];
     char *buf = NULL;
     const char *p = NULL;
     size_t len = 0;
@@ -129,38 +123,37 @@ char *dynsec_build_path_greedy(struct path *path,
     if (!path) {
         return NULL;
     }
-    memset(local_buf, 0, sizeof(local_buf));
+    buf = kzalloc(alloc_size, mode);
+    if (!buf) {
+        return NULL;
+    }
 
     // Build path with local buffer
     if (!has_gfp_atomic(mode))
         path_get(path);
-    p = dynsec_d_path(path, local_buf, alloc_size);
+    p = dynsec_d_path(path, buf, alloc_size);
     if (!has_gfp_atomic(mode))
         path_put(path);
 
     // If no issues duplicate the string and return
     if (!IS_ERR_OR_NULL(p)) {
         len = strlen(p);
-        alloc_size = len + 1;
-        buf = kzalloc(alloc_size, mode);
-        if (!buf) {
-            goto out_err;
-        }
         strlcpy(buf, p, len + 1);
         if (file) {
             file->path_size = len + 1;
             file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
         }
-        goto out;
+        return buf;
+
     } else if (!p || PTR_ERR(p) != -ENAMETOOLONG) {
         goto out_err;
     }
 
     // Local buffer was too small. Retry with a large buffer.
     alloc_size = DYNSEC_PATH_MAX;
-    buf = kzalloc(alloc_size, mode);
+    buf = krealloc(buf, alloc_size, mode);
     if (!buf) {
-        goto out_err;
+        return NULL;
     }
     // Retry path with dynamic buffer
     if (!has_gfp_atomic(mode))
@@ -180,6 +173,10 @@ char *dynsec_build_path_greedy(struct path *path,
             }
         }
         goto out_err;
+    } else {
+        if (file) {
+            file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
+        }
     }
 
 found:
@@ -191,22 +188,22 @@ found:
     buf[len] = 0;
     if (file) {
         file->path_size = len + 1;
-        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_FULL;
     }
-
-out:
     return buf;
 
 out_err:
     kfree(buf);
-    buf = NULL;
-    goto out;
+    return NULL;
+}
+
+char *dynsec_build_path(struct path *path, struct dynsec_file *file, gfp_t mode)
+{
+    return __dynsec_build_path_greedy(path, file, mode);
 }
 
 char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t mode)
 {
     size_t alloc_size = DEFAULT_PATH_ALLOC_SZ;
-    char local_buf[DEFAULT_PATH_ALLOC_SZ];
     char *buf = NULL;
     const char *p = NULL;
     size_t len = 0;
@@ -214,38 +211,37 @@ char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t
     if (!dentry) {
         return NULL;
     }
-    memset(local_buf, 0, sizeof(local_buf));
+    buf = kzalloc(alloc_size, mode);
+    if (!buf) {
+        return NULL;
+    }
 
     // Build path with local buffer
     if (!has_gfp_atomic(mode))
         dget(dentry);
-    p = dynsec_dentry_path(dentry, local_buf, alloc_size);
+    p = dynsec_dentry_path(dentry, buf, alloc_size);
     if (!has_gfp_atomic(mode))
         dput(dentry);
 
     // If no issues duplicate the string and return
     if (!IS_ERR_OR_NULL(p)) {
         len = strlen(p);
-        alloc_size = len + 1;
-        buf = kzalloc(alloc_size, mode);
-        if (!buf) {
-            goto out_err;
-        }
         strlcpy(buf, p, len + 1);
         if (file) {
             file->path_size = len + 1;
             file->attr_mask |= DYNSEC_FILE_ATTR_PATH_DENTRY;
         }
-        goto out;
+        return buf;
+
     } else if (!p || PTR_ERR(p) != -ENAMETOOLONG) {
         goto out_err;
     }
 
     // Local buffer was too small. Retry with a large buffer.
     alloc_size = DYNSEC_PATH_MAX;
-    buf = kzalloc(alloc_size, mode);
+    buf = krealloc(buf, alloc_size, mode);
     if (!buf) {
-        goto out_err;
+        return NULL;
     }
     // Retry path with dynamic buffer
     if (!has_gfp_atomic(mode))
@@ -265,6 +261,10 @@ char *dynsec_build_dentry(struct dentry *dentry, struct dynsec_file *file, gfp_t
             }
         }
         goto out_err;
+    } else {
+        if (file) {
+            file->attr_mask |= DYNSEC_FILE_ATTR_PATH_DENTRY;
+        }
     }
 
 found:
@@ -276,16 +276,12 @@ found:
     buf[len] = 0;
     if (file) {
         file->path_size = len + 1;
-        file->attr_mask |= DYNSEC_FILE_ATTR_PATH_DENTRY;
     }
-
-out:
     return buf;
 
 out_err:
     kfree(buf);
-    buf = NULL;
-    goto out;
+    return NULL;
 }
 
 static char *dynsec_prepend_dfd(int dfd, char *pathbuf, int buflen,
