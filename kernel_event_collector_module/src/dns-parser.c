@@ -257,7 +257,7 @@ int __ec_dns_name_from_dns(char *name)
         int num = name[i];
         int j;
 
-        TRY_SET_MSG(i >= 0, E_FAIL, DL_INFO, "Invalid buffer length detected in dns_name_from_dns.");
+        TRY_SET_MSG(num >= 0, E_FAIL, DL_INFO, "Invalid buffer length detected in dns_name_from_dns.");
 
         for (j = 0; j < num; j++)
         {
