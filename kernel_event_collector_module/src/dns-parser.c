@@ -51,12 +51,14 @@ int ec_dns_parse_data(char                *dns_data,
                    ProcessContext         *context)
 {
     int             xcode  = E_UNEXPECTED;
-    TRY(dns_data);
-    uint8_t        *dataPos = dns_data;
-    dns_header_t   *header = (dns_header_t *)dataPos;
+    uint8_t        *dataPos;
+    dns_header_t   *header;
     dns_question_t *question;
     int             i;
 
+    TRY(dns_data);
+    dataPos = dns_data;
+    header = (dns_header_t *)dataPos;
     TRY_MSG(dns_data_len >= 12 && dns_data_len <= 512, DL_COMMS, "dns_data_len %d", dns_data_len);
     TRY(response);
     TRY(context);
