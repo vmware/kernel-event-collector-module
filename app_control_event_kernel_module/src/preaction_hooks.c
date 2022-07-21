@@ -135,7 +135,7 @@ static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *re
     DECL_ARG_1(const struct path *, path);
     DECL_ARG_2(umode_t, mode);
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
@@ -172,7 +172,7 @@ static int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *re
     DECL_ARG_2(uid_t, user);
     DECL_ARG_3(gid_t, group);
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
@@ -366,7 +366,7 @@ static void dynsec_do_create(int dfd, const char __user *filename,
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
     int lookup_flags = LOOKUP_FOLLOW;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -550,7 +550,7 @@ static bool dynsec_do_rename(int olddfd, const char __user *oldname,
     uint64_t local_intent_req_id = 0;
     bool filled;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return false;
     }
 
@@ -643,7 +643,7 @@ static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -700,7 +700,7 @@ static void dynsec_do_unlink(int dfd, const char __user *pathname,
     bool filled;
     umode_t mode;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -789,7 +789,7 @@ static void dynsec_do_symlink(const char __user *target,
     char *target_path = NULL;
     bool filled;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -870,7 +870,7 @@ static void dynsec_do_link(int olddfd, const char __user *oldname,
     bool filled;
     int lookup_flags = 0;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 

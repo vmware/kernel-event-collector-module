@@ -81,6 +81,11 @@ static inline bool stall_tbl_enabled(struct stall_tbl *tbl)
     return (tbl && tbl->enabled);
 }
 
+static inline bool hooks_enabled(struct stall_tbl *tbl)
+{
+    return !bypass_mode_enabled() && stall_tbl_enabled(tbl);
+}
+
 extern struct stall_tbl *stall_tbl_alloc(gfp_t mode);
 
 extern int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
