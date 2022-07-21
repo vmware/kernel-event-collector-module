@@ -48,7 +48,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -100,7 +100,7 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -173,7 +173,7 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -242,7 +242,7 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -372,7 +372,7 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -431,7 +431,7 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry, int mode)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -490,7 +490,7 @@ int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -544,7 +544,7 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -598,7 +598,7 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     // check if client is interested in this file system
@@ -759,7 +759,7 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -842,7 +842,7 @@ void dynsec_file_free_security(struct file *file)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
     // In between the TASK_EXIT and TASK_FREE hooks
@@ -890,7 +890,7 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -937,7 +937,7 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
 
@@ -1002,7 +1002,7 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -1044,7 +1044,7 @@ void dynsec_sched_process_fork_tp(struct task_struct *parent,
     if (!child) {
         return;
     }
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -1082,7 +1082,7 @@ static void __dynsec_task_exit(struct task_struct *task,
         return;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -1185,7 +1185,7 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
 
@@ -1269,7 +1269,7 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
     if (!p) {
         goto out;
     }
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
 
