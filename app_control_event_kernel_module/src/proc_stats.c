@@ -35,6 +35,9 @@ ssize_t dynsec_proc_write(struct file *file, const char *buf, size_t size, loff_
 int dynsec_proc_read(struct seq_file *m, void *v)
 {
     int ctr;
+    seq_printf(m, "   dynsec_config: bypass:%d stall:%d",
+            global_config.bypass_mode, global_config.stall_mode);
+    seq_puts(m, "\n");
     seq_printf(m, " %20s %d", "stall queue size: ", stall_queue_size(stall_tbl));
     seq_puts(m, "\n");
 

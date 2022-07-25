@@ -242,13 +242,19 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
         return -EINVAL;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
-        return -EINVAL;
-    }
-
     if (copy_from_user(&response, ubuf, sizeof(response))) {
         return -EINVAL;
     }
+
+    if (!stall_tbl_enabled(stall_tbl)) {
+        pr_err("%s:%d event %d, stall response %d but table disabled.\n", __func__, __LINE__,
+                response.event_type, response.response);
+        return -EINVAL;
+    }
+
+    if (response.response)
+        pr_info("%s:%d event %d, stall response %d.\n", __func__, __LINE__,
+            response.event_type, response.response);
 
     memset(&key, 0, sizeof(key));
     key.req_id = response.req_id;
@@ -263,6 +269,8 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
         }
         ret = sizeof(response);
     } else if (ret == -ENOENT) {
+        pr_info("%s:%d event %d, stall response %d, entry not found.\n", __func__, __LINE__,
+                response.event_type, response.response);
         // Only accept disable cache opts here
         if ((response.task_label_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE)) ||
             (response.cache_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE))) {
@@ -457,7 +465,7 @@ static long dynsec_stall_unlocked_ioctl(struct file *file, unsigned int cmd,
         struct dynsec_stall_ioc_hdr hdr;
 
         memset(&hdr, 0, sizeof(hdr));
-        hdr.flags |= DYNSEC_STALL_MODE_SET;
+        hdr.flags |= DYNSEC_STALL_DEFAULT_TIMEOUT;
         hdr.stall_timeout = arg;
 
         ret = handle_stall_ioc(&hdr);

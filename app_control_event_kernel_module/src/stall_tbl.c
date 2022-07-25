@@ -443,9 +443,14 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
         break;
     case DYNSEC_RESPONSE_CONTINUE:
         inode_cache_flags = 0;
+        if (overrided_stall_timeout == 0) {
+            overrided_stall_timeout = get_continue_timeout();
+        }
         if (overrided_stall_timeout > MAX_EXTENDED_TIMEOUT_MS) {
             overrided_stall_timeout = MAX_EXTENDED_TIMEOUT_MS;
         }
+        pr_info("%s:%d event %d, stall timeout overrided: %d\n",
+                __func__, __LINE__, key->event_type, overrided_stall_timeout);
         break;
 
     default:
