@@ -324,7 +324,7 @@ int handle_stall_ioc(const struct dynsec_stall_ioc_hdr *hdr)
         }
 
         global_config.stall_timeout_continue = timeout_ms;
-        pr_info("%s:%d continue stall timeout set to %ld sec.\n", __func__, __LINE__,
+        pr_debug("%s:%d continue stall timeout set to %ld sec.\n", __func__, __LINE__,
                 timeout_ms/1000);
     }
 

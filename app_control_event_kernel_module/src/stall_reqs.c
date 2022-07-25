@@ -253,7 +253,7 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
     }
 
     if (response.response)
-        pr_info("%s:%d event %d, stall response %d.\n", __func__, __LINE__,
+        pr_debug("%s:%d event %d, stall response %d.\n", __func__, __LINE__,
             response.event_type, response.response);
 
     memset(&key, 0, sizeof(key));
@@ -269,7 +269,7 @@ static ssize_t dynsec_stall_write(struct file *file, const char __user *ubuf,
         }
         ret = sizeof(response);
     } else if (ret == -ENOENT) {
-        pr_info("%s:%d event %d, stall response %d, entry not found.\n", __func__, __LINE__,
+        pr_debug("%s:%d event %d, stall response %d, entry not found.\n", __func__, __LINE__,
                 response.event_type, response.response);
         // Only accept disable cache opts here
         if ((response.task_label_flags & (DYNSEC_CACHE_CLEAR|DYNSEC_CACHE_DISABLE)) ||
