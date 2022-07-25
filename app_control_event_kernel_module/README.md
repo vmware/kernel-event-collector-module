@@ -94,6 +94,7 @@ form of label retention and is meant to label process trees.
 The module creates an entry in the proc file system 
 /proc/cb\_appc\_events\_NNNNN\_stats file contains the following
 information:
+ * dynsec config:    shows current value of bypass mode, stall mode etc.
  * stall queue size: shows current size of stall queue.
  * stall timeout events: shows number of continuous events for which user
                          space does not respond within 5 seconds.
