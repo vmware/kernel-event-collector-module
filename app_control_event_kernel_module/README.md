@@ -31,7 +31,7 @@ was cached or other context clues.
 
 ### PreActions/Intents
 The last known event is cached on a per-task level basis with it event
-unique identifer some other metadata. The regular event may tell us if
+unique identifier some other metadata. The regular event may tell us if
 there was an intent event by providing us the intent event's id. PreActions
 are always enqueued before the regular event.
 
@@ -118,7 +118,7 @@ time to trace the code flow. This works only if the kernel is compiled
 with CONFIG\_DYNAMIC\_DEBUG flag.
 Refer to dynamic-debug-howto.txt from kernel Documentation.
 
-Use followig procedure to tracing the code path:
+Use following procedure to tracing the code path:
 1. mount the debug file system if it not mounted already.
    mount  | grep -i debugfs
    mount -t debugfs nodev /sys/kernel/debug

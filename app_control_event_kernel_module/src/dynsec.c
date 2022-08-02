@@ -193,4 +193,5 @@ static void __exit dynsec_exit(void)
 module_init(dynsec_init);
 module_exit(dynsec_exit);
 
+MODULE_AUTHOR("VMware, Inc.");
 MODULE_LICENSE("GPL");
