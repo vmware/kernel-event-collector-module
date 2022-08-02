@@ -64,6 +64,11 @@ int dynsec_proc_open(struct inode *inode, struct file *file)
 #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
 #define PDE_DATA(a) container_of((a), struct proc_inode, vfs_inode)->pde->data
 #endif
+#if defined(RHEL_MAJOR) && defined(RHEL_MINOR) && RHEL_MAJOR == 9 && RHEL_MINOR > 0
+// CentoOS 9 Stream (5.14.0-134.el9) removed PDE_DATA but supplies a pde_data
+// helper function.
+#define PDE_DATA(inode) pde_data(inode)
+#endif
     return single_open(file, dynsec_proc_read, PDE_DATA(inode));
 }
 
