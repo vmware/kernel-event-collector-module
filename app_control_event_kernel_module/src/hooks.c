@@ -1132,15 +1132,7 @@ void dynsec_sched_process_free_tp(struct task_struct *task)
     __dynsec_task_exit(task, DYNSEC_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
 }
 
-// Settings to help control mmap event performance
-int mmap_report_misc = 1;
-int mmap_stall_misc = 0;
-int mmap_stall_on_exec = 1;
-int mmap_stall_on_ldso = 1;
 
-//
-//
-//
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
 int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
                      unsigned long flags)
@@ -1174,13 +1166,6 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         goto out;
     }
 
-    // // Remove read-only entry if PROT_WRITE requested
-    // TODO: verify other mmap args to remove entry
-    // if (prot & PROT_WRITE) {
-    //     rm_inode_addr = (unsigned long)__file_inode(file);
-    //     inode_cache_remove_entry(rm_inode_addr);
-    // }
-
     if (!(prot & PROT_EXEC)) {
         goto out;
     }
@@ -1189,26 +1174,9 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         goto out;
     }
 
-    if (current->in_execve ||
-        (file && (file->f_mode & FMODE_EXEC) == FMODE_EXEC)) {
-        unsigned long exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-
-        if (mmap_stall_on_exec && exec_flags & MAP_EXECUTABLE) {
-            report_flags |= DYNSEC_REPORT_STALL;
-        }
-        else if (mmap_stall_on_ldso) {
-            report_flags |= DYNSEC_REPORT_STALL;
-        }
-
-        // High priority even if we're not stalling
-        report_flags |= DYNSEC_REPORT_HI_PRI;
-    }
-    else {
-        if (mmap_stall_misc) {
-            report_flags |= DYNSEC_REPORT_STALL;
-        } else if (!mmap_report_misc) {
-            goto out;
-        }
+    // Stall the mmap if task is in exec or file was opened for exec
+    if (current->in_execve || (file->f_mode & FMODE_EXEC) == FMODE_EXEC) {
+        report_flags |= DYNSEC_REPORT_STALL;
     }
 
     // Don't stall on ourself
@@ -1225,6 +1193,8 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
             goto out;
         }
     }
+
+    // We may to filter out mmaps events here
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MMAP, DYNSEC_HOOK_TYPE_MMAP,
                                report_flags, GFP_KERNEL);
