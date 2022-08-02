@@ -267,6 +267,11 @@ static int protect_insert_entry(const struct dynsec_match *match)
     protect_read_unlock(flags);
 
     if (found_entry) {
+        if (entry->blob) {
+            kfree(entry->blob);
+            entry->blob = NULL;
+        }
+        kfree(entry);
         goto out_unlock;
     }
 

@@ -801,10 +801,12 @@ static void dynsec_do_symlink(const char __user *target,
     ret = user_path_at(newdfd, linkpath, 0, &path);
     if (!ret) {
         path_put(&path);
+        kfree(target_path);
+        target_path = NULL;
         return;
     }
     len = strncpy_from_user(target_path, target, PATH_MAX);
-    if (unlikely(len < 0)) {
+    if (unlikely(len <= 0)) {
         kfree(target_path);
         target_path = NULL;
         return;
@@ -814,10 +816,7 @@ static void dynsec_do_symlink(const char __user *target,
         target_path = NULL;
         return;
     }
-    if (unlikely(len == 0)) {
-        kfree(target_path);
-        target_path = NULL;
-    } else {
+    if (len == 0) {
         target_path[len] = 0;
     }
 
@@ -1168,9 +1167,6 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
         return -ENOMEM;
     }
 
-    symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
-    old_symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
-
     // Don't assume existing sys_call_table addr is the same
     find_symbol_indirect("sys_call_table",
                          (unsigned long *)&curr_table);
@@ -1183,7 +1179,20 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
         diff += 1;
     }
     if (!curr_table) {
+        kfree(curr_hooks);
         return diff;
+    }
+
+    symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
+    if (!symname) {
+        kfree(curr_hooks);
+        return -ENOMEM;
+    }
+    old_symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
+    if (!old_symname) {
+        kfree(curr_hooks);
+        kfree(symname);
+        return -ENOMEM;
     }
 
 #define __cmp_syscall(NAME, MASK, x) \
