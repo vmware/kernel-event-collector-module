@@ -397,6 +397,7 @@ static char *parse_last_component(char *namebuf, size_t namebuf_sz,
 
         // Copy character over
         *comp-- = *p--;
+        component_len += 1;
     }
 
     return NULL;
@@ -689,3 +690,91 @@ out_err:
     }
     return ERR_PTR(err_ret);
 }
+
+#ifdef DEBUG_PATH
+struct parse_test_case {
+    const char *input;
+    char *exp_ret;
+    char *exp_input;
+};
+struct parse_test_case test_cases[] = {
+    [0] = {
+        .input = "..",
+        .exp_ret = NULL,
+        .exp_input = "..",
+    },
+    [1] = {
+        .input = ".",
+        .exp_ret = NULL,
+        .exp_input = ".",
+    },
+    [2] = {
+        .input = "...",
+        .exp_ret = "...",
+        .exp_input = "",
+    },
+    [3] = {
+        .input = "../.",
+        .exp_ret = NULL,
+        .exp_input = "../.",
+    },
+    [4] = {
+        .input = "/..",
+        .exp_ret = NULL,
+        .exp_input = "/..",
+    },
+    [5] = {
+        .input = "",
+        .exp_ret = NULL,
+        .exp_input = "",
+    },
+    [6] = {
+        .input = "filewith.",
+        .exp_ret = "filewith.",
+        .exp_input = "",
+    },
+};
+
+bool test_parse_last_component(void)
+{
+    char namebuf[NAME_MAX + 1];
+    char tmp_inputbuf[256];
+    char *result;
+    int i;
+    int total_failed = 0;
+
+    for (i = 0; i < ARRAY_SIZE(test_cases); i++) {
+        bool passed = true;
+        memset(tmp_inputbuf, 0, sizeof(tmp_inputbuf));
+
+        if (!test_cases[i].input) {
+            continue;
+        }
+        strcpy(tmp_inputbuf, test_cases[i].input);
+        result = parse_last_component(namebuf, sizeof(namebuf),
+                                      tmp_inputbuf, strlen(tmp_inputbuf));
+
+        if ((!test_cases[i].exp_ret && result) ||
+            (test_cases[i].exp_ret && !result) ||
+            (test_cases[i].exp_ret && result && strcmp(test_cases[i].exp_ret, result) != 0)) {
+            pr_info("FAIL: Case: %d %s exp_ret:'%s' actual ret:'%s'\n", i,
+                    test_cases[i].input, test_cases[i].exp_ret, result);
+            passed = false;
+        }
+        if (strcmp(test_cases[i].exp_input, tmp_inputbuf) != 0) {
+            pr_info("FAIL: Case: %d %s exp_input_ret:'%s' actual input_ret:'%s'\n", i,
+                    test_cases[i].input, test_cases[i].exp_input, tmp_inputbuf);
+            passed = false;
+        }
+        if (passed) {
+            pr_info("PASS: Case %d %s exp_ret:'%s' ret:'%s', exp_input_ret:'%s' input_ret:'%s'\n",
+                    i, test_cases[i].input,  test_cases[i].exp_ret,
+                    result, test_cases[i].exp_input, tmp_inputbuf);
+        } else {
+            total_failed += 1;
+        }
+    }
+
+    return total_failed == 0;
+}
+#endif /* DEBUG_PATH */
