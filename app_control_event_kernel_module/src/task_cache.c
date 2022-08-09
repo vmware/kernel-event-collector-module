@@ -73,7 +73,7 @@ struct task_entry {
     u32 task_label_flags;
 
     // Per-Event Label Options
-    u32 event_caches[DYNSEC_EVENT_TYPE_TASK_DUMP - 1];
+    u32 event_caches[DYNSEC_EVENT_TYPE_TASK_DUMP];
 };
 
 struct task_cache {
@@ -243,7 +243,7 @@ static inline void __update_entry_data(struct event_track *event,
 
     entry->hits += 1;
 
-    BUILD_BUG_ON(ARRAY_SIZE(entry->event_caches) >= DYNSEC_EVENT_TYPE_TASK_DUMP);
+    BUILD_BUG_ON(ARRAY_SIZE(entry->event_caches) > DYNSEC_EVENT_TYPE_TASK_DUMP);
 
     // If not reportable then only set last event and touch nothing else
     if (!(event->track_flags & TRACK_EVENT_REPORTABLE)) {
@@ -292,7 +292,7 @@ static inline void __update_entry_data(struct event_track *event,
     case DYNSEC_CACHE_ENABLE_EXCL:
         // Disable Cache If Previous STALL Event WAS NOT Cacheable
         if (!task_observed_stall_event(entry) ||
-            event_cache_enabled(entry->event_caches[entry->last_stall.event_type % DYNSEC_EVENT_TYPE_TASK_DUMP])) {
+            event_cache_enabled(entry->event_caches[entry->last_stall.event_type])) {
             if (is_ignore) {
                 event->report_flags &= ~(DYNSEC_REPORT_STALL);
                 event->report_flags |= DYNSEC_REPORT_IGNORE;
