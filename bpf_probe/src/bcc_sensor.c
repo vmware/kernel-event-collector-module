@@ -864,10 +864,25 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 		goto out;
 	}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
+	// This fix is to adjust the flag changes in 5.14 kernel to match the user space pipeline requirement
+	//  - MAP_EXECUTABLE flag is not available for exec mmap function
+	//  - MAP_DENYWRITE flag is "reverted" for ld.so and normal mmap
+	if (file->f_flags & FMODE_EXEC && flags == (MAP_FIXED | MAP_PRIVATE)) {
+	    goto out;
+	}
+
+	if (flags & MAP_DENYWRITE) {
+	    flags &= ~MAP_DENYWRITE;
+	} else {
+	    flags |= MAP_DENYWRITE;
+	}
+#else
 	exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
 	if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
 		goto out;
 	}
+#endif
 
 	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
