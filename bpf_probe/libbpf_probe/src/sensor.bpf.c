@@ -729,7 +729,7 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
         header->tid = BPF_CORE_READ(task, pid);
         header->pid = BPF_CORE_READ(task, tgid);
         if (BPF_CORE_READ(task, cred)) { // TODO: use bpf_core_field_exists()?
-            header->uid = __kuid_val(BPF_CORE_READ(task, cred, uid));
+            header->uid = BPF_CORE_READ(task, cred, uid.val);
         }
         if (BPF_CORE_READ(task, real_parent)) {
             header->ppid = BPF_CORE_READ(task, real_parent, tgid);
@@ -1299,7 +1299,7 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
 
 	__init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &data.header, task);
 
-	data.header.uid = __kuid_val(BPF_CORE_READ(task, real_parent, cred, uid)); // override
+	data.header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
 
 #ifdef __BCC_UNDER_4_8__
     // Poorman's method for storing root fs path data->
@@ -1869,12 +1869,12 @@ int BPF_KRETPROBE(trace_udp_sendmsg_return)
 
     if (check_family(skp, AF_INET))
     {
+        data.local_addr = BPF_CORE_READ(skp, __sk_common.skc_rcv_saddr);
         if (!addr_in_msghr)
         {
-            data.remote_addr = BPF_CORE_READ(skp, __sk_common.skc_daddr);;
+            data.remote_addr = BPF_CORE_READ(skp, __sk_common.skc_daddr);
         }
 
-        data.local_addr = BPF_CORE_READ(skp, __sk_common.skc_rcv_saddr);
 
 #ifdef CACHE_UDP
         struct ip_key ip_key = {};

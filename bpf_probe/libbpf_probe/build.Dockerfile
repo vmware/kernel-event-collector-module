@@ -16,7 +16,7 @@ RUN apt-get update && apt-get -y install arping netperf iperf python3.9 curl  \
 RUN apt-get update && apt-get install -y build-essential linux-tools-common clang
 
 # BPFTool
-RUN apt-get install -y linux-tools-$(uname -r)
+RUN apt-get install -y linux-tools-5.15.0-1017-azure
 
 # ELFUtils - static
 WORKDIR /
@@ -42,8 +42,5 @@ RUN cp /zlib/libz.a /libbpf_sensor
 COPY src /libbpf_sensor
 
 WORKDIR /libbpf_sensor
-# COPY libbpf_sensor /project/bin
-# COPY sensor.skel.h /project/bin
-# COPY sensor.bpf.o /project/bin
 
-CMD ["sh", "-c", "make; cp libbpf_sensor /project/bin; cp sensor.bpf.o /project/bin/"]
+CMD ["sh", "-c", "make; cp libbpf_sensor /project/bin; cp sensor.bpf.o /project/bin/; cp sensor.skel.h /project/bin/"]
