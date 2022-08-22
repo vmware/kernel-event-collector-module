@@ -16,19 +16,19 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
 #ifdef randomized_struct_fields_start
 #undef randomized_struct_fields_start
-#endif
+#endif /* randomized_struct_fields_start */
 #define randomized_struct_fields_start struct {
 #ifdef randomized_struct_fields_end
 #undef randomized_struct_fields_end
-#endif
+#endif /* randomized_struct_fields_end */
 #define randomized_struct_fields_end \
 	}                            \
 	;
-#endif
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0) */
 
 #ifndef KBUILD_MODNAME
 #define KBUILD_MODNAME "vmw_bcc_bpfsensor"
-#endif
+#endif /* KBUILD_MODNAME */
 
 #include <uapi/linux/limits.h>
 #include <uapi/linux/in.h>
@@ -74,24 +74,24 @@
 // BPF_LRU(name, key_type=u64, leaf_type=u64, size=10240)
 #define BPF_LRU(...) \
 	BPF_LRUX(__VA_ARGS__, BPF_LRU3, BPF_LRU2, BPF_LRU1)(__VA_ARGS__)
-#else
+#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
 #define BPF_LRU BPF_HASH
-#endif
-#endif
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
+#endif /* BPF_LRU */
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 // Existence of map tells userspace if kernel is LRU map capable
 BPF_ARRAY(has_lru, uint32_t, 1);
 #define FALLBACK_FIELD_TYPE(A, B) A
-#else
+#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
 #define FALLBACK_FIELD_TYPE(A, B) B
-#endif
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
 
 // is this struct really needed here?
 struct mnt_namespace {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 	atomic_t count;
-#endif
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
 	struct ns_common ns;
 };
 
@@ -105,17 +105,17 @@ struct mount {
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 #define MAXARG 30
-#else
+#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0) */
 #define MAXARG 20
-#endif
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0) */
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 #define __BCC_UNDER_4_10__
-#endif
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) */
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 #define __BCC_UNDER_4_8__
-#endif
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0) */
 
 
 #else /* __BCC__ : non-BCC (libbpf specific) headers */
