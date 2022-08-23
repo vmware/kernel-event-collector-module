@@ -3,60 +3,70 @@
 
 #include "BpfProgram.h"
 
+#include "sensor.skel.h"
+
+
 #include <map>
 
 using namespace cb_endpoint::bpf_probe;
+
+// bool BpfProgram::InstallHooks(
+//     IBpfApi          &bpf_api,
+//     const ProbePoint *hook_list)
+// {
+//     std::map<std::string, bool> status_map;
+
+//     // Loop over all the probes we need to install
+//     for (int i = 0; hook_list[i].name != NULL; ++i)
+//     {
+//         const char *name = hook_list[i].name;
+
+//         if (hook_list[i].alternate)
+//         {
+//             bool isInsterted = false;
+//             try
+//             {
+//                 isInsterted = status_map.at(hook_list[i].name);
+//             }
+//             catch (std::out_of_range)
+//             {
+//                 //pass
+//             }
+//             // If the hook we depend on inserted correctly than skip this.
+//             //  Otherwise attempt to insert this hook.
+//             if (isInsterted)
+//             {
+//                 status_map[hook_list[i].alternate] = false;
+//                 continue;
+//             }
+//             else
+//             {
+//                 name = hook_list[i].alternate;
+//             }
+//         }
+
+//         auto didAttach = bpf_api.AttachProbe(
+//             name,
+//             hook_list[i].callback,
+//             hook_list[i].type);
+
+//         // Record the insertion status of this probe point
+//         status_map[name] = didAttach;
+//         if (!hook_list[i].optional && !didAttach)
+//         {
+//             // This probe point is required, so fail out
+//             return false;
+//         }
+//     }
+    
+//     return true;
+// }
 
 bool BpfProgram::InstallHooks(
     IBpfApi          &bpf_api,
     const ProbePoint *hook_list)
 {
-    std::map<std::string, bool> status_map;
-
-    // Loop over all the probes we need to install
-    for (int i = 0; hook_list[i].name != NULL; ++i)
-    {
-        const char *name = hook_list[i].name;
-
-        if (hook_list[i].alternate)
-        {
-            bool isInsterted = false;
-            try
-            {
-                isInsterted = status_map.at(hook_list[i].name);
-            }
-            catch (std::out_of_range)
-            {
-                //pass
-            }
-            // If the hook we depend on inserted correctly than skip this.
-            //  Otherwise attempt to insert this hook.
-            if (isInsterted)
-            {
-                status_map[hook_list[i].alternate] = false;
-                continue;
-            }
-            else
-            {
-                name = hook_list[i].alternate;
-            }
-        }
-
-        auto didAttach = bpf_api.AttachProbe(
-            name,
-            hook_list[i].callback,
-            hook_list[i].type);
-
-        // Record the insertion status of this probe point
-        status_map[name] = didAttach;
-        if (!hook_list[i].optional && !didAttach)
-        {
-            // This probe point is required, so fail out
-            return false;
-        }
-    }
-    
-    return true;
+    sensor_bpf__attach(bpf_api->m_sensor);
 }
 
 const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {

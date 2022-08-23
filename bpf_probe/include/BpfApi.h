@@ -10,6 +10,8 @@
 #include <list>
 #include <chrono>
 
+#include "sensor.skel.h"
+
 // A number of calls are annotated with 'warn_unused_result' in their definition, so a
 // normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
 // the compiler into properly allowing the call to be ignored.
@@ -210,13 +212,12 @@ namespace bpf_probe {
 
         void CleanBuildDir();
 
-        bool OnPeek(const bpf_probe::Data data);
         void OnEvent(bpf_probe::Data data);
 
-        static bool on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size);
         static void on_perf_submit(void *cb_cookie, void *data, int data_size);
 
-        std::unique_ptr<ebpf::BPF>  m_BPF;
+        struct sensor_bpf*          m_sensor;
+        struct perf_buffer*         m_events_pb;
         const std::string           m_kptr_restrict_path;
         bool                        m_bracket_kptr_restrict;
         bool                        m_first_syscall_lookup;
