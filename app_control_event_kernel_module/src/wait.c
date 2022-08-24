@@ -84,7 +84,8 @@ retry:
                 "intent_req_id:%llu\n", __func__, tid, req_id, event_type,
                 report_flags, intent_req_id);
 
-        if (atomic_read(&stall_timeout_ctr) >= stall_timeout_ctr_limit) {
+        if (stall_timeout_ctr_limit &&
+            atomic_read(&stall_timeout_ctr) >= stall_timeout_ctr_limit) {
             disable_stall_tbl = true;
             pr_warn("Stalling disabled after %d events timed out.\n",
                      stall_timeout_ctr_limit);
