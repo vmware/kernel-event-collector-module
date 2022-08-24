@@ -49,12 +49,15 @@ static char lsm_hooks_str[64];
 
 bool protect_on_connect = false;
 
+uint32_t stall_timeout_ctr_limit = DYNSEC_STALL_TIMEOUT_CTR_LIMIT;
+
 // Hooks to only allow for kmod instance. Superset.
 module_param_string(lsm_hooks, lsm_hooks_str,
                     sizeof(lsm_hooks_str), 0644);
 
 module_param(process_hooks, uint, 0644);
 module_param(protect_on_connect, bool, 0644);
+module_param(stall_timeout_ctr_limit, uint, 0644);
 
 // Special Globals
 DEFINE_MUTEX(global_config_lock);

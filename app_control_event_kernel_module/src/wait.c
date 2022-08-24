@@ -18,6 +18,8 @@
 atomic_t  stall_timeout_ctr = ATOMIC_INIT(0);
 atomic_t  access_denied_ctr = ATOMIC_INIT(0);
 
+extern uint32_t stall_timeout_ctr_limit;
+
 static int do_stall_interruptible(struct stall_entry *entry, int *response)
 {
     bool disable_stall_tbl = false;
@@ -82,9 +84,10 @@ retry:
                 "intent_req_id:%llu\n", __func__, tid, req_id, event_type,
                 report_flags, intent_req_id);
 
-        if (atomic_read(&stall_timeout_ctr) >= DYNSEC_STALL_TIMEOUT_CTR_LIMIT) {
+        if (atomic_read(&stall_timeout_ctr) >= stall_timeout_ctr_limit) {
             disable_stall_tbl = true;
-            pr_warn("Stalling disabled after many events timed out.\n");
+            pr_warn("Stalling disabled after %d events timed out.\n",
+                     stall_timeout_ctr_limit);
         }
 
         pr_info("%s:%d response:%d timedout:%lu jiffies\n", __func__, __LINE__,
