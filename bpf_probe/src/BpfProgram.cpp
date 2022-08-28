@@ -61,64 +61,156 @@ using namespace cb_endpoint::bpf_probe;
     
 //     return true;
 // }
+struct kprobe {
+    char *program_name;
+    char *kprobe_name;
+    bool is_kretprobe;
+};
+
+// TODO: add __x64_ prefix to sys_* hook names only for kernels >= 4.17
+const struct kprobe kprobes[] = {
+        {
+                .program_name = "syscall__on_sys_execve",
+                .kprobe_name = "__x64_sys_execve",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "syscall__on_sys_execveat",
+                .kprobe_name = "__x64_sys_execveat",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "after_sys_execve",
+                .kprobe_name = "__x64_sys_execve",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "after_sys_execve",
+                .kprobe_name = "__x64_sys_execveat",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "trace_connect_v4_entry",
+                .kprobe_name = "tcp_v4_connect",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_connect_v6_entry",
+                .kprobe_name = "tcp_v6_connect",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_connect_v4_return",
+                .kprobe_name = "tcp_v4_connect",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "trace_connect_v6_return",
+                .kprobe_name = "tcp_v6_connect",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "on_security_file_free",
+                .kprobe_name = "security_file_free",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "on_security_mmap_file",
+                .kprobe_name = "security_mmap_file",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "on_security_file_open",
+                .kprobe_name = "security_file_open",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "on_security_inode_unlink",
+                .kprobe_name = "security_inode_unlink",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "on_security_inode_rename",
+                .kprobe_name = "security_inode_rename",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "on_wake_up_new_task",
+                .kprobe_name = "wake_up_new_task",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "on_do_exit",
+                .kprobe_name = "do_exit",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_skb_recv_udp",
+                .kprobe_name = "__skb_recv_udp",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "trace_accept_return",
+                .kprobe_name = "inet_csk_accept",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "trace_udp_recvmsg",
+                .kprobe_name = "udp_recvmsg",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_udp_recvmsg_return",
+                .kprobe_name = "udp_recvmsg",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "trace_udp_recvmsg",
+                .kprobe_name = "udpv6_recvmsg",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_udp_recvmsg_return",
+                .kprobe_name = "udpv6_recvmsg",
+                .is_kretprobe = true
+        },
+
+        {
+                .program_name = "trace_udp_sendmsg",
+                .kprobe_name = "udp_sendmsg",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_udp_sendmsg_return",
+                .kprobe_name = "udp_sendmsg",
+                .is_kretprobe = true
+        },
+        {
+                .program_name = "trace_udp_sendmsg",
+                .kprobe_name = "udpv6_sendmsg",
+                .is_kretprobe = false
+        },
+        {
+                .program_name = "trace_udp_sendmsg_return",
+                .kprobe_name = "udpv6_sendmsg",
+                .is_kretprobe = true
+        },
+};
 
 bool BpfProgram::InstallHooks(
-    IBpfApi          &bpf_api,
-    const ProbePoint *hook_list)
+    IBpfApi          &bpf_api
+    )
 {
-    sensor_bpf__attach(bpf_api->m_sensor);
+    int num_of_kprobes = sizeof(kprobes) / sizeof(kprobes[0]);
+
+    for (int i = 0; i < num_of_kprobes; i++) {
+        struct kprobe kprobe = kprobes[i];
+        if (!bpf_api.AttachProbe(kprobe.program_name, kprobe.kprobe_name, kprobe.is_kretprobe)) {
+            return false;
+        }
+    }
+
+    return true;
+
 }
 
-const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
-
-    BPF_ENTRY_HOOK ("tcp_v4_connect", "trace_connect_v4_entry"),
-    BPF_RETURN_HOOK("tcp_v4_connect", "trace_connect_v4_return"),
-
-    BPF_ENTRY_HOOK ("tcp_v6_connect", "trace_connect_v6_entry"),
-    BPF_RETURN_HOOK("tcp_v6_connect", "trace_connect_v6_return"),
-
-    BPF_RETURN_HOOK("inet_csk_accept", "trace_accept_return"),
-
-    // TODO: The collector is not currently handling the proxy event, so dont't bother collecting
-    //BPF_ENTRY_HOOK ("tcp_sendmsg", "trace_tcp_sendmsg"),
-
-    BPF_ENTRY_HOOK ("udp_recvmsg", "trace_udp_recvmsg"),
-    BPF_RETURN_HOOK("udp_recvmsg", "trace_udp_recvmsg_return"),
-
-    BPF_ENTRY_HOOK ("udpv6_recvmsg", "trace_udp_recvmsg"),
-    BPF_RETURN_HOOK("udpv6_recvmsg", "trace_udp_recvmsg_return"),
-
-    BPF_ENTRY_HOOK ("udp_sendmsg", "trace_udp_sendmsg"),
-    BPF_RETURN_HOOK("udp_sendmsg", "trace_udp_sendmsg_return"),
-
-    BPF_ENTRY_HOOK ("udpv6_sendmsg", "trace_udp_sendmsg"),
-    BPF_RETURN_HOOK("udpv6_sendmsg", "trace_udp_sendmsg_return"),
-
-    // Network Event Hooks (only for udp recv event)
-    BPF_OPTIONAL_RETURN_HOOK("__skb_recv_udp",                         "trace_skb_recv_udp"),
-    BPF_ALTERNATE_RETURN_HOOK("__skb_recv_udp", "__skb_recv_datagram", "trace_skb_recv_udp"),
-
-    BPF_ENTRY_HOOK("security_inode_rename", "on_security_inode_rename"),
-    BPF_ENTRY_HOOK("security_inode_unlink", "on_security_inode_unlink"),
-
-    // File Event Hooks
-    BPF_ENTRY_HOOK("security_mmap_file", "on_security_mmap_file"),
-    BPF_ENTRY_HOOK("security_file_open", "on_security_file_open"),
-    BPF_ENTRY_HOOK("security_file_free", "on_security_file_free"),
-
-    // Process Event Hooks
-    BPF_ENTRY_HOOK("wake_up_new_task",   "on_wake_up_new_task"),
-
-    BPF_ENTRY_HOOK("do_exit", "on_do_exit"),
-
-    // Exec Syscall Hooks
-    BPF_LOOKUP_ENTRY_HOOK ("execve",   "syscall__on_sys_execve"),
-    BPF_LOOKUP_RETURN_HOOK("execve",   "after_sys_execve"),
-    BPF_LOOKUP_ENTRY_HOOK ("execveat", "syscall__on_sys_execveat"),
-    BPF_LOOKUP_RETURN_HOOK("execveat", "after_sys_execve"),
-
-    // Container Hooks
-    BPF_ENTRY_HOOK("cgroup_attach_task", "on_cgroup_attach_task"),
-
-    BPF_ENTRY_HOOK(nullptr,nullptr)
-};

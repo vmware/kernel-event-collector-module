@@ -1,3 +1,4 @@
+
 # Artifacts produced via the CB build utility
 build-util
 workspace
@@ -9,7 +10,9 @@ cbst_util/include/rule_engine_util
 event_collector/include/event_collector
 hash_processor/include/hash_processor
 
+
 # Artifacts produced by a local build
+bpf_probe/src/build/
 #version.h
 #cb-module-state-export.c
 #Kbuild

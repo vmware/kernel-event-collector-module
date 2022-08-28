@@ -1,6 +1,6 @@
 // Copyright (c) 2020 VMWare, Inc. All rights reserved.
 // SPDX-License-Identifier: GPL-2.0
-
+#include <linux/bpf.h>
 #include "BpfApi.h"
 
 #include <climits>
@@ -11,8 +11,10 @@
 #include <exception>
 #include <boost/filesystem.hpp>
 
+#include <sys/resource.h>
 #include <bpf/libbpf.h>
-#include <bpf/bpf.h>
+
+//#include <bpf/bpf.h>
 
 #include "sensor.skel.h"
 
@@ -45,6 +47,26 @@ BpfApi::~BpfApi()
 {
 }
 
+static void on_perf_submit_libbpf(void *ctx, int cpu, void *data, __u32 size)
+{
+    auto bpfApi = static_cast<BpfApi*>(ctx);
+    if (bpfApi)
+    { 
+        bpfApi->m_eventCallbackFn(static_cast<struct data *>(data));
+    }
+}
+
+
+int bump_memlock_rlimit(void)
+{
+	struct rlimit rlim_new = {
+		.rlim_cur = RLIM_INFINITY,
+		.rlim_max = RLIM_INFINITY,
+	};
+
+	return setrlimit(RLIMIT_MEMLOCK, &rlim_new);
+}
+
 // BCC specific
 // void BpfApi::CleanBuildDir()
 // {
@@ -52,28 +74,48 @@ BpfApi::~BpfApi()
 //     // resolves DSEN-13711
 //     IGNORE_UNUSED_RETURN_VALUE(fs::remove_all("/var/tmp/bcc"));
 // }
-
-bool BpfApi::Init(const std::string & bpf_program)
+int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
 {
-    m_sensor = sensor_bpf__open()
-    if (!m_sensor)
-    {
+
+	return vfprintf(stderr, format, args);
+}
+
+
+bool BpfApi::Init(void)
+{
+    libbpf_set_print(libbpf_print_fn);
+
+    // Libbpf specific
+    if ((bump_memlock_rlimit())) {
+        m_ErrorMessage =  "failed to increase rlimit";
         return false;
     }
 
-    bool kptr_result = GetKptrRestrict(m_kptr_restrict_orig);
-    if (kptr_result && m_kptr_restrict_orig >= 2)
-    {
-        m_bracket_kptr_restrict = true;
+    m_sensor = sensor_bpf__open_and_load();
+    if (!m_sensor)
+    {   
+        m_ErrorMessage = "failed to open BPF object";
+        return false;
     }
+
+    // bool kptr_result = GetKptrRestrict(m_kptr_restrict_orig);
+    // if (kptr_result && m_kptr_restrict_orig >= 2)
+    // {
+    //     m_bracket_kptr_restrict = true;
+    // }
+
+    
 
     //CleanBuildDir();
 
-    if (sensor_bpf__load(m_sensor)) {
-    {
-        m_ErrorMessage = result.msg();
-        return false
-    }
+    // int ret = sensor_bpf__load(m_sensor);
+    // if (ret)
+    // {
+    //     //printf("error %d\n", ret);
+    //     m_ErrorMessage = "Failed to load sensor bpf program";
+    //     return false;
+    // }
+    printf("bpf program loaded successfuly\n");
 
 // TODO: Legacy kernel support
     // A compile time BPF program will create map "has_lru".
@@ -97,10 +139,10 @@ void BpfApi::Reset()
 {
     // Calling ebpf::BPF::detach_all multiple times on the same object results in double free and segfault.
     // ebpf::BPF::~BPF calls detach_all so the best thing is to delete the object.
-    if (m_BPF)
-    {
-        m_BPF.reset();
-    }
+    // if (m_BPF)
+    // {
+    //     m_BPF.reset();
+    // }
 }
 
 // TODO: Legacy kernel support
@@ -145,56 +187,31 @@ void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
     // }
 }
 
+bool BpfApi::AttachAllProbes(void) {
+    if (sensor_bpf__load(m_sensor)) {
+        m_ErrorMessage = "Failed to attach sensor";
+        return false;
+    }
+    return true;
+    
+}
+
 bool BpfApi::AttachProbe(const char * name,
                          const char * callback,
-                         ProbeType    type)
+                         bool is_kretprobe)
 {
-    if (!m_BPF)
+    if (!m_sensor)
     {
         return false;
     }
 
-    std::string           alternate;
-    bpf_probe_attach_type attach_type;
-    switch (type)
-    {
-    case ProbeType::LookupEntry:
-        LookupSyscallName(name, alternate);
-        name = alternate.c_str();
-        // https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html#index-Wimplicit-fallthrough
-        [[fallthrough]];
-    case ProbeType::Entry:
-        attach_type = BPF_PROBE_ENTRY;
-        break;
-    case ProbeType::LookupReturn:
-        LookupSyscallName(name, alternate);
-        name = alternate.c_str();
-        // https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html#index-Wimplicit-fallthrough
-        [[fallthrough]];
-    case ProbeType::Return:
-        attach_type = BPF_PROBE_RETURN;
-        break;
-    // case ProbeType::Tracepoint:
-    // {
-    //     auto result = m_BPF->attach_tracepoint(name, callback);
-    //     if (!result.ok())
-    //     {
-    //         m_ErrorMessage = result.msg();
-    //     }
-
-    //     return result.ok();
-    // }
-    default:
-        return false;
+    struct bpf_program *func = bpf_object__find_program_by_name(m_sensor->obj, name);
+    if ((libbpf_get_error(bpf_program__attach_kprobe(func, is_kretprobe, callback)))) {
+        m_ErrorMessage = "failed to attach";
+        //return false;
     }
-
-    auto result = bpf_program__attach_kprobe(name, attach_type == BPF_PROBE_RETURN, callback);
-    if (!result.ok())
-    {
-        m_ErrorMessage = result.msg();
-    }
-
-    return result.ok();
+    
+    return true;
 }
 
 bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
@@ -206,7 +223,13 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 
     m_eventCallbackFn = std::move(callback);
 
-    m_events_pb = perf_buffer__new(m_fd, 1024, on_perf_submit, nullptr, static_cast<void*>(this), nullptr);
+    int map_fd = bpf_object__find_map_fd_by_name(m_sensor->obj, "my_map");
+    if (map_fd < 0) {
+        m_ErrorMessage = "ERROR: finding a map in obj file failed";
+        return false;
+    }
+
+    m_events_pb = perf_buffer__new(map_fd, 1024, on_perf_submit_libbpf, nullptr, this, nullptr);
     if (!m_events_pb)
     {
         m_ErrorMessage = "Failed creating events perf buffer";
@@ -217,7 +240,7 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 
 int BpfApi::PollEvents()
 {
-    return perf_buffer__poll(m_sensor, POLL_TIMEOUT_MSc);
+    return perf_buffer__poll(m_events_pb, POLL_TIMEOUT_MS);
 }
 
 bool BpfApi::GetKptrRestrict(long &kptr_restrict_value)
@@ -294,15 +317,6 @@ void BpfApi::OnEvent(bpf_probe::Data data)
 
     // Add the event to our internal event list
     m_event_list.emplace_back(std::move(data));
-}
-
-void BpfApi::on_perf_submit(void *ctx, int cpu, void *data, __u32 size)
-{
-    auto bpfApi = static_cast<BpfApi*>(ctx);
-    if (bpfApi)
-    { 
-        bpfApi->m_eventCallbackFn(static_cast<struct data *>(data));
-    }
 }
 
 // bool BpfApi::ClearUDPCache4()

@@ -60,6 +60,7 @@ namespace bpf_probe {
         using EventCallbackFn = std::function<void(bpf_probe::Data data)>;
 
         static const uint64_t POLL_TIMEOUT_MS = 300;
+        EventCallbackFn             m_eventCallbackFn;
 
         enum class ProbeType
         {
@@ -72,16 +73,19 @@ namespace bpf_probe {
 
         virtual ~IBpfApi() = default;
 
-        virtual bool Init(const std::string & bpf_program) = 0;
+        virtual bool Init() = 0;
 
         virtual void Reset() = 0;
 
-        virtual bool IsLRUCapable() const = 0;
+        //virtual bool IsLRUCapable() const = 0;
 
         virtual bool AttachProbe(
             const char * name,
             const char * callback,
-            ProbeType     type) = 0;
+            bool is_kretprobe) = 0;
+
+        virtual bool AttachAllProbes(void) = 0;
+
 
         virtual bool RegisterEventCallback(EventCallbackFn callback) = 0;
 
@@ -92,20 +96,20 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
-        virtual bool ClearUDPCache4() = 0;
+        // virtual bool ClearUDPCache4() = 0;
 
-        virtual bool ClearUDPCache6() = 0;
+        // virtual bool ClearUDPCache6() = 0;
 
-        virtual bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                                     const bpf_probe::ip_entry &value) = 0;
+        // virtual bool InsertUDPCache4(const bpf_probe::ip_key &key,
+        //                              const bpf_probe::ip_entry &value) = 0;
 
-        virtual bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) = 0;
+        // virtual bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) = 0;
 
-        virtual bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                          bpf_probe::ip_entry &value) = 0;
+        // virtual bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
+        //                                   bpf_probe::ip_entry &value) = 0;
 
-        virtual bool GetEntryUDPCache4(const uint32_t &pid,
-                                       bpf_probe::ip_key &value) = 0;
+        // virtual bool GetEntryUDPCache4(const uint32_t &pid,
+        //                                bpf_probe::ip_key &value) = 0;
 
         static const char *TypeToString(uint8_t type)
         {
@@ -154,7 +158,6 @@ namespace bpf_probe {
 
     protected:
         std::string                 m_ErrorMessage;
-        EventCallbackFn             m_eventCallbackFn;
     };
 
     class BpfApi
@@ -164,14 +167,17 @@ namespace bpf_probe {
         BpfApi();
         virtual ~BpfApi();
 
-        bool Init(const std::string & bpf_program) override;
+
+        bool Init() override;
         void Reset() override;
-        bool IsLRUCapable() const override;
+        //bool IsLRUCapable() const override;
 
         bool AttachProbe(
             const char * name,
             const char * callback,
-            ProbeType     type) override;
+            bool is_kretprobe) override;
+
+        bool AttachAllProbes(void);
 
         bool RegisterEventCallback(EventCallbackFn callback) override;
 
@@ -182,20 +188,20 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
-        bool ClearUDPCache4() override;
+        // bool ClearUDPCache4() override;
 
-        bool ClearUDPCache6() override;
+        // bool ClearUDPCache6() override;
 
-        bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                             const bpf_probe::ip_entry &value) override;
+        // bool InsertUDPCache4(const bpf_probe::ip_key &key,
+        //                      const bpf_probe::ip_entry &value) override;
 
-        bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override;
+        // bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override;
 
-        bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                  bpf_probe::ip_entry &value) override;
+        // bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
+        //                           bpf_probe::ip_entry &value) override;
 
-        bool GetEntryUDPCache4(const uint32_t &pid,
-                               bpf_probe::ip_key &value) override;
+        // bool GetEntryUDPCache4(const uint32_t &pid,
+        //                        bpf_probe::ip_key &value) override;
 
     private:
 
