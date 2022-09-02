@@ -10,7 +10,6 @@ include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/-/raw/c702b677e1fecff
 # Gitlab CI configuration script for event-collector-app.
 variables:
   ARTIFACTORY_PATH: https://${ARTIFACTORY_URL}/artifactory
-  ARTIFACTORY_PROBE_PATH: carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
   BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
 
 stages:
@@ -69,11 +68,21 @@ makefile_test:
 .deploy_check_probe_pkg: &deploy_check_probe_pkg |
   get_ci_variables
   if [[ ${PACKAGES_TO_BUILD} = *bpf_probe* ]]; then
-      echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
-      filename=workspace/bpf_probe/build/install-packages/check-probe-${BUILD_VERSION}.tar.gz
-      echo $filename
+      ARTIFACTORY_BASE_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
+      for arch in "x86_64" "aarch64"
+      do
+          ARTIFACTORY_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${arch}/${CI_COMMIT_REF_NAME}
+          echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+          filename=workspace/bpf_probe/build/install-packages/${arch}/check-probe-${BUILD_VERSION}.tar.gz
+          echo $filename
 
-      curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+          curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+
+          if [ "${arch}" == "x86_64" ]; then
+              echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_BASE_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+              curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_BASE_PROBE_PATH/" -T  $filename >/dev/null
+          fi
+      done
   else
       echo "Skipping deployment because no new version of bpf_probe was built"
   fi
