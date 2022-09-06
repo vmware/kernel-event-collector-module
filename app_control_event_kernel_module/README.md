@@ -18,7 +18,7 @@ userspace entrypoints that may contain more helpful context clues before
 hitting the requesting acess control.
 
 ## Supported Kernel Versions
-The kernel module currently support EL7 and EL8 based distros. However
+The kernel module currently support EL7, EL8 and EL9 based distros. However
 this could support other kernels with some better kver checks. Source does
 compile for some EL6 kernels but is not supported.
 
