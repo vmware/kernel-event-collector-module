@@ -973,7 +973,7 @@ out:
 
 // Must Not Stall
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
-#if RHEL_MAJOR == 8 && RHEL_MINOR == 0
+#if defined(RHEL_MAJOR) && defined(RHEL_MINOR) && RHEL_MAJOR == 8 && RHEL_MINOR == 0
 int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
                      int sig, const struct cred *cred)
 #else
