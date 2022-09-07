@@ -111,22 +111,6 @@ deploy_branch:
   stage: deploy_branch
   when: manual
 
-.run_publish_github: &run_publish_github |
-  source workspace/ci_variables
-  echo "Branch is ${CI_COMMIT_REF_NAME}"
-  git branch -D "${CI_COMMIT_REF_NAME}" &> /dev/null || true
-  git fetch --prune &> /dev/null || true
-  git checkout -B "${CI_BUILD_REF_NAME}" "${CI_BUILD_REF}"
-
-  if [[ ${PACKAGES_TO_BUILD} = *app_control_event_kernel* ]]
-  then
-    git remote add upstream https://github.com/vmware/app-control-event-kernel-module.git
-  else
-    git remote add upstream https://github.com/vmware/kernel-event-collector-module.git
-  fi
-  git config credential.https://github.com.helper "${GITHUB_CREDENTIAL_HELPER}"
-  git push upstream "${CI_BUILD_REF_NAME}"
-
 publish_to_github:
   stage: publish
   tags:
@@ -134,7 +118,14 @@ publish_to_github:
   before_script:
     - echo "Overriding global build script" > /dev/null
   allow_failure: true
-  script: *run_publish_github
+  script:
+    - echo "Branch is ${CI_COMMIT_REF_NAME}"
+    - git branch -D "${CI_COMMIT_REF_NAME}" &> /dev/null || true
+    - git fetch --prune &> /dev/null || true
+    - git checkout -B "${CI_BUILD_REF_NAME}" "${CI_BUILD_REF}"
+    - git remote add upstream https://github.com/vmware/kernel-event-collector-module.git
+    - git config credential.https://github.com.helper "${GITHUB_CREDENTIAL_HELPER}"
+    - git push upstream "${CI_BUILD_REF_NAME}"
   only:
     - master
     - /^release-/
