@@ -512,7 +512,7 @@ static void submit_all_args(struct pt_regs *ctx,
 {
     void *argp = NULL;
     int index = 0;
-    
+
 #pragma unroll
     for (int i = 0; i < MAXARG; i++) {
         data->header.state = PP_ENTRY_POINT;
@@ -597,87 +597,50 @@ out:
 #define MAX_PATH_ITER 24
 #endif
 static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
-				 struct vfsmount *mnt, struct path_data *data)
+				 struct vfsmount *vfsmnt, struct path_data *data)
 {
 	struct mount *real_mount = NULL;
 	struct mount *mnt_parent = NULL;
 	struct dentry *mnt_root = NULL;
-	struct dentry *new_mnt_root = NULL;
 	struct dentry *parent_dentry = NULL;
 	struct qstr sp = {};
 
-	struct dentry *root_fs_dentry = NULL;
-	struct vfsmount *root_fs_vfsmnt = NULL;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-	// We can ifdef this block to make this act more like either
-	// d_absolute_path or __d_path
-	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-	if (task->fs) {
-		// We can get root fs path from mnt_ns or task
-		root_fs_vfsmnt = task->fs->root.mnt;
-		root_fs_dentry = task->fs->root.dentry;
-	}
-#else
-	u32 index = 0;
-	struct dentry **t_dentry = (struct dentry **)root_fs.lookup(&index);
-	if (t_dentry) {
-		root_fs_dentry = *t_dentry;
-	}
-	index = 1;
-	struct vfsmount **t_vfsmount =
-		(struct vfsmount **)root_fs.lookup(&index);
-	if (t_vfsmount) {
-		root_fs_vfsmnt = *t_vfsmount;
-	}
-#endif
-
-	mnt_root = mnt->mnt_root;
+	bpf_probe_read(&mnt_root, sizeof(struct dentry *), &vfsmnt->mnt_root);
 
 	// poorman's container_of
-	real_mount = ((void *)mnt) - offsetof(struct mount, mnt);
+	real_mount = ((void *)vfsmnt) - offsetof(struct mount, mnt);
 
-	// compiler doesn't seem to mind accessing stuff without bpf_probe_read
-	mnt_parent = real_mount->mnt_parent;
-
-	/*
-	 * File Path Walking. This may not be completely accurate but
-	 * should hold for most cases. Paths for private mount namespaces might work.
-	 */
 	data->header.state = PP_PATH_COMPONENT;
 #pragma clang loop unroll(full)
 	for (int i = 1; i < MAX_PATH_ITER; ++i) {
-		if (dentry == root_fs_dentry) {
-			goto out;
-		}
+		bpf_probe_read(&parent_dentry, sizeof(struct dentry *), &dentry->d_parent);
 
-		bpf_probe_read(&parent_dentry, sizeof(parent_dentry),
-				   &(dentry->d_parent));
-		if (dentry == parent_dentry || dentry == mnt_root) {
-			bpf_probe_read(&dentry, sizeof(struct dentry *),
-					   &(real_mount->mnt_mountpoint));
-			real_mount = mnt_parent;
-			bpf_probe_read(&mnt, sizeof(struct vfsmnt *),
-					   &(real_mount->mnt));
-			mnt_root = mnt->mnt_root;
-			if (mnt == root_fs_vfsmnt) {
-				goto out;
+		if (dentry == mnt_root || dentry == parent_dentry) {
+			bpf_probe_read(&mnt_parent, sizeof(struct mount *), &real_mount->mnt_parent);
+			if (dentry != mnt_root) {
+				// We reached root, but not mount root - escaped?
+				break;
 			}
 
-			// prefetch next real mount parent.
-			mnt_parent = real_mount->mnt_parent;
-			if (mnt_parent == real_mount) {
-				goto out;
+			if (real_mount != mnt_parent) {
+				// We reached root, but not global root - continue with mount point path
+				bpf_probe_read(&dentry, sizeof(struct dentry *), &real_mount->mnt_mountpoint);
+				bpf_probe_read(&real_mount, sizeof(struct mount *), &real_mount->mnt_parent);
+				vfsmnt = &real_mount->mnt;
+				bpf_probe_read(&mnt_root, sizeof(struct dentry *), &vfsmnt->mnt_root);
+				continue;
 			}
-		} else {
-			bpf_probe_read(&sp, sizeof(sp),
-					   (void *)&(dentry->d_name));
-			__write_fname(data, sp.name);
-			dentry = parent_dentry;
-			send_event(ctx, data, PATH_MSG_SIZE(data));
+
+			// Global root - path fully parsed
+			break;
 		}
+
+		bpf_probe_read(&sp, sizeof(sp), (void *)&(dentry->d_name));
+		__write_fname(data, sp.name);
+		dentry = parent_dentry;
+		send_event(ctx, data, PATH_MSG_SIZE(data));
 	}
 
-out:
 	data->header.state = PP_FINALIZED;
 	return 0;
 }
