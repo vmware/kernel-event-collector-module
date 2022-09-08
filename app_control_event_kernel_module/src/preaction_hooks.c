@@ -816,9 +816,6 @@ static void dynsec_do_symlink(const char __user *target,
         target_path = NULL;
         return;
     }
-    if (len == 0) {
-        target_path[len] = 0;
-    }
 
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
