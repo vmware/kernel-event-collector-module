@@ -67,7 +67,7 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
-        bool Init(const std::string & bpf_prog) override
+        bool Init() override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
@@ -78,16 +78,16 @@ namespace tdd_mock {
         {
         }
 
-        bool IsLRUCapable() const override
+        /*bool IsLRUCapable() const override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
-
+*/
         bool AttachProbe(const char * name,
-                                      const char * callback,
-                                      ProbeType    type) override
+                         const char * callback,
+                         bool is_kretprobe) override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
@@ -108,6 +108,7 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).intReturnValue();
         }
 
+/*
         bool ClearUDPCache4() override
         {
             ::mock(BPF_API_SCOPE)
@@ -152,6 +153,7 @@ namespace tdd_mock {
                 .actualCall(__FUNCTION__);
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
+*/
     };
 }
 }

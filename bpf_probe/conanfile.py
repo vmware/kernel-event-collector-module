@@ -13,7 +13,7 @@ class SHORT_NAME(CbConanFile):
     version  = "PACKAGE_VERSION"
     settings = "os", "compiler", "build_type", "arch"
     generators = "cmake"
-    requires = "LLVM_VERSION", "ELFUTILS_VERSION", "BCC_VERSION", "BOOST_VERSION"
+    requires =  "ELFUTILS_VERSION", "BOOST_VERSION"
     build_requires = "CPPUTEST_VERSION"
     default_options = "Boost:shared=False", \
                       "Boost:without_program_options=False", \

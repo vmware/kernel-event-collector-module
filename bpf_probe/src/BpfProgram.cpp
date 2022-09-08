@@ -70,131 +70,132 @@ struct kprobe {
 // TODO: add __x64_ prefix to sys_* hook names only for kernels >= 4.17
 const struct kprobe kprobes[] = {
         {
-                .program_name = "syscall__on_sys_execve",
-                .kprobe_name = "__x64_sys_execve",
+                .program_name = (char *)"syscall__on_sys_execve",
+                .kprobe_name = (char *)"__x64_sys_execve",
                 .is_kretprobe = false
         },
         {
-                .program_name = "syscall__on_sys_execveat",
-                .kprobe_name = "__x64_sys_execveat",
+                .program_name = (char *)"syscall__on_sys_execveat",
+                .kprobe_name = (char *)"__x64_sys_execveat",
                 .is_kretprobe = false
         },
         {
-                .program_name = "after_sys_execve",
-                .kprobe_name = "__x64_sys_execve",
+                .program_name = (char *)"after_sys_execve",
+                .kprobe_name = (char *)"__x64_sys_execve",
                 .is_kretprobe = true
         },
         {
-                .program_name = "after_sys_execve",
-                .kprobe_name = "__x64_sys_execveat",
+                .program_name = (char *)"after_sys_execve",
+                .kprobe_name = (char *)"__x64_sys_execveat",
                 .is_kretprobe = true
         },
         {
-                .program_name = "trace_connect_v4_entry",
-                .kprobe_name = "tcp_v4_connect",
+                .program_name = (char *)"trace_connect_v4_entry",
+                .kprobe_name = (char *)"tcp_v4_connect",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_connect_v6_entry",
-                .kprobe_name = "tcp_v6_connect",
+                .program_name = (char *)"trace_connect_v6_entry",
+                .kprobe_name = (char *)"tcp_v6_connect",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_connect_v4_return",
-                .kprobe_name = "tcp_v4_connect",
+                .program_name = (char *)"trace_connect_v4_return",
+                .kprobe_name = (char *)"tcp_v4_connect",
                 .is_kretprobe = true
         },
         {
-                .program_name = "trace_connect_v6_return",
-                .kprobe_name = "tcp_v6_connect",
+                .program_name = (char *)"trace_connect_v6_return",
+                .kprobe_name = (char *)"tcp_v6_connect",
                 .is_kretprobe = true
         },
         {
-                .program_name = "on_security_file_free",
-                .kprobe_name = "security_file_free",
+                .program_name = (char *)"on_security_file_free",
+                .kprobe_name = (char *)"security_file_free",
                 .is_kretprobe = false
         },
         {
-                .program_name = "on_security_mmap_file",
-                .kprobe_name = "security_mmap_file",
+                .program_name = (char *)"on_security_mmap_file",
+                .kprobe_name = (char *)"security_mmap_file",
                 .is_kretprobe = false
         },
         {
-                .program_name = "on_security_file_open",
-                .kprobe_name = "security_file_open",
+                .program_name = (char *)"on_security_file_open",
+                .kprobe_name = (char *)"security_file_open",
                 .is_kretprobe = false
         },
         {
-                .program_name = "on_security_inode_unlink",
-                .kprobe_name = "security_inode_unlink",
+                .program_name = (char *)"on_security_inode_unlink",
+                .kprobe_name = (char *)"security_inode_unlink",
                 .is_kretprobe = false
         },
         {
-                .program_name = "on_security_inode_rename",
-                .kprobe_name = "security_inode_rename",
+                .program_name = (char *)"on_security_inode_rename",
+                .kprobe_name = (char *)"security_inode_rename",
                 .is_kretprobe = false
         },
         {
-                .program_name = "on_wake_up_new_task",
-                .kprobe_name = "wake_up_new_task",
+                .program_name = (char *)"on_wake_up_new_task",
+                .kprobe_name = (char *)"wake_up_new_task",
                 .is_kretprobe = false
         },
         {
-                .program_name = "on_do_exit",
-                .kprobe_name = "do_exit",
+                .program_name = (char *)"on_do_exit",
+                .kprobe_name = (char *)"do_exit",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_skb_recv_udp",
-                .kprobe_name = "__skb_recv_udp",
+                .program_name = (char *)"trace_skb_recv_udp",
+                .kprobe_name = (char *)"__skb_recv_udp",
                 .is_kretprobe = true
         },
         {
-                .program_name = "trace_accept_return",
-                .kprobe_name = "inet_csk_accept",
+                .program_name = (char *)"trace_accept_return",
+                .kprobe_name = (char *)"inet_csk_accept",
                 .is_kretprobe = true
         },
         {
-                .program_name = "trace_udp_recvmsg",
-                .kprobe_name = "udp_recvmsg",
+                .program_name = (char *)"trace_udp_recvmsg",
+                .kprobe_name = (char *)"udp_recvmsg",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_udp_recvmsg_return",
-                .kprobe_name = "udp_recvmsg",
+                .program_name = (char *)"trace_udp_recvmsg_return",
+                .kprobe_name = (char *)"udp_recvmsg",
                 .is_kretprobe = true
         },
         {
-                .program_name = "trace_udp_recvmsg",
-                .kprobe_name = "udpv6_recvmsg",
+                .program_name = (char *)"trace_udp_recvmsg",
+                .kprobe_name = (char *)"udpv6_recvmsg",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_udp_recvmsg_return",
-                .kprobe_name = "udpv6_recvmsg",
+                .program_name = (char *)"trace_udp_recvmsg_return",
+                .kprobe_name = (char *)"udpv6_recvmsg",
                 .is_kretprobe = true
         },
 
         {
-                .program_name = "trace_udp_sendmsg",
-                .kprobe_name = "udp_sendmsg",
+                .program_name = (char *)"trace_udp_sendmsg",
+                .kprobe_name = (char *)"udp_sendmsg",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_udp_sendmsg_return",
-                .kprobe_name = "udp_sendmsg",
+                .program_name = (char *)"trace_udp_sendmsg_return",
+                .kprobe_name = (char *)"udp_sendmsg",
                 .is_kretprobe = true
         },
         {
-                .program_name = "trace_udp_sendmsg",
-                .kprobe_name = "udpv6_sendmsg",
+                .program_name = (char *)"trace_udp_sendmsg",
+                .kprobe_name = (char *)"udpv6_sendmsg",
                 .is_kretprobe = false
         },
         {
-                .program_name = "trace_udp_sendmsg_return",
-                .kprobe_name = "udpv6_sendmsg",
+                .program_name = (char *)"trace_udp_sendmsg_return",
+                .kprobe_name = (char *)"udpv6_sendmsg",
                 .is_kretprobe = true
         },
+
 };
 
 bool BpfProgram::InstallHooks(

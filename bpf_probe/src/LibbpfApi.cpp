@@ -223,7 +223,7 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 
     m_eventCallbackFn = std::move(callback);
 
-    int map_fd = bpf_object__find_map_fd_by_name(m_sensor->obj, "my_map");
+    int map_fd = bpf_object__find_map_fd_by_name(m_sensor->obj, "events");
     if (map_fd < 0) {
         m_ErrorMessage = "ERROR: finding a map in obj file failed";
         return false;

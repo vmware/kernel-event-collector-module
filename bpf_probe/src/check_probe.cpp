@@ -16,7 +16,7 @@ using namespace cb_endpoint::bpf_probe;
 
 static void PrintUsage();
 static void ParseArgs(int argc, char** argv);
-static void ReadProbeSource(const std::string &probe_source);
+//static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api);
 //static bool CheckUDPMaps(BpfApi &bpf_api);
 
