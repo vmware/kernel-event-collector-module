@@ -2278,7 +2278,7 @@ static inline bool may_read_from_file(const struct file *file)
     }
 
     // Allow for reading during exec regardless of filesystem type
-    if (file->f_mode & FMODE_EXEC) {
+    if (file && (file->f_mode & FMODE_EXEC)) {
         return true;
     }
 
