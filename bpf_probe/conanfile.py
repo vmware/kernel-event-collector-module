@@ -52,10 +52,13 @@ class SHORT_NAME(CbConanFile):
 
             cmake.build()
 
+    # Would be better as a cmake.install call
     def package(self):
         self.copy("*.h", dst="include/bpf_probe", src="include", keep_path=True)
         self.copy("*.a", dst="lib", keep_path=False)
         self.copy("check_probe", dst="bin", src="bin")
+        self.copy("sensor.bpf.o*", dst="lib")
+        self.copy("sensor.skel.h", dst="include")
 
     def package_info(self):
         self.cpp_info.includedirs = ["include"]
