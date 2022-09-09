@@ -77,6 +77,33 @@ target_link_libraries(check_probe
         bpf-probe
         z rt dl pthread m)
 
+set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
+set(BPF_ELF_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.o)
+set(BPF_SKEL_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.skel.h)
+set(CLANG ${CONAN_BIN_DIRS_LLVM}/clang)
+set(BPFTOOL ${CONAN_BIN_DIRS_BPFTOOL}/bpftool)
+
+set(ARCH x86)
+set(VMLINUX_INCLUDE ${PROJECT_SOURCE_DIR}/../include/vmlinux/${ARCH})
+set(TARGET_ARCH __TARGET_ARCH_${ARCH})
+
+message("CONAN_BIN_DIRS_LLVM: ${CONAN_BIN_DIRS_LLVM}")
+message("CONAN_BIN_DIRS_BPFTOOL: ${CONAN_BIN_DIRS_BPFTOOL}")
+
+add_custom_command(
+    OUTPUT ${BPF_ELF_FILE} ${BPF_SKEL_FILE}
+    COMMAND ${CLANG} -g -O2 -Wall -Wall -fpie
+        -target bpf
+        -D${TARGET_ARCH}
+        -I${CONAN_INCLUDE_DIRS_LIBBPF}
+        -I${VMLINUX_INCLUDE}
+        -c ${BPF_C_FILE}
+        -o ${BPF_ELF_FILE}
+    COMMAND ${BPFTOOL} gen skeleton ${BPF_ELF_FILE} > ${BPF_SKEL_FILE}
+    DEPENDS ${BPF_C_FILE}
+)
+add_custom_target(bpf_skel ALL DEPENDS ${BPF_ELF_FILE} ${BPF_SKEL_FILE})
+
 add_subdirectory(tests)
 
 include(constants.cmake)
