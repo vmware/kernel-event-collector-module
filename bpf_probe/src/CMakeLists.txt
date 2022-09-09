@@ -79,8 +79,10 @@ target_link_libraries(check_probe
 
 set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
 set(BPF_ELF_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.o)
+set(BPF_ELF_FILE_UNSTRIP ${BPF_ELF_FILE}.unstripped)
 set(BPF_SKEL_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.skel.h)
 set(CLANG ${CONAN_BIN_DIRS_LLVM}/clang)
+set(LLMV_STRIP ${CONAN_BIN_DIRS_LLVM}/llvm-strip)
 set(BPFTOOL ${CONAN_BIN_DIRS_BPFTOOL}/bpftool)
 
 set(ARCH x86)
@@ -92,13 +94,14 @@ message("CONAN_BIN_DIRS_BPFTOOL: ${CONAN_BIN_DIRS_BPFTOOL}")
 
 add_custom_command(
     OUTPUT ${BPF_ELF_FILE} ${BPF_SKEL_FILE}
-    COMMAND ${CLANG} -g -O2 -Wall -Wall -fpie
+    COMMAND ${CLANG} -g -O2 -Wall
         -target bpf
         -D${TARGET_ARCH}
         -I${CONAN_INCLUDE_DIRS_LIBBPF}
         -I${VMLINUX_INCLUDE}
         -c ${BPF_C_FILE}
-        -o ${BPF_ELF_FILE}
+        -o ${BPF_ELF_FILE_UNSTRIP}
+    COMMAND ${LLMV_STRIP} -g ${BPF_ELF_FILE_UNSTRIP} -o ${BPF_ELF_FILE}
     COMMAND ${BPFTOOL} gen skeleton ${BPF_ELF_FILE} > ${BPF_SKEL_FILE}
     DEPENDS ${BPF_C_FILE}
 )
@@ -109,7 +112,8 @@ add_subdirectory(tests)
 include(constants.cmake)
 
 install(TARGETS check_probe PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
-
+install(FILES ${BPF_SKEL_FILE} DESTINATION include)
+install(FILES ${BPF_ELF_FILE} ${BPF_ELF_FILE_UNSTRIP} DESTINATION lib)
 
 set(CPACK_OUTPUT_FILE_PREFIX $ENV{BUILD_DIR}/install-packages/$ENV{CMAKE_SYSTEM_PROCESSOR})
 set(CPACK_GENERATOR "TGZ")
