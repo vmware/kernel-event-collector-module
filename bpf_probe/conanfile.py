@@ -16,7 +16,7 @@ class SHORT_NAME(CbConanFile):
     requires = (
         "LLVM_VERSION",
         "ELFUTILS_VERSION",
-        "BCC_VERSION",
+        #"BCC_VERSION",
         "BOOST_VERSION",
         "BPFTOOL_VERSION",
         "LIBBPF_VERSION",
