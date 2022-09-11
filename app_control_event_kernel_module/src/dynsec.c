@@ -9,7 +9,6 @@
 #include "symbols.h"
 
 #include "stall_reqs.h"
-#include "logging.h"
 #include "path_utils.h"
 #include "task_utils.h"
 #include "tracepoints.h"
@@ -50,12 +49,15 @@ static char lsm_hooks_str[64];
 
 bool protect_on_connect = false;
 
+uint32_t stall_timeout_ctr_limit = DYNSEC_STALL_TIMEOUT_CTR_LIMIT;
+
 // Hooks to only allow for kmod instance. Superset.
 module_param_string(lsm_hooks, lsm_hooks_str,
                     sizeof(lsm_hooks_str), 0644);
 
 module_param(process_hooks, uint, 0644);
 module_param(protect_on_connect, bool, 0644);
+module_param(stall_timeout_ctr_limit, uint, 0644);
 
 // Special Globals
 DEFINE_MUTEX(global_config_lock);
@@ -75,7 +77,7 @@ static void print_config(struct dynsec_config *dynsec_config)
             dynsec_config->stall_timeout_continue);
     pr_info("dynsec_config: stall_timeout_deny:%u\n",
             dynsec_config->stall_timeout_deny);
-    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d",
+    pr_info("dynsec_config: lazy_notifier:%d queue_threshold:%d notify_threshold:%d\n",
             dynsec_config->lazy_notifier, dynsec_config->queue_threshold,
             dynsec_config->notify_threshold);
     pr_info("dynsec_config: send_files %#x\n", dynsec_config->send_files);
@@ -84,6 +86,8 @@ static void print_config(struct dynsec_config *dynsec_config)
     pr_info("dynsec_config: lsm_hooks:%#llx process_hooks:%#llx preaction_hooks:%#llx\n",
             dynsec_config->lsm_hooks, dynsec_config->process_hooks,
             dynsec_config->preaction_hooks);
+    pr_info("dynsec_config: file system stall mask: %#llx\n", 
+            dynsec_config->file_system_stall_mask);
 }
 
 static void setup_lsm_hooks(void)
@@ -112,8 +116,8 @@ static void setup_lsm_hooks(void)
 
 static int __init dynsec_init(void)
 {
-    DS_LOG(DS_INFO, "Initializing Dynamic Security Module Brand(%s)",
-           CB_APP_MODULE_NAME);
+    pr_info("Initializing Dynamic Security Module Brand(%s)\n",
+           THIS_MODULE->name);
 
     // Explicitly enable protection on connect
     (void)dynsec_protect_init();
@@ -130,12 +134,12 @@ static int __init dynsec_init(void)
     dynsec_task_utils_init();
 
     if (!dynsec_init_tp(&global_config)) {
-        pr_info("Unable to load process tracepoints\n");
+        pr_err("Unable to load process tracepoints\n");
         return -EINVAL;
     }
 
     if (!dynsec_init_lsmhooks(&global_config)) {
-        pr_info("Unable to load LSM hooks\n");
+        pr_err("Unable to load LSM hooks\n");
         dynsec_tp_shutdown();
         return -EINVAL;
     }
@@ -155,6 +159,8 @@ static int __init dynsec_init(void)
     }
     register_preaction_hooks(&global_config);
 
+    dynsec_register_proc_entries();
+
     pr_info("Loaded: %s\n", CB_APP_MODULE_NAME);
     print_config(&global_config);
 
@@ -168,8 +174,9 @@ static int __init dynsec_init(void)
 
 static void __exit dynsec_exit(void)
 {
-    DS_LOG(DS_INFO, "Exiting: %s",
-           CB_APP_MODULE_NAME);
+    pr_info("Exiting: %s\n", THIS_MODULE->name);
+
+    dynsec_cleanup_proc_entries();
 
     dynsec_protect_shutdown();
 
@@ -189,4 +196,5 @@ static void __exit dynsec_exit(void)
 module_init(dynsec_init);
 module_exit(dynsec_exit);
 
+MODULE_AUTHOR("VMware, Inc.");
 MODULE_LICENSE("GPL");

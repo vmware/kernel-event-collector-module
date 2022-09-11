@@ -13,11 +13,13 @@
 #include "preaction_hooks.h"
 #include "symbols.h"
 #include "dynsec.h"
+#include "fs_utils.h"
 #include "lsm_mask.h"
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
 #include "factory.h"
+#include "mem.h"
 
 
 struct syscall_hooks {
@@ -108,6 +110,13 @@ static void dynsec_do_setattr(struct iattr *iattr, const struct path *path)
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
+    // check if connected client is interested in this
+    // file system type
+    if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
+        return;
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_SETATTR, DYNSEC_HOOK_TYPE_SETATTR,
                                report_flags, GFP_ATOMIC);
 
@@ -126,10 +135,16 @@ static int dynsec_chmod_common(struct kretprobe_instance *ri, struct pt_regs *re
     DECL_ARG_1(const struct path *, path);
     DECL_ARG_2(umode_t, mode);
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    // check if connected client is interested in this
+    if (path->dentry && !__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         goto out;
     }
 
@@ -157,10 +172,16 @@ static int dynsec_chown_common(struct kretprobe_instance *ri, struct pt_regs *re
     DECL_ARG_2(uid_t, user);
     DECL_ARG_3(gid_t, group);
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (!path || !path->dentry || !path->mnt) {
+        goto out;
+    }
+
+    // check if connected client is interested in this
+    if (!__is_client_concerned_filesystem(path->dentry->d_sb)) {
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_SETATTR, GFP_ATOMIC);
         goto out;
     }
 
@@ -339,11 +360,13 @@ out:
 static void dynsec_do_create(int dfd, const char __user *filename,
                              int flags, umode_t umode)
 {
+    int ret;
+    struct path path;
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
     int lookup_flags = LOOKUP_FOLLOW;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -364,10 +387,19 @@ static void dynsec_do_create(int dfd, const char __user *filename,
         report_flags |= DYNSEC_REPORT_SELF;
     }
 
+    ret = user_path_at(dfd, filename, lookup_flags, &path);
+    if (!ret) {
+        path_put(&path);
+        return;
+    }
+    if (ret != -ENOENT) {
+        return;
+    }
+
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_CREATE, DYNSEC_HOOK_TYPE_OPEN,
                                report_flags, GFP_KERNEL);
 
-    if (!fill_in_preaction_create(event, dfd, filename, flags, umode)) {
+    if (!fill_in_preaction_create(event, dfd, filename, flags, umode | S_IFREG)) {
         prepare_non_report_event(DYNSEC_EVENT_TYPE_CREATE, GFP_KERNEL);
         free_dynsec_event(event);
         return;
@@ -421,7 +453,7 @@ DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
     // copy in how
 
     if (!copy_from_user(&khow, how, sizeof(khow))) {
-        dynsec_do_create(dfd, filename, khow->flags, khow->mode);
+        dynsec_do_create(dfd, filename, khow.flags, khow.mode);
     }
 
     return ret_sys(openat2, dfd, filename, how, usize);
@@ -431,12 +463,18 @@ DEF_DYNSEC_SYS(openat2, int dfd, const char __user *filename,
 DEF_DYNSEC_SYS(mknod, const char __user *filename,
                umode_t mode, unsigned dev)
 {
+    umode_t local_mode;
     SYS_ARG_1(const char __user *, filename);
     SYS_ARG_2(umode_t, mode);
     SYS_ARG_3(unsigned, dev);
 
-    if ((mode & S_IFMT) == S_IFREG) {
-        dynsec_do_create(AT_FDCWD, filename, O_CREAT, mode);
+    // Empty file type defaults to regular file
+    local_mode = mode;
+    if (!(local_mode & S_IFMT)) {
+        local_mode |= S_IFREG;
+    }
+    if (S_ISREG(local_mode)) {
+        dynsec_do_create(AT_FDCWD, filename, O_CREAT, local_mode);
     }
     return ret_sys(mknod, filename, mode, dev);
 }
@@ -444,13 +482,19 @@ DEF_DYNSEC_SYS(mknod, const char __user *filename,
 DEF_DYNSEC_SYS(mknodat, int dfd, const char __user *filename,
                umode_t mode, unsigned dev)
 {
+    umode_t local_mode;
     SYS_ARG_1(int, dfd);
     SYS_ARG_2(const char __user *, filename);
     SYS_ARG_3(umode_t, mode);
     SYS_ARG_4(unsigned, dev);
 
-    if ((mode & S_IFMT) == S_IFREG) {
-        dynsec_do_create(dfd, filename, O_CREAT, mode);
+    // Empty file type defaults to regular file
+    local_mode = mode;
+    if (!(local_mode & S_IFMT)) {
+        local_mode |= S_IFREG;
+    }
+    if (S_ISREG(local_mode)) {
+        dynsec_do_create(dfd, filename, O_CREAT, local_mode);
     }
     return ret_sys(mknodat, dfd, filename, mode, dev);
 }
@@ -506,7 +550,7 @@ static bool dynsec_do_rename(int olddfd, const char __user *oldname,
     uint64_t local_intent_req_id = 0;
     bool filled;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return false;
     }
 
@@ -599,7 +643,7 @@ static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
     struct dynsec_event *event = NULL;
     uint16_t report_flags = DYNSEC_REPORT_AUDIT|DYNSEC_REPORT_INTENT;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -618,7 +662,7 @@ static void dynsec_do_mkdir(int dfd, const char __user *pathname, umode_t umode)
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MKDIR, DYNSEC_HOOK_TYPE_MKDIR,
                                report_flags, GFP_KERNEL);
-    if (!fill_in_preaction_create(event, dfd, pathname, O_CREAT, umode)) {
+    if (!fill_in_preaction_create(event, dfd, pathname, O_CREAT, umode | S_IFDIR)) {
         prepare_non_report_event(DYNSEC_EVENT_TYPE_MKDIR, GFP_KERNEL);
         free_dynsec_event(event);
         return;
@@ -656,7 +700,7 @@ static void dynsec_do_unlink(int dfd, const char __user *pathname,
     bool filled;
     umode_t mode;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -678,6 +722,14 @@ static void dynsec_do_unlink(int dfd, const char __user *pathname,
     }
     else if (!(S_ISLNK(mode) || S_ISREG(mode) || S_ISDIR(mode))) {
         path_put(&path);
+        return;
+    }
+
+    // check if connected client is interested in this
+    // file system type
+    if (!__is_client_concerned_filesystem(path.dentry->d_sb)) {
+        path_put(&path);
+        prepare_non_report_event(DYNSEC_EVENT_TYPE_UNLINK, GFP_KERNEL);
         return;
     }
 
@@ -737,7 +789,7 @@ static void dynsec_do_symlink(const char __user *target,
     char *target_path = NULL;
     bool filled;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -749,10 +801,12 @@ static void dynsec_do_symlink(const char __user *target,
     ret = user_path_at(newdfd, linkpath, 0, &path);
     if (!ret) {
         path_put(&path);
+        kfree(target_path);
+        target_path = NULL;
         return;
     }
     len = strncpy_from_user(target_path, target, PATH_MAX);
-    if (unlikely(len < 0)) {
+    if (unlikely(len <= 0)) {
         kfree(target_path);
         target_path = NULL;
         return;
@@ -761,12 +815,6 @@ static void dynsec_do_symlink(const char __user *target,
         kfree(target_path);
         target_path = NULL;
         return;
-    }
-    if (unlikely(len == 0)) {
-        kfree(target_path);
-        target_path = NULL;
-    } else {
-        target_path[len] = 0;
     }
 
     if (task_in_connected_tgid(current)) {
@@ -818,7 +866,7 @@ static void dynsec_do_link(int olddfd, const char __user *oldname,
     bool filled;
     int lookup_flags = 0;
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -1019,55 +1067,6 @@ static void init_our_syscall_hooks(uint64_t lsm_hooks)
     ours = &in_our_kmod;
 }
 
-#ifdef CONFIG_X86_64
-#define GPF_DISABLE() write_cr0(read_cr0() & (~ 0x10000))
-#define GPF_ENABLE()  write_cr0(read_cr0() | 0x10000)
-
-static inline bool set_page_state_rw(void **tbl, unsigned long *old_page_rw)
-{
-    unsigned int level;
-    unsigned long irq_flags;
-    pte_t *pte = NULL;
-
-    local_irq_save(irq_flags);
-    local_irq_disable();
-
-    pte = lookup_address((unsigned long)tbl, &level);
-    if (!pte) {
-        local_irq_restore(irq_flags);
-        return false;
-    }
-
-    *old_page_rw = pte->pte & _PAGE_RW;
-    pte->pte |= _PAGE_RW;
-
-    local_irq_restore(irq_flags);
-    return true;
-}
-
-static inline void restore_page_state(void **tbl, unsigned long page_rw)
-{
-    unsigned int level;
-    unsigned long irq_flags;
-    pte_t *pte = NULL;
-
-    local_irq_save(irq_flags);
-    local_irq_disable();
-
-    pte = lookup_address((unsigned long)tbl, &level);
-    if (!pte)
-    {
-        local_irq_restore(irq_flags);
-        return;
-    }
-
-    // If the page state was originally RO, restore it to RO.
-    // We don't just assign the original value back here in case some other bits were changed.
-    if (!page_rw) pte->pte &= ~_PAGE_RW;
-    local_irq_restore(irq_flags);
-}
-#endif /* CONFIG_X86_64 */
-
 static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 {
     unsigned long flags;
@@ -1092,7 +1091,7 @@ static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
     get_cpu();
     GPF_DISABLE();
 
-    if (!set_page_state_rw(table, &page_rw_set)) {
+    if (!set_page_state_rw((void *)table, &page_rw_set)) {
         goto out_unlock;
     }
 
@@ -1132,7 +1131,7 @@ static void __set_syscall_table(struct syscall_hooks *hooks, void **table)
 #undef set_syscall
 #undef cond_set_syscall
 
-    restore_page_state(table, page_rw_set);
+    restore_page_state((void *)table, page_rw_set);
 
 out_unlock:
     GPF_ENABLE();
@@ -1165,9 +1164,6 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
         return -ENOMEM;
     }
 
-    symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
-    old_symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
-
     // Don't assume existing sys_call_table addr is the same
     find_symbol_indirect("sys_call_table",
                          (unsigned long *)&curr_table);
@@ -1180,7 +1176,20 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
         diff += 1;
     }
     if (!curr_table) {
+        kfree(curr_hooks);
         return diff;
+    }
+
+    symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
+    if (!symname) {
+        kfree(curr_hooks);
+        return -ENOMEM;
+    }
+    old_symname = kzalloc(KSYM_NAME_LEN + 1, GFP_KERNEL);
+    if (!old_symname) {
+        kfree(curr_hooks);
+        kfree(symname);
+        return -ENOMEM;
     }
 
 #define __cmp_syscall(NAME, MASK, x) \
@@ -1268,7 +1277,7 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
         if (ret >= 0) {
             enabled_chmod_common = true;
         } else {
-            pr_info("Unable to hook kretprobe: %d %s\n", ret,
+            pr_err("Unable to hook kretprobe: %d %s\n", ret,
                     kret_dynsec_chmod_common.kp.symbol_name);
             success = false;
         }
@@ -1278,7 +1287,7 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
             enabled_chown_common = true;
             preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
         } else {
-            pr_info("Unable to hook kretprobe: %d %s\n", ret,
+            pr_err("Unable to hook kretprobe: %d %s\n", ret,
                     kret_dynsec_chown_common.kp.symbol_name);
             success = false;
         }
@@ -1325,7 +1334,7 @@ bool register_preaction_hooks(struct dynsec_config *dynsec_config)
     mutex_lock(&lookup_lock);
     get_syscall_tbl();
     if (!sys_call_table) {
-        pr_info("Failed to grab syscall hooks\n");
+        pr_err("Failed to grab syscall hooks\n");
         mutex_unlock(&lookup_lock);
         return false;
     }

@@ -203,7 +203,6 @@ bool BpfProgram::InstallHooks(
     )
 {
     int num_of_kprobes = sizeof(kprobes) / sizeof(kprobes[0]);
-
     for (int i = 0; i < num_of_kprobes; i++) {
         struct kprobe kprobe = kprobes[i];
         if (!bpf_api.AttachProbe(kprobe.program_name, kprobe.kprobe_name, kprobe.is_kretprobe)) {
@@ -214,4 +213,3 @@ bool BpfProgram::InstallHooks(
     return true;
 
 }
-

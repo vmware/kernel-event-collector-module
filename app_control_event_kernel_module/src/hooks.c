@@ -22,7 +22,14 @@
 #include "path_utils.h"
 #include "wait.h"
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0) || \
+    (defined(RHEL_MAJOR) && defined(RHEL_MINOR) && \
+        RHEL_MAJOR == 8 && RHEL_MINOR >= 6)
+// TODO: Determine if bprm_creds_from_file requires a new hook
+int dynsec_bprm_creds_for_exec(struct linux_binprm *bprm)
+#else
 int dynsec_bprm_set_creds(struct linux_binprm *bprm)
+#endif
 {
     struct dynsec_event *event = NULL;
     int ret = 0;
@@ -41,7 +48,7 @@ int dynsec_bprm_set_creds(struct linux_binprm *bprm)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -93,9 +100,14 @@ int dynsec_inode_unlink(struct inode *dir, struct dentry *dentry)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -161,9 +173,14 @@ int dynsec_inode_rmdir(struct inode *dir, struct dentry *dentry)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -225,9 +242,14 @@ int dynsec_inode_rename(struct inode *old_dir, struct dentry *old_dentry,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(old_dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -350,9 +372,14 @@ int dynsec_inode_setattr(struct dentry *dentry, struct iattr *attr)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -404,9 +431,14 @@ int dynsec_inode_mkdir(struct inode *dir, struct dentry *dentry, int mode)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -458,9 +490,14 @@ int dynsec_inode_create(struct inode *dir, struct dentry *dentry,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -507,9 +544,14 @@ int dynsec_inode_link(struct dentry *old_dentry, struct inode *dir,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(old_dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -556,9 +598,14 @@ int dynsec_inode_symlink(struct inode *dir, struct dentry *dentry,
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
+    // check if client is interested in this file system
+    if (!__is_client_concerned_filesystem(dentry->d_sb)) {
+        goto out;
+    }
+
     if (task_in_connected_tgid(current)) {
         report_flags |= DYNSEC_REPORT_SELF;
     } else {
@@ -644,6 +691,12 @@ static inline bool may_report_file(const struct file *file)
             if (__is_special_filesystem(file->f_path.dentry->d_sb)) {
                 return false;
             }
+
+            // check if connected client is interested in this
+            // file system type
+            if (!__is_client_concerned_filesystem(file->f_path.dentry->d_sb)) {
+                return false;
+            }
         }
         return true;
     }
@@ -706,7 +759,7 @@ int dynsec_dentry_open(struct file *file, const struct cred *cred)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -789,7 +842,7 @@ void dynsec_file_free_security(struct file *file)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
     // In between the TASK_EXIT and TASK_FREE hooks
@@ -837,7 +890,7 @@ int dynsec_ptrace_traceme(struct task_struct *parent)
     }
 #endif
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -884,7 +937,7 @@ int dynsec_ptrace_access_check(struct task_struct *child, unsigned int mode)
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
 
@@ -920,7 +973,7 @@ out:
 
 // Must Not Stall
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0)
-#if RHEL_MAJOR == 8 && RHEL_MINOR == 0
+#if defined(RHEL_MAJOR) && defined(RHEL_MINOR) && RHEL_MAJOR == 8 && RHEL_MINOR == 0
 int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
                      int sig, const struct cred *cred)
 #else
@@ -949,7 +1002,7 @@ int dynsec_task_kill(struct task_struct *p, struct siginfo *info,
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
     if (task_in_connected_tgid(current)) {
@@ -991,7 +1044,7 @@ void dynsec_sched_process_fork_tp(struct task_struct *parent,
     if (!child) {
         return;
     }
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -1029,7 +1082,7 @@ static void __dynsec_task_exit(struct task_struct *task,
         return;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         return;
     }
 
@@ -1079,15 +1132,7 @@ void dynsec_sched_process_free_tp(struct task_struct *task)
     __dynsec_task_exit(task, DYNSEC_HOOK_TYPE_TASK_FREE, GFP_ATOMIC);
 }
 
-// Settings to help control mmap event performance
-int mmap_report_misc = 1;
-int mmap_stall_misc = 0;
-int mmap_stall_on_exec = 1;
-int mmap_stall_on_ldso = 1;
 
-//
-//
-//
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
 int dynsec_mmap_file(struct file *file, unsigned long reqprot, unsigned long prot,
                      unsigned long flags)
@@ -1121,41 +1166,17 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         goto out;
     }
 
-    // // Remove read-only entry if PROT_WRITE requested
-    // TODO: verify other mmap args to remove entry
-    // if (prot & PROT_WRITE) {
-    //     rm_inode_addr = (unsigned long)__file_inode(file);
-    //     inode_cache_remove_entry(rm_inode_addr);
-    // }
-
     if (!(prot & PROT_EXEC)) {
         goto out;
     }
 
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
 
-    if (current->in_execve ||
-        (file && (file->f_mode & FMODE_EXEC) == FMODE_EXEC)) {
-        unsigned long exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-
-        if (mmap_stall_on_exec && exec_flags & MAP_EXECUTABLE) {
-            report_flags |= DYNSEC_REPORT_STALL;
-        }
-        else if (mmap_stall_on_ldso) {
-            report_flags |= DYNSEC_REPORT_STALL;
-        }
-
-        // High priority even if we're not stalling
-        report_flags |= DYNSEC_REPORT_HI_PRI;
-    }
-    else {
-        if (mmap_stall_misc) {
-            report_flags |= DYNSEC_REPORT_STALL;
-        } else if (!mmap_report_misc) {
-            goto out;
-        }
+    // Stall the mmap if task is in exec or file was opened for exec
+    if (current->in_execve || (file->f_mode & FMODE_EXEC) == FMODE_EXEC) {
+        report_flags |= DYNSEC_REPORT_STALL;
     }
 
     // Don't stall on ourself
@@ -1163,6 +1184,17 @@ int dynsec_file_mmap(struct file *file, unsigned long reqprot, unsigned long pro
         report_flags |= DYNSEC_REPORT_SELF;
         report_flags &= ~(DYNSEC_REPORT_STALL);
     }
+
+    // file system mask check...keeping simple
+    // no checks for report_flags for HI_PRI or STALL
+    if (file->f_path.dentry) {
+        // check if client is interested in this file system
+        if (!__is_client_concerned_filesystem(file->f_path.dentry->d_sb)) {
+            goto out;
+        }
+    }
+
+    // We may to filter out mmaps events here
 
     event = alloc_dynsec_event(DYNSEC_EVENT_TYPE_MMAP, DYNSEC_HOOK_TYPE_MMAP,
                                report_flags, GFP_KERNEL);
@@ -1207,7 +1239,7 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
     if (!p) {
         goto out;
     }
-    if (!stall_tbl_enabled(stall_tbl)) {
+    if (!hooks_enabled(stall_tbl)) {
         goto out;
     }
 

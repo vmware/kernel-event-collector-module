@@ -132,6 +132,11 @@ NTSTATUS ec_ProcessIsolationIoctl(
         char           str[INET_ADDRSTRLEN];
         unsigned char *addr, i;
 
+        // Suppressing false positive coverity issue reporting that we are using tainted variable
+        // "_pCurrentCbIsolationModeControl->numberOfAllowedIpAddresses" as a loop boundary.
+        // The "allowedIpAddresses" array is allocated to accommodate "numberOfAllowedIpAddresses" entries.
+
+        // coverity[tainted_data:SUPPRESS]
         for (i = 0; i < _pCurrentCbIsolationModeControl->numberOfAllowedIpAddresses; ++i)
         {
             addr = (unsigned char *)&_pCurrentCbIsolationModeControl->allowedIpAddresses[i];

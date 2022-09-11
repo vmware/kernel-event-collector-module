@@ -15,6 +15,7 @@
 #include <linux/wait.h>
 #include <linux/poll.h>
 #include <linux/version.h>
+#include <linux/seq_file.h>
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
@@ -387,11 +388,17 @@ stall_tbl_insert(struct stall_tbl *tbl, struct dynsec_event *event, gfp_t mode)
     // Copy over inode_addr data
     entry->inode_addr = event->inode_addr;
 
+    // Copy extra dynsec_event header related data
+    entry->report_flags = event->report_flags;
+    if (entry->report_flags & DYNSEC_REPORT_INTENT_FOUND) {
+        entry->intent_req_id = event->intent_req_id;
+    }
+
     // Build bucket lookup data
     entry->hash = stall_hash(tbl->secret, &entry->key);
     index = stall_bkt_index(entry->hash);
 
-    getrawmonotonic(&entry->start);
+    entry->start = dynsec_current_ktime;
 
     flags = lock_stall_bkt(&stall_tbl->bkt[index], flags);
     list_add(&entry->list, &tbl->bkt[index].list);
@@ -436,9 +443,14 @@ int stall_tbl_resume(struct stall_tbl *tbl, struct stall_key *key,
         break;
     case DYNSEC_RESPONSE_CONTINUE:
         inode_cache_flags = 0;
+        if (overrided_stall_timeout == 0) {
+            overrided_stall_timeout = get_continue_timeout();
+        }
         if (overrided_stall_timeout > MAX_EXTENDED_TIMEOUT_MS) {
             overrided_stall_timeout = MAX_EXTENDED_TIMEOUT_MS;
         }
+        pr_info("%s:%d event %d, stall timeout overrided: %d\n",
+                __func__, __LINE__, key->event_type, overrided_stall_timeout);
         break;
 
     default:
@@ -515,6 +527,7 @@ int stall_tbl_remove_entry(struct stall_tbl *tbl, struct stall_entry *entry)
     return ret;
 }
 
+#if 0
 int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
 {
     struct stall_entry *entry = NULL;
@@ -543,4 +556,25 @@ int stall_tbl_remove_by_key(struct stall_tbl *tbl, struct stall_key *key)
     }
 
     return ret;
+}
+#endif
+
+void stall_tbl_display_buckets(struct stall_tbl *stall_tbl, struct seq_file *m)
+{
+    unsigned long flags;
+    u32 i, size;
+
+    pr_debug("Display stall table non-zero bucket sizes\n");
+    for (i = 0; i < STALL_BUCKETS; i++) {
+        size = 0;
+        flags = lock_stall_bkt(&stall_tbl->bkt[i], flags);
+        if (stall_tbl->bkt[i].size) {
+            size = stall_tbl->bkt[i].size;
+        }
+        unlock_stall_bkt(&stall_tbl->bkt[i], flags);
+        if (size) {
+            seq_printf(m, "Stall Bucket %06d: size: %d", i, size);
+            seq_puts(m, "\n");
+        }
+    }
 }

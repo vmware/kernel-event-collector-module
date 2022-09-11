@@ -394,7 +394,8 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     {
         if (readyCount < s_fops_config.high_queue_size
             || msg->eventType == CB_EVENT_TYPE_PROCESS_START
-            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT)
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
             llist_add(&(eventNode->llistEntry), &msg_queue_in);
             percpu_counter_inc(&tx_ready);
@@ -417,7 +418,8 @@ CATCH_DEFAULT:
         ++tx_dropped;
 
         if (msg->eventType == CB_EVENT_TYPE_PROCESS_START
-            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT)
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
+            || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
             ++tx_pdropped;
         }
@@ -1105,11 +1107,11 @@ int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
         break;
 
     case CB_EVENT_ACTION_ENABLE_EVENT_COLLECTOR:
-        result = ec_enable_module(context) ? 0 : 1;
+        result = ec_enable_module(context) ? 0 : -EPERM;
         break;
 
     case CB_EVENT_ACTION_DISABLE_EVENT_COLLECTOR:
-        result = ec_disable_module(context);
+        result = ec_disable_module(context) ? 0 : -EPERM;
         break;
 
     case CB_EVENT_ACTION_REQUEST_PROCESS_DISCOVERY:

@@ -443,6 +443,8 @@ struct dynsec_task_dump_umsg {
 // Explicitly set a task's label
 #define DYNSEC_IOC_LABEL_TASK      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 12)
 #define DYNSEC_IOC_STALL_OPTS      _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 13)
+// Set file system specific stall mask
+#define DYNSEC_IOC_FS_STALL_MASK   _IO(DYNSEC_IOC_BASE, DYNSEC_IOC_OFFSET + 14)
 
 // May want a request to print out what kernel objects
 // that are blocking a clean rmmod.
@@ -566,6 +568,31 @@ struct dynsec_config {
     uint64_t lsm_hooks;
     uint64_t process_hooks;
     uint64_t preaction_hooks;
+
+    // File system types to stall or ignore
+    // Based on the definitions in linux/magic.h
+    // enums defined in src/fs_utils.h
+    uint64_t file_system_stall_mask;
+
+};
+
+// enums based on MAGIC definitions of file system types
+// from linux/magic.h kernel version 5.18
+enum file_system_magic_bits_e {
+     EXT2_SUPER_MAGIC_BIT,  // 0
+     BTRFS_SUPER_MAGIC_BIT,
+     HPFS_SUPER_MAGIC_BIT,
+     ISOFS_SUPER_MAGIC_BIT,
+     JFFS2_SUPER_MAGIC_BIT,
+     XFS_SUPER_MAGIC_BIT,
+     FUSE_SUPER_MAGIC_BIT,
+     MSDOS_SUPER_MAGIC_BIT,
+     NFS_SUPER_MAGIC_BIT,
+     REISERFS_SUPER_MAGIC_BIT,
+     SMB_SUPER_MAGIC_BIT,  // 10
+     CIFS_SUPER_MAGIC_BIT,
+     SMB2_SUPER_MAGIC_BIT,
+     USBDEVICE_SUPER_MAGIC_BIT,
 };
 
 #pragma pack(pop)

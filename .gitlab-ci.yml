@@ -5,14 +5,12 @@
 # Include gitlab-ci-base.yml from cb-build-util.
 #  Update the git hash to use a newer version of the base yaml
 #  Note: This can be a branch name for testing but should be a git hash/tag for reproducibility
-include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/-/raw/a91acf11a2628ca81123ab10e47c3d7e984526e6/gitlab-ci-base.yml'
+include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/-/raw/c702b677e1fecff204d6e4d3b932ce9602128f48/gitlab-ci-base.yml'
 
 # Gitlab CI configuration script for event-collector-app.
 variables:
   ARTIFACTORY_PATH: https://${ARTIFACTORY_URL}/artifactory
-  ARTIFACTORY_PROBE_PATH: carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
   BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
-  MAKEFILE_TEST_KERNEL_VERSION: 3.10.0-1160.59.1.el7.x86_64
 
 stages:
   - build_project
@@ -45,51 +43,46 @@ deploy_release:
   when: on_success
 
 .run_makefile_build: &run_makefile_build |
-  ARTIFACTORY_KERNEL_RPM_PATH=$ARTIFACTORY_PATH/centos-yum-remote-cache/7/updates/x86_64/Packages/kernel-$MAKEFILE_TEST_KERNEL_VERSION.rpm
-  ARTIFACTORY_KERNEL_HEADER_RPM_PATH=$ARTIFACTORY_PATH/centos-yum-remote-cache/7/updates/x86_64/Packages/kernel-devel-$MAKEFILE_TEST_KERNEL_VERSION.rpm
-  
-  # Download and extract the kernel and the header files which will be used to build  
-  mkdir localKernelCopy && pushd "$_"
-  
-  for rpm in $ARTIFACTORY_KERNEL_RPM_PATH $ARTIFACTORY_KERNEL_HEADER_RPM_PATH
-  do
-    wget $rpm
-  done
+  get_ci_variables
+  if [[ ${PACKAGES_TO_BUILD} = *kernel_event_collector* ]]
+  then
 
-  for rpmFile in *.rpm
-  do
-    rpm2cpio $rpmFile | cpio -idmc 
-  done
+    yum update -y && yum install -y kernel kernel-devel
 
-  headerStorageDir="$PWD"
-  ln -sf $headerStorageDir/usr/src/kernels/$MAKEFILE_TEST_KERNEL_VERSION $headerStorageDir/lib/modules/$MAKEFILE_TEST_KERNEL_VERSION/build
+    KERNEL_VERSION=$(ls -t /lib/modules | head -1)
 
-  popd
-  
-  mkdir -p kernel_event_collector_module/build && pushd "$_"
-  cmake -DLOCAL_BUILD=yes -DKERNEL_NAME=$MAKEFILE_TEST_KERNEL_VERSION -DKERNEL_HEADER_PATH="$headerStorageDir/lib/modules/$MAKEFILE_TEST_KERNEL_VERSION"  ..
-  make
+    mkdir -p kernel_event_collector_module/build && pushd "$_"
+    cmake -DLOCAL_BUILD=yes -DKERNEL_NAME=$KERNEL_VERSION -DKERNEL_HEADER_PATH="/lib/modules/$KERNEL_VERSION"  ..
+    make
+  fi
 
 makefile_test:
   script: *run_makefile_build
   extends: .build_no_artifacts_template
-  stage: build_project
+  stage: deploy
   when: on_success
   allow_failure: false
-  only:
-      - master
-      - /^release-/
   tags:
     - docker-socket
 
 .deploy_check_probe_pkg: &deploy_check_probe_pkg |
   get_ci_variables
   if [[ ${PACKAGES_TO_BUILD} = *bpf_probe* ]]; then
-      echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
-      filename=workspace/bpf_probe/build/install-packages/check-probe-${BUILD_VERSION}.tar.gz
-      echo $filename
+      ARTIFACTORY_BASE_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
+      for arch in "x86_64" "aarch64"
+      do
+          ARTIFACTORY_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${arch}/${CI_COMMIT_REF_NAME}
+          echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+          filename=workspace/bpf_probe/build/install-packages/${arch}/check-probe-${BUILD_VERSION}.tar.gz
+          echo $filename
 
-      curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+          curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+
+          if [ "${arch}" == "x86_64" ]; then
+              echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_BASE_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+              curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_BASE_PROBE_PATH/" -T  $filename >/dev/null
+          fi
+      done
   else
       echo "Skipping deployment because no new version of bpf_probe was built"
   fi

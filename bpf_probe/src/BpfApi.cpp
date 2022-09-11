@@ -122,6 +122,10 @@ bool BpfApi::IsLRUCapable() const
 // When we need to lower kptr_restrict we only have to do it once.
 // Alternatively we could manually guess what the name of the syscall prefix
 // without changing kptr_restrict but would need  more work to do cleanly.
+//
+// BPF::get_syscall_fnname() doesn't have the code for handling ARM symbols,
+// due to which it's not returning the correct kernel function for the
+// syscall for ARM architecture. So, handling the same for ARM here.
 void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
 {
     if (!name)
@@ -129,6 +133,9 @@ void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
         return;
     }
 
+#if defined(__aarch64__)
+    syscall_name = std::string("__arm64_sys_") + name;
+#else
     if (m_BPF)
     {
         if (m_first_syscall_lookup)
@@ -146,6 +153,7 @@ void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
     {
         syscall_name = std::string(name);
     }
+#endif
 }
 
 bool BpfApi::AttachProbe(const char * name,
@@ -344,7 +352,7 @@ int BpfApi::PollEvents()
 bool BpfApi::GetKptrRestrict(long &kptr_restrict_value)
 {
     auto fileHandle = open(m_kptr_restrict_path.c_str(), O_RDONLY);
-    if (fileHandle <= 0)
+    if (fileHandle < 0)
     {
         return false;
     }
@@ -383,7 +391,7 @@ void BpfApi::SetKptrRestrict(long value)
 
     auto fileHandle = open(m_kptr_restrict_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC,
                            S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if (fileHandle <= 0)
+    if (fileHandle < 0)
     {
         return;
     }

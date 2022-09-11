@@ -95,32 +95,6 @@ static void ParseArgs(int argc, char** argv)
     }
 }
 
-// static void ReadProbeSource(const std::string &probe_source)
-// {
-//     if (!probe_source.empty())
-//     {
-//         auto fileHandle = open(probe_source.c_str(), O_RDONLY);
-//         if (fileHandle <= 0)
-//         {
-//             return;
-//         }
-
-//         struct stat data;
-//         int result = fstat(fileHandle, &data);
-
-//         if (result == 0)
-//         {
-//             std::unique_ptr<unsigned char []> buffer(new unsigned char[data.st_size + 1]);
-
-//             IGNORE_UNUSED_RETURN_VALUE(read(fileHandle, buffer.get(), data.st_size));
-
-//             // = (const char *)buffer.get();
-//         }
-
-//         close(fileHandle);
-//     }
-// }
-
 static bool LoadProbe(BpfApi & bpf_api)
 {
        if (!bpf_api.Init())

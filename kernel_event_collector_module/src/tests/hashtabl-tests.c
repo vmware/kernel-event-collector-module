@@ -614,6 +614,11 @@ bool __init test__hashtbl_lru_many_buckets(ProcessContext *context)
     // fill all available buckets
     for (i=0; i < hash_table.numberOfBuckets * hash_table.lruSize; i++)
     {
+        // Suppressing false positive coverity issue reporting that argument "key++" of ASSERT_TRY()
+        // has a side effect. The containing function might work differently in a non-debug build.
+        // Coverity seems to treat ASSERT_TRY() as an actual assert() which is not the case.
+
+        // coverity[assert_side_effect:SUPPRESS]
         ASSERT_TRY(__add_entry(key++, &hash_table, context));
     }
 

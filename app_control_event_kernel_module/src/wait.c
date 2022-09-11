@@ -4,6 +4,7 @@
 #include <linux/slab.h>
 #include <linux/jiffies.h>
 #include <linux/wait.h>
+#include <linux/seq_file.h>
 
 #include "stall_tbl.h"
 #include "stall_reqs.h"
@@ -13,13 +14,15 @@
 
 #define MAX_CONTINUE_RESPONSES 256
 
-int dynsec_debug_stall = 0;
-
 // counter to track consecutive stall timeouts
 atomic_t  stall_timeout_ctr = ATOMIC_INIT(0);
+atomic_t  access_denied_ctr = ATOMIC_INIT(0);
+
+extern uint32_t stall_timeout_ctr_limit;
 
 static int do_stall_interruptible(struct stall_entry *entry, int *response)
 {
+    bool disable_stall_tbl = false;
     int ret = 0;
     int wait_ret;
     int local_response;
@@ -27,10 +30,20 @@ static int do_stall_interruptible(struct stall_entry *entry, int *response)
     unsigned long timeout;
     unsigned int continue_count = 0;
     int default_reponse = entry->response;
+    // saved event hdr data
+    uint32_t tid;
+    uint64_t req_id, intent_req_id;
+    enum dynsec_event_type event_type;
+    uint16_t report_flags;
 
     // Initial values before we might perform a continuation
     timeout = msecs_to_jiffies(get_wait_timeout());
     local_response = entry->response;
+    tid = entry->key.tid;
+    req_id = entry->key.req_id;
+    event_type = entry->key.event_type;
+    report_flags = entry->report_flags;
+    intent_req_id = entry->intent_req_id;
 
 retry:
     if (!stall_tbl_enabled(stall_tbl)) {
@@ -54,9 +67,7 @@ retry:
         // We could opt for a non-deny response here or
         // set back to safe value.
 
-        if (dynsec_debug_stall) {
-            pr_info("%s: interruped %d\n", __func__, wait_ret);
-        }
+        pr_info("%s: interruped %d\n", __func__, wait_ret);
     }
     // Timedout and conditional not met in time
     else if (wait_ret == 0) {
@@ -66,20 +77,22 @@ retry:
         // for timed_out events.
         atomic_inc(&stall_timeout_ctr);
 
-        if (atomic_read(&stall_timeout_ctr) >= DYNSEC_STALL_TIMEOUT_CTR_LIMIT) {
-            stall_tbl_disable(stall_tbl);
-            task_cache_clear();
-            inode_cache_clear();
-            lock_config();
-            global_config.stall_mode = DEFAULT_DISABLED;
-            unlock_config();
-            pr_warn("Stalling disabled after many events timed out.\n");
+        // TODO: Generate a GENERIC_AUDIT event here.
+        // This is something we should not frequently, observe so send these
+        // to userspace.
+        pr_info("%s: timedout: tid:%u req_id:%llu event_type:%d report_flags:%#x"
+                "intent_req_id:%llu\n", __func__, tid, req_id, event_type,
+                report_flags, intent_req_id);
+
+        if (stall_timeout_ctr_limit &&
+            atomic_read(&stall_timeout_ctr) >= stall_timeout_ctr_limit) {
+            disable_stall_tbl = true;
+            pr_warn("Stalling disabled after %d events timed out.\n",
+                     stall_timeout_ctr_limit);
         }
 
-        if (dynsec_debug_stall) {
-            pr_info("%s:%d response:%d timedout:%lu jiffies\n", __func__, __LINE__,
-                    local_response, timeout);
-        }
+        pr_info("%s:%d response:%d timedout:%lu jiffies\n", __func__, __LINE__,
+                local_response, timeout);
     }
     // Conditional was true, likely wake_up
     else {
@@ -105,10 +118,8 @@ retry:
                 timeout = msecs_to_jiffies(get_continue_timeout());
             }
             continue_count += 1;
-            if (dynsec_debug_stall) {
-                pr_info("%s:%d continue:%u extending stall:%lu jiffies\n",
-                        __func__, __LINE__, continue_count, timeout);
-            }
+            pr_info("%s:%d continue:%u extending stall:%lu jiffies\n",
+                    __func__, __LINE__, continue_count, timeout);
 
             // Don't let userspace ping/pong for too long
             if (continue_count < MAX_CONTINUE_RESPONSES) {
@@ -120,13 +131,85 @@ retry:
 
     if (local_response == DYNSEC_RESPONSE_EPERM) {
         *response = -EPERM;
+        atomic_inc(&access_denied_ctr);
     }
 
     // Must always attempt to remove from the table unless some entry
     // state in the future tells we don't have to.
     stall_tbl_remove_entry(stall_tbl, entry);
 
+    // Call last to prevent potential use-after-free
+    if (disable_stall_tbl) {
+        stall_tbl_disable(stall_tbl);
+        task_cache_clear();
+        inode_cache_clear();
+        lock_config();
+        global_config.stall_mode = DEFAULT_DISABLED;
+        unlock_config();
+    }
+
     return ret;
+}
+
+// handling calculations to find average time
+// maximum time spent in stall table etc.
+
+#define  DYNSEC_RECORDS_TO_AVERAGE    64
+
+DEFINE_SPINLOCK(g_stall_timing_lock);
+static u64 g_avg_stall_time, g_max_stall_time;
+
+static void do_stall_timing_records(struct stall_entry *entry)
+{
+    static bool flag = false;
+    static int ctr = 0;
+    static u64 sum = 0;
+    static u64 stall_times[DYNSEC_RECORDS_TO_AVERAGE];
+    int divisor = DYNSEC_RECORDS_TO_AVERAGE;
+    ktime_t event_done;
+
+    // stall time calculations.
+    event_done = dynsec_current_ktime;
+    if (flag) {
+        // rotating average of DYNSEC_RECORDS_TO_AVERAGE entries
+        sum -= stall_times[ctr]; 
+    } else {
+        // till ctr reaches DYNSEC_RECORDS_TO_AVERAGE
+        divisor = ctr + 1;
+    }
+    stall_times[ctr] = ktime_to_ns(ktime_sub(event_done, entry->start));
+
+    spin_lock(&g_stall_timing_lock);
+    if (stall_times[ctr] > g_max_stall_time) {
+        g_max_stall_time = stall_times[ctr];
+    }
+
+    sum += stall_times[ctr++];
+    g_avg_stall_time = (sum / divisor); 
+    spin_unlock(&g_stall_timing_lock);
+
+    if (ctr == DYNSEC_RECORDS_TO_AVERAGE) {
+        ctr = 0;
+        // flag indicates counter beyond DYNSEC_RECORDS_TO_AVERAGE
+        flag = true;
+    }
+    pr_debug("Stall time logs: %02d: sum: %lld avg: %lld max: %lld\n",
+              ctr, sum, g_avg_stall_time, g_max_stall_time);
+}
+
+void stall_tbl_wait_statistics(struct seq_file *m)
+{
+    u64 avg, max;
+    spin_lock(&g_stall_timing_lock);
+    avg = g_avg_stall_time;
+    max = g_max_stall_time;
+    spin_unlock(&g_stall_timing_lock);
+    seq_printf(m, "   stall table average wait time: %lld.%06lld msec",
+                  avg/1000000, avg % 1000000);
+    seq_puts(m, "\n");
+    seq_printf(m, "   stall table average wait time: %lld.%06lld msec",
+                  max/1000000, max % 1000000);
+    seq_puts(m, "\n");
 }
 
 int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
@@ -162,6 +245,12 @@ int dynsec_wait_event_timeout(struct dynsec_event *dynsec_event, int *response,
 
     if (entry) {
         (void)do_stall_interruptible(entry, response);
+
+        // stall table timing calculations
+        if (*response == 0)
+            do_stall_timing_records(entry);
+
+        // free entry memory here
         kfree(entry);
     }
 
@@ -208,6 +297,7 @@ int handle_stall_ioc(const struct dynsec_stall_ioc_hdr *hdr)
                 global_config.stall_mode = DEFAULT_ENABLED;
                 // reset counter
                 atomic_set(&stall_timeout_ctr, 0);
+                atomic_set(&access_denied_ctr, 0);
             }
         }
     }
@@ -238,6 +328,8 @@ int handle_stall_ioc(const struct dynsec_stall_ioc_hdr *hdr)
         }
 
         global_config.stall_timeout_continue = timeout_ms;
+        pr_debug("%s:%d continue stall timeout set to %ld sec.\n", __func__, __LINE__,
+                timeout_ms/1000);
     }
 
     if (flags & DYNSEC_STALL_DEFAULT_DENY) {

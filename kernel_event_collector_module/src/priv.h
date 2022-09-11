@@ -106,7 +106,7 @@ extern bool     g_path_cache_ref_debug;
 //
 void ec_shutdown(ProcessContext *context);
 bool ec_enable_module(ProcessContext *context);
-int ec_disable_module(ProcessContext *context);
+bool ec_disable_module(ProcessContext *context);
 ModuleState ec_get_module_state(ProcessContext *context);
 bool ec_is_reader_connected(void);
 bool ec_disconnect_reader(pid_t pid, ProcessContext *context);

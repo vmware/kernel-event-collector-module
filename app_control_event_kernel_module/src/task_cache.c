@@ -10,6 +10,7 @@
 #include <linux/random.h>
 #include <linux/sched.h>
 #include <linux/version.h>
+#include <linux/seq_file.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0)
 #include <linux/sched/task.h>
 #endif
@@ -72,7 +73,7 @@ struct task_entry {
     u32 task_label_flags;
 
     // Per-Event Label Options
-    u32 event_caches[DYNSEC_EVENT_TYPE_TASK_DUMP - 1];
+    u32 event_caches[DYNSEC_EVENT_TYPE_TASK_DUMP];
 };
 
 struct task_cache {
@@ -87,9 +88,6 @@ struct task_cache {
 #define TASK_BUCKETS BIT(TASK_BUCKET_BITS)
 
 static struct task_cache *task_cache = NULL;
-
-int debug_task_cache = 0;
-int debug_task_labeling = 0;
 
 static inline u32 task_hash(struct task_key *key, u32 secret)
 {
@@ -125,18 +123,14 @@ static void task_cache_free_entries(void)
         task_cache->bkt[i].size = 0;
         spin_unlock_irqrestore(&task_cache->bkt[i].lock, flags);
 
-        if (debug_task_cache) {
-            total_entries += size;
-            if (size) {
-                bkts_used += 1;
-            }
+        total_entries += size;
+        if (size) {
+            bkts_used += 1;
         }
     }
 
-    if (debug_task_cache && total_entries) {
-        pr_info("task hashtbl: entries:%u bkts used:%u\n",
-                total_entries, bkts_used);
-    }
+    pr_debug("task hashtbl: entries:%u bkts used:%u\n",
+            total_entries, bkts_used);
 }
 
 int task_cache_register(void)
@@ -249,7 +243,7 @@ static inline void __update_entry_data(struct event_track *event,
 
     entry->hits += 1;
 
-    BUILD_BUG_ON(ARRAY_SIZE(entry->event_caches) >= DYNSEC_EVENT_TYPE_TASK_DUMP);
+    BUILD_BUG_ON(ARRAY_SIZE(entry->event_caches) > DYNSEC_EVENT_TYPE_TASK_DUMP);
 
     // If not reportable then only set last event and touch nothing else
     if (!(event->track_flags & TRACK_EVENT_REPORTABLE)) {
@@ -453,9 +447,7 @@ static int set_task_label_flags(pid_t tid, u32 task_label_flags, gfp_t mode)
         kfree(new_entry);
     }
 
-    if (debug_task_labeling && task_label_flags && !ret) {
-        pr_info("%s: %#x for tid:%d\n", __func__, task_label_flags, tid);
-    }
+    pr_debug("%s: %#x for tid:%d\n", __func__, task_label_flags, tid);
 
     return ret;
 }
@@ -523,14 +515,12 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
     }
 
     has_parent = find_parent_task_labels(parent_pid, &task_label_flags);
-    if (debug_task_labeling) {
-        pr_info("%s: %s %s:%d %s:%d %#x\n", __func__,
-                has_parent ? "has_parent" : "parent not found",
-                    is_thread ? "tid" : "pid", tid,
-                    is_thread ? "pid" : "ppid", parent_pid,
-                    task_label_flags
-        );
-    }
+    pr_debug("%s: %s %s:%d %s:%d %#x\n", __func__,
+            has_parent ? "has_parent" : "parent not found",
+                is_thread ? "tid" : "pid", tid,
+                is_thread ? "pid" : "ppid", parent_pid,
+                task_label_flags
+    );
     if (has_parent && (task_label_flags & DYNSEC_CACHE_INHERIT)) {
         // Unset inheritability if not a thread.
         // Threads retain same label as main thread for simplicity.
@@ -538,31 +528,25 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
             !(task_label_flags & DYNSEC_CACHE_INHERIT_RECURSE)) {
 
             task_label_flags &= ~(DYNSEC_CACHE_INHERIT);
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d dropping inherit from %s:%d: %#x\n",
-                        __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
+            pr_debug("%s: %s:%d dropping inherit from %s:%d: %#x\n",
+                    __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
         } else {
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d inheriting from %s:%d %#x\n",
-                        __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
+            pr_debug("%s: %s:%d inheriting from %s:%d %#x\n",
+                    __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
         }
     } else {
         if (has_parent && task_label_flags) {
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d Not inheriting parent %s:%d label: %#x",
-                        __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
+            pr_debug("%s: %s:%d Not inheriting parent %s:%d label: %#x\n",
+                    __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
 
             // Parent label was not inheritable. Insert later on as needed.
             return 0;
@@ -621,9 +605,7 @@ int task_cache_insert_new_task(pid_t tid, pid_t parent_pid, bool is_thread,
         entry = NULL;
     }
 
-    if (debug_task_labeling) {
-        pr_info("%s: inserted tid:%d ret:%d\n", __func__, tid, ret);
-    }
+    pr_debug("%s: inserted tid:%d ret:%d\n", __func__, tid, ret);
 
     return ret;
 }
@@ -682,27 +664,23 @@ int task_cache_set_last_event(pid_t tid, pid_t parent_pid, bool is_thread,
     INIT_LIST_HEAD(&entry->list);
 
     has_parent = find_parent_task_labels(parent_pid, &task_label_flags);
-    if (debug_task_labeling) {
-        pr_info("%s: %s %s:%d %s:%d %#x\n", __func__,
-                has_parent ? "has_parent" : "parent not found",
-                is_thread ? "tid" : "pid", tid,
-                is_thread ? "pid" : "ppid", parent_pid,
-                task_label_flags
-        );
-    }
+    pr_debug("%s: %s %s:%d %s:%d %#x\n", __func__,
+            has_parent ? "has_parent" : "parent not found",
+            is_thread ? "tid" : "pid", tid,
+            is_thread ? "pid" : "ppid", parent_pid,
+            task_label_flags
+    );
     if (has_parent && (task_label_flags & DYNSEC_CACHE_INHERIT)) {
         // Unset inheritability if not a thread
         if (!is_thread &&
             !(task_label_flags & DYNSEC_CACHE_INHERIT_RECURSE)) {
             task_label_flags &= ~(DYNSEC_CACHE_INHERIT);
-            if (debug_task_labeling) {
-                pr_info("%s: %s:%d dropping inherit from %s:%d: %#x\n", __func__,
-                        is_thread ? "tid" : "pid", tid,
-                        is_thread ? "pid" : "ppid", parent_pid,
-                        task_label_flags);
-            }
-        } else if (debug_task_labeling) {
-            pr_info("%s: %s:%d inheriting from %s:%d %#x\n", __func__,
+            pr_debug("%s: %s:%d dropping inherit from %s:%d: %#x\n", __func__,
+                    is_thread ? "tid" : "pid", tid,
+                    is_thread ? "pid" : "ppid", parent_pid,
+                    task_label_flags);
+        } else {
+            pr_debug("%s: %s:%d inheriting from %s:%d %#x\n", __func__,
                     is_thread ? "tid" : "pid", tid,
                     is_thread ? "pid" : "ppid", parent_pid,
                     task_label_flags);
@@ -865,10 +843,8 @@ int task_cache_handle_response(struct dynsec_response *response)
         return 0;
     }
 
-    if (debug_task_labeling && task_label_flags) {
-        pr_info("%s: tid:%u task_label_flags:%#x\n", __func__,
-                response->tid, task_label_flags);
-    }
+    pr_debug("%s: tid:%u task_label_flags:%#x\n", __func__,
+            response->tid, task_label_flags);
 
     key.tid = response->tid;
     hash = task_hash(&key, task_cache->seed);
@@ -957,5 +933,29 @@ void task_cache_remove_entry(pid_t tid)
 
     if (entry) {
         kfree(entry);
+    }
+}
+
+void task_cache_display_buckets(struct seq_file *m)
+{
+    unsigned long flags;
+    u32 i, size;
+
+    if (!task_cache || !task_cache->bkt) {
+        return;
+    }
+
+    pr_debug("Display task cache non-zero bucket sizes\n");
+    for (i = 0; i < TASK_BUCKETS; i++) {
+        size = 0;
+        spin_lock_irqsave(&task_cache->bkt[i].lock, flags);
+        if (task_cache->bkt[i].size) {
+            size = task_cache->bkt[i].size;
+        }
+        spin_unlock_irqrestore(&task_cache->bkt[i].lock, flags);
+        if (size) {
+            seq_printf(m, "TaskCache Bucket %06d: size: %d", i, size);
+            seq_puts(m, "\n");
+        }
     }
 }
