@@ -76,7 +76,9 @@ set(CMAKE_BUILD_TYPE RelWithDebInfo)
 
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
 
-include_directories(${PROJECT_SOURCE_DIR}/../include)
+
+message("libbpf bin dir: ${CMAKE_CURRENT_BINARY_DIR}")
+include_directories(${PROJECT_SOURCE_DIR}/../include ${CMAKE_CURRENT_BINARY_DIR}/libbpf ${CMAKE_CURRENT_BINARY_DIR}/boost)
 
 # set(EPBF_PROG_CPP ${CMAKE_CURRENT_BINARY_DIR}/cb_ebpfprog.cpp)
 # set(EBPF_PPRG_SRC ${PROJECT_SOURCE_DIR}/bcc_sensor.c)
@@ -103,13 +105,13 @@ set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
 if (NOT ${LOCAL_BUILD})
     target_link_libraries(bpf-probe
             #CONAN_PKG::bcc
-            ${CMAKE_CURRENT_BINARY_DIR}/libbpf/libbpf.a
+            CONAN_PKG::libbpf
             #libbpf
-            -Wl,--whole-archive
+            #-Wl,--whole-archive
             #CONAN_PKG::llvm
             CONAN_LIB::elfutils_elf
             -Wl,--no-whole-archive
-            #CONAN_PKG::Boost
+            CONAN_PKG::Boost
 
             z rt dl pthread m
             )
@@ -127,6 +129,7 @@ endif()
 add_executable(check_probe check_probe.cpp)
 add_dependencies(check_probe bpf-probe)
 target_link_libraries(check_probe
+        CONAN_PKG::libbpf
         bpf-probe 
 )
 
