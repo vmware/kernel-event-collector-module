@@ -23,53 +23,35 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 
 # Tell cmake where to find BpfObject module
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/3party/libbpf-bootstrap/tools/cmake/)
+set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
+set(BPF_ELF_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.o)
+set(BPF_ELF_FILE_UNSTRIP ${BPF_ELF_FILE}.unstripped)
+set(BPF_SKEL_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.skel.h)
+set(CLANG ${CONAN_BIN_DIRS_LLVM}/clang)
+set(LLMV_STRIP ${CONAN_BIN_DIRS_LLVM}/llvm-strip)
+set(BPFTOOL ${CONAN_BIN_DIRS_BPFTOOL}/bpftool)
 
-# Build vendored libbpf
-include(ExternalProject)
-ExternalProject_Add(libbpf
-  PREFIX libbpf
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3party/libbpf/src
-  CONFIGURE_COMMAND ""
-  BUILD_COMMAND make
-    BUILD_STATIC_ONLY=1
-    OBJDIR=${CMAKE_CURRENT_BINARY_DIR}/libbpf/libbpf
-    DESTDIR=${CMAKE_CURRENT_BINARY_DIR}/libbpf
-    INCLUDEDIR=
-    LIBDIR=
-    UAPIDIR=
-    install
-  BUILD_IN_SOURCE TRUE
-  INSTALL_COMMAND ""
-  STEP_TARGETS build
+set(ARCH x86)
+set(VMLINUX_INCLUDE ${PROJECT_SOURCE_DIR}/../include/vmlinux/${ARCH})
+set(TARGET_ARCH __TARGET_ARCH_${ARCH})
+
+message("CONAN_BIN_DIRS_LLVM: ${CONAN_BIN_DIRS_LLVM}")
+message("CONAN_BIN_DIRS_BPFTOOL: ${CONAN_BIN_DIRS_BPFTOOL}")
+
+add_custom_command(
+        OUTPUT ${BPF_ELF_FILE} ${BPF_SKEL_FILE}
+        COMMAND ${CLANG} -g -O2 -Wall
+        -target bpf
+        -D${TARGET_ARCH}
+        -I${CONAN_INCLUDE_DIRS_LIBBPF}
+        -I${VMLINUX_INCLUDE}
+        -c ${BPF_C_FILE}
+        -o ${BPF_ELF_FILE_UNSTRIP}
+        COMMAND ${LLMV_STRIP} -g ${BPF_ELF_FILE_UNSTRIP} -o ${BPF_ELF_FILE}
+        COMMAND ${BPFTOOL} gen skeleton ${BPF_ELF_FILE} > ${BPF_SKEL_FILE}
+        DEPENDS ${BPF_C_FILE}
 )
-
-#[[
-ExternalProject_Add(bpftool
-  PREFIX bpftool
-  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3party/bpftool/src
-  CONFIGURE_COMMAND ""
-  BUILD_COMMAND make
-    OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/bpftool/
-  BUILD_IN_SOURCE TRUE
-  INSTALL_COMMAND ""
-  STEP_TARGETS build
-)
-
-]]
-# Set BpfObject input parameters -- note this is usually not necessary unless
-# you're in a highly vendored environment (like libbpf-bootstrap)
-#[[
-set(BPFOBJECT_BPFTOOL_EXE ${CMAKE_CURRENT_BINARY_DIR}/bpftool/bpftool)
-set(BPFOBJECT_VMLINUX_H ${CMAKE_CURRENT_SOURCE_DIR}/3party/libbpf-bootstrap/vmlinux/vmlinux.h)
-set(LIBBPF_INCLUDE_DIRS ${CMAKE_CURRENT_BINARY_DIR}/libbpf)
-set(LIBBPF_LIBRARIES ${CMAKE_CURRENT_BINARY_DIR}/libbpf/libbpf.a)
-find_package(BpfObject REQUIRED)
-
-# Build object skeleton and depend skeleton on libbpf build
-bpf_object(sensor sensor.bpf.c)
-add_dependencies(sensor_skel libbpf-build bpftool-build)
-]]
+add_custom_target(bpf_skel ALL DEPENDS ${BPF_ELF_FILE} ${BPF_SKEL_FILE})
 
 # We shouldn't need this but without out we lose -g. It's probably because LLVM cmake stuff is overriding flags
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
@@ -78,28 +60,12 @@ set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
 
 
 message("libbpf bin dir: ${CMAKE_CURRENT_BINARY_DIR}")
-include_directories(${PROJECT_SOURCE_DIR}/../include ${CMAKE_CURRENT_BINARY_DIR}/libbpf ${CMAKE_CURRENT_BINARY_DIR}/boost)
-
-# set(EPBF_PROG_CPP ${CMAKE_CURRENT_BINARY_DIR}/cb_ebpfprog.cpp)
-# set(EBPF_PPRG_SRC ${PROJECT_SOURCE_DIR}/bcc_sensor.c)
-# set(GENERATE_SH   ${PROJECT_SOURCE_DIR}/generate.sh)
-
-# # generate bcc string file
-# add_custom_command(
-#         OUTPUT ${EPBF_PROG_CPP}
-#         COMMAND chmod a+x ${GENERATE_SH}
-#         COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${EPBF_PROG_CPP}
-#         DEPENDS ${GENERATE_SH} ${EBPF_PPRG_SRC}
-#         COMMENT "Generating BPF Program ${EPBF_PROG_CPP}"
-# )
-#set(BPFTOOL bpftool)
-
-#add_custom_target(bcc_prog ALL DEPENDS ${EPBF_PROG_CPP})
+include_directories(${PROJECT_SOURCE_DIR}/../include ${CMAKE_CURRENT_BINARY_DIR}/libbpf ${CMAKE_CURRENT_BINARY_DIR}/boost ${CMAKE_CURRENT_BINARY_DIR})
 
 add_library(bpf-probe STATIC
         LibbpfApi.cpp
         BpfProgram.cpp)
-add_dependencies(bpf-probe libbpf-build)
+add_dependencies(bpf-probe bpf_skel)
 set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
 
 if (NOT ${LOCAL_BUILD})

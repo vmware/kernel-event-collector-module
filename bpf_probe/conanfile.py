@@ -13,19 +13,31 @@ class SHORT_NAME(CbConanFile):
     version  = "PACKAGE_VERSION"
     settings = "os", "compiler", "build_type", "arch"
     generators = "cmake"
-    requires =  "BOOST_VERSION" ,"libbpf/0.8.1+12349@dev/testing", "BPFTOOL_VERSION"
+    requires = (
+        "LLVM_VERSION",
+        "ELFUTILS_VERSION",
+        "BCC_VERSION",
+        "BOOST_VERSION",
+        "BPFTOOL_VERSION",
+        "LIBBPF_VERSION",
+    )
+
     build_requires = "CPPUTEST_VERSION"
-    default_options = "Boost:shared=False", \
-                      "Boost:without_program_options=False", \
-                      "Boost:without_thread=False", \
-                      "Boost:without_system=False", \
-                      "Boost:without_serialization=False", \
-                      "Boost:without_filesystem=False", \
-                      "Boost:without_chrono=False", \
-                      "Boost:fPIC=True", \
-                      "elfutils:shared=False", \
-                      "llvm:shared=False", \
-                      "libbpf:shared=False"
+    default_options = (
+        "Boost:shared=False",
+        "Boost:without_program_options=False",
+        "Boost:without_thread=False",
+        "Boost:without_system=False",
+        "Boost:without_serialization=False",
+        "Boost:without_filesystem=False",
+        "Boost:without_chrono=False",
+        "Boost:fPIC=True",
+        "elfutils:shared=False",
+        "llvm:shared=False",
+        "bcc:shared=False",
+        "bpftool:shared=False",
+        "libbpf:shared=False",
+    )
 
     def build(self):
         cmake = CMake(self)
@@ -34,16 +46,19 @@ class SHORT_NAME(CbConanFile):
         with tools.environment_append(env_build.vars):
             if os.getenv("FAST_BUILD") != "1":
                 cmake.configure(source_dir=self.source_folder + os.path.sep + "src")
-                with open("%s/env" % (self.build_folder, ), 'w') as fh:
+                with open("%s/env" % (self.build_folder,), 'w') as fh:
                     for key in os.environ:
                         fh.write(key + "=" + os.environ[key] + "\n")
 
             cmake.build()
 
+    # Would be better as a cmake.install call
     def package(self):
         self.copy("*.h", dst="include/bpf_probe", src="include", keep_path=True)
         self.copy("*.a", dst="lib", keep_path=False)
         self.copy("check_probe", dst="bin", src="bin")
+        self.copy("sensor.bpf.o*", dst="lib")
+        self.copy("sensor.skel.h", dst="include")
 
     def package_info(self):
         self.cpp_info.includedirs = ["include"]
