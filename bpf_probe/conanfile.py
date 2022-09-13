@@ -43,6 +43,7 @@ class SHORT_NAME(CbConanFile):
         cmake = CMake(self)
         env_build = AutoToolsBuildEnvironment(self)
 
+        cmake.verbose = True
         with tools.environment_append(env_build.vars):
             if os.getenv("FAST_BUILD") != "1":
                 cmake.configure(source_dir=self.source_folder + os.path.sep + "src")

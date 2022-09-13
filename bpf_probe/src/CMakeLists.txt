@@ -72,10 +72,6 @@ else()
     )
 endif()
 
-add_executable(check_probe check_probe.cpp)
-target_link_libraries(check_probe
-        bpf-probe
-        z rt dl pthread m)
 
 set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
 set(BPF_ELF_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.o)
@@ -106,6 +102,16 @@ add_custom_command(
     DEPENDS ${BPF_C_FILE}
 )
 add_custom_target(bpf_skel ALL DEPENDS ${BPF_ELF_FILE} ${BPF_SKEL_FILE})
+
+add_executable(check_probe check_probe.cpp)
+target_link_libraries(check_probe
+        bpf-probe
+        z rt dl pthread m
+        CONAN_PKG::libbpf
+)
+add_dependencies(check_probe bpf_skel)
+target_include_directories(check_probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(check_probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
 
 add_subdirectory(tests)
 

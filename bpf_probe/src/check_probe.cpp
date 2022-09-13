@@ -4,6 +4,8 @@
 #include "BpfApi.h"
 #include "BpfProgram.h"
 
+#include "sensor.skel.h"
+
 #include <getopt.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -23,9 +25,20 @@ static bool CheckUDPMaps(BpfApi &bpf_api);
 static std::string s_bpf_program;
 static bool check_udp_maps = false;
 
+static bool LoadBTFProbe();
+
+static int libbpf_print_fn(enum libbpf_print_level level,
+                           const char *format, va_list args)
+{
+    if (level == LIBBPF_DEBUG)
+        return 0;
+    return vfprintf(stderr, format, args);
+}
+
 int main(int argc, char *argv[])
 {
     ParseArgs(argc, argv);
+    libbpf_set_print(libbpf_print_fn);
 
     printf("Attempting to load probe...\n");
     std::unique_ptr<BpfApi> bpf_api = std::unique_ptr<BpfApi>(new BpfApi());
@@ -125,8 +138,32 @@ static void ReadProbeSource(const std::string &probe_source)
     }
 }
 
+static bool LoadBTFProbe()
+{
+    struct sensor_bpf *skel = NULL;
+
+    skel = sensor_bpf__open_and_load();
+
+    if (!skel)
+    {
+        sensor_bpf__destroy(skel);
+        return false;
+    }
+    else
+    {
+        printf("Loaded BTF Sensor!\n");
+    }
+
+    return true;
+}
+
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
 {
+    if (LoadBTFProbe())
+    {
+        return true;
+    }
+
     if (bpf_program.empty())
     {
         printf("Invalid argument to 'LoadProbe'\n");
