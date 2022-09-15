@@ -51,6 +51,7 @@ set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
 if (NOT ${LOCAL_BUILD})
     target_link_libraries(bpf-probe
             CONAN_PKG::bcc
+            CONAN_PKG::libbpf
 
             -Wl,--whole-archive
             CONAN_PKG::llvm
@@ -71,6 +72,9 @@ else()
         boost
     )
 endif()
+add_dependencies(bpf-probe bpf_skel)
+target_include_directories(bpf-probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+#target_include_directories(check_probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
 
 
 set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
@@ -107,7 +111,7 @@ add_executable(check_probe check_probe.cpp)
 target_link_libraries(check_probe
         bpf-probe
         z rt dl pthread m
-        CONAN_PKG::libbpf
+#        CONAN_PKG::libbpf # Only link if not part of BpfApi
 )
 add_dependencies(check_probe bpf_skel)
 target_include_directories(check_probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

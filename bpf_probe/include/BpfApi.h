@@ -21,6 +21,11 @@ namespace ebpf {
     class BPF;
 }
 
+#define PROG_TYPE_UNINITIALIZED -1
+#define PROG_TYPE_BCC 0
+#define PROG_TYPE_LIBBPF 1
+
+struct sensor_bpf;
 
 namespace cb_endpoint {
 namespace bpf_probe {
@@ -89,21 +94,6 @@ namespace bpf_probe {
         {
             return m_ErrorMessage;
         }
-
-        virtual bool ClearUDPCache4() = 0;
-
-        virtual bool ClearUDPCache6() = 0;
-
-        virtual bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                                     const bpf_probe::ip_entry &value) = 0;
-
-        virtual bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) = 0;
-
-        virtual bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                          bpf_probe::ip_entry &value) = 0;
-
-        virtual bool GetEntryUDPCache4(const uint32_t &pid,
-                                       bpf_probe::ip_key &value) = 0;
 
         static const char *TypeToString(uint8_t type)
         {
@@ -180,21 +170,6 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
-        bool ClearUDPCache4() override;
-
-        bool ClearUDPCache6() override;
-
-        bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                             const bpf_probe::ip_entry &value) override;
-
-        bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override;
-
-        bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                  bpf_probe::ip_entry &value) override;
-
-        bool GetEntryUDPCache4(const uint32_t &pid,
-                               bpf_probe::ip_key &value) override;
-
     private:
 
         void LookupSyscallName(const char * name, std::string & syscall_name);
@@ -227,6 +202,8 @@ namespace bpf_probe {
         uint64_t                    m_event_count;
         bool                        m_did_leave_events;
         bool                        m_has_lru_hash;
+        int                         m_ProgType;
+        struct sensor_bpf *         m_skel;
     };
 }
 }

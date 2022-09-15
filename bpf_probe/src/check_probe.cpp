@@ -20,7 +20,6 @@ static void PrintUsage();
 static void ParseArgs(int argc, char** argv);
 static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
-static bool CheckUDPMaps(BpfApi &bpf_api);
 
 static std::string s_bpf_program;
 static bool check_udp_maps = false;
@@ -56,16 +55,6 @@ int main(int argc, char *argv[])
 
     printf("Probe loaded!\n");
 
-    if (check_udp_maps)
-    {
-        if (!CheckUDPMaps(*bpf_api))
-        {
-            return 1;
-        }
-
-        printf("UDPv4 Cache Map Works!\n");
-    }
-
     return 0;
 }
 
@@ -74,7 +63,6 @@ static void PrintUsage()
     printf("Usage: -- [options]\nOptions:\n");
     printf(" -h - this message\n");
     printf(" -p - probe source file to test\n");
-    printf(" -u - check UDP maps usage\n");
 }
 
 static void ParseArgs(int argc, char** argv)
@@ -83,7 +71,6 @@ static void ParseArgs(int argc, char** argv)
     struct option const long_options[]  = {
         {"help",           no_argument,       nullptr, 'h'},
         {"probe-source",   required_argument, nullptr, 'p'},
-        {"check-udp-maps",     no_argument,       nullptr, 'u'},
         {nullptr, 0,       nullptr, 0}};
 
     while(true)
@@ -185,76 +172,4 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
     }
 
     return true;
-}
-
-static bool CheckUDPMaps(BpfApi &bpf_api)
-{
-    bool result = true;
-    ip_key ip4_key;
-    ip_entry value;
-
-    value.flow = FLOW_TX | FLOW_TX;
-    memset(&ip4_key, 'A', sizeof(ip4_key));
-
-    // Verify Update/Insert works
-    if (!bpf_api.InsertUDPCache4(ip4_key, value))
-    {
-        printf("Unable to insert into UDPv4 hashmap\n");
-        return false;
-    }
-
-    // Verify remove works
-    if (!bpf_api.RemoveEntryUDPCache4(ip4_key))
-    {
-        printf("Unable to remove entry from UDPv4 hashmap\n");
-        result = false;
-    }
-
-    // Re-insert to setup Get/Lookup
-    if (!bpf_api.InsertUDPCache4(ip4_key, value))
-    {
-        printf("Unable to insert/update entry in UDPv4 hashmap\n");
-        result = false;
-    }
-
-    if (bpf_api.IsLRUCapable())
-    {
-        ip_entry found_value = {};
-
-        if (!bpf_api.GetEntryUDPLRUCache4(ip4_key, found_value))
-        {
-            printf("Unable to get LRU UDPv4 entry just inserted\n");
-            result = false;
-        }
-
-        if (found_value.flow != value.flow)
-        {
-            printf("Found LRU entry does not match inserted value\n");
-            result = false;
-        }
-    }
-    else
-    {
-        ip_key found_value = {};
-
-        if (!bpf_api.GetEntryUDPCache4(ip4_key.pid, found_value))
-        {
-            printf("Unable to get NonLRU UDPv4 entry just inserted\n");
-            result = false;
-        }
-
-        if (memcmp(&found_value, &ip4_key, sizeof(found_value)) != 0)
-        {
-            printf("Found NonLRU entry does not match inserted value\n");
-            result = false;
-        }
-    }
-
-    if (!bpf_api.ClearUDPCache4())
-    {
-        printf("Unable to Clear UDP Cache\n");
-        result = false;
-    }
-
-    return result;
 }
