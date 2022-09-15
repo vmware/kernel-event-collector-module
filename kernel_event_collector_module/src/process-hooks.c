@@ -135,7 +135,12 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
     struct timespec start_time = {0};
     ProcessHandle *process_handle = NULL;
 
-    getnstimeofday(&start_time);
+    //getnstimeofday(&start_time);
+    ec_get_proc_start_time(&start_time, task);
+    TRACE(DL_ERROR, "ymay Debug Message 4: pid: %d --- time_sec :%lld , time_nsec: %lld\n", pid,
+        (long long) start_time.tv_sec, (long long) start_time.tv_nsec);
+    TRACE(DL_ERROR, "ymay Debug Message 4: pid: %d --- time_windows :%lld\n", pid,
+        (long long) ec_to_windows_timestamp(&start_time));
 
     // If the `pid` and `tid` are the same than this is a fork.  If they are different this is a
     //  thread.  We need to ignore threads.
@@ -206,7 +211,12 @@ int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
     MODULE_GET(&context);
 
     // get time as early in the function as possible
-    getnstimeofday(&start_time);
+    //getnstimeofday(&start_time);
+    ec_get_proc_start_time(&start_time, task);
+    TRACE(DL_ERROR, "ymay Debug Message 4: pid: %d --- time_sec :%lld , time_nsec: %lld\n", pid,
+        (long long) start_time.tv_sec, (long long) start_time.tv_nsec);
+    TRACE(DL_ERROR, "ymay Debug Message 4: pid: %d --- time_windows :%lld\n", pid,
+        (long long) ec_to_windows_timestamp(&start_time));
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0)  //{
     // Call any other hooks in the chain, and bail if they want to bail

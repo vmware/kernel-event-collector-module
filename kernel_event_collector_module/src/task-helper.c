@@ -517,3 +517,40 @@ void __ec_add_tracking_for_task(
         ec_process_tracking_put_handle(handle, context);
     }
 }
+
+
+u64 ec_nsec_to_clock_t(u64 x)
+{
+#if (NSEC_PER_SEC % USER_HZ) == 0
+	return div_u64(x, NSEC_PER_SEC / USER_HZ);
+#elif (USER_HZ % 512) == 0
+	return div_u64(x * USER_HZ / 512, NSEC_PER_SEC / 512);
+#else
+	/*
+         * max relative error 5.7e-8 (1.8s per year) for USER_HZ <= 1024,
+         * overflow after 64.99 years.
+         * exact for HZ=60, 72, 90, 120, 144, 180, 300, 600, 900, ...
+         */
+	return div_u64(x * 9, (9ull * NSEC_PER_SEC + (USER_HZ / 2)) / USER_HZ);
+#endif
+}
+
+void ec_get_proc_start_time(struct timespec *start_time, struct task_struct const *task)
+{
+    struct timespec boottime;
+
+    unsigned long long pstart_time =
+		(unsigned long long)task->real_start_time.tv_sec * NSEC_PER_SEC
+				+ task->real_start_time.tv_nsec;
+
+    getboottime(&boottime);
+	/* convert nsec -> ticks */
+	pstart_time = ec_nsec_to_clock_t(pstart_time);
+
+    start_time->tv_sec = boottime.tv_sec + pstart_time/USER_HZ;
+    //unsigned long long userhz_usec = USER_HZ/1000000;
+    start_time->tv_nsec = task->real_start_time.tv_nsec;
+
+    TRACE(DL_ERROR, "ymay Debug Message 5: --- boottime_sec :%lld , boottime_nsec: %lld\n",
+        (long long) boottime.tv_sec, (long long) boottime.tv_nsec);
+}

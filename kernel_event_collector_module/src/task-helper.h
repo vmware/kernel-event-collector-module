@@ -25,6 +25,7 @@ extern pid_t ec_getppid(struct task_struct const *task);
 extern void ec_get_task_struct(struct task_struct *task);
 extern void ec_put_task_struct(struct task_struct *task);
 extern void ec_get_starttime(struct timespec *start_time);
+extern void ec_get_proc_start_time(struct timespec *start_time, struct task_struct const *task);
 extern uint64_t ec_get_path_buffer_memory_usage(void);
 PathData *ec_task_get_path_data(struct task_struct const *task, char *path_buffer, ProcessContext *context);
 extern bool ec_is_task_valid(struct task_struct const *task);
