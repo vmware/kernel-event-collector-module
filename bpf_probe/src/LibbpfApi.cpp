@@ -31,7 +31,7 @@ using namespace std::chrono;
 
 BpfApi::BpfApi()
     : m_sensor(nullptr)
-    , m_events_pb(nullptr)
+    , m_events_rb(nullptr)
     , m_kptr_restrict_path("/proc/sys/kernel/kptr_restrict")
     , m_bracket_kptr_restrict(false)
     , m_first_syscall_lookup(true)
@@ -48,13 +48,15 @@ BpfApi::~BpfApi()
 {
 }
 
-static void on_perf_submit_libbpf(void *ctx, int cpu, void *data, __u32 size)
+static int on_ring_submit_libbpf(void *ctx, void *data, uint64_t size)
 {
     auto bpfApi = static_cast<BpfApi*>(ctx);
     if (bpfApi)
     { 
         bpfApi->m_eventCallbackFn(static_cast<struct data *>(data));
     }
+
+    return 0;
 }
 
 
@@ -230,18 +232,18 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
         return false;
     }
 
-    m_events_pb = perf_buffer__new(map_fd, 1024, on_perf_submit_libbpf, nullptr, this, nullptr);
-    if (!m_events_pb)
+    m_events_rb = ring_buffer__new(map_fd, on_ring_submit_libbpf, this, nullptr);
+    if (!m_events_rb)
     {
-        m_ErrorMessage = "Failed creating events perf buffer";
+        m_ErrorMessage = "Failed creating events ring buffer";
     }
 
-    return m_events_pb != nullptr;
+    return m_events_rb != nullptr;
 }
 
 int BpfApi::PollEvents()
 {
-    return perf_buffer__poll(m_events_pb, POLL_TIMEOUT_MS);
+    return ring_buffer__poll(m_events_rb, POLL_TIMEOUT_MS);
 }
 
 bool BpfApi::GetKptrRestrict(long &kptr_restrict_value)

@@ -279,9 +279,8 @@ struct {
 } root_fs SEC(".maps");
 
 struct {
-	__uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-	__uint(key_size, sizeof(u32));
-	__uint(value_size, sizeof(u32));
+	__uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 256 * 1024 /* 256 KB */);
 } events SEC(".maps");
 
 // This hash tracks the "observed" file-create events.  This will not be 100% accurate because we will report a
@@ -558,7 +557,7 @@ static void send_event(
 	size_t          data_size)
 {
 	((struct data*)data)->header.event_time = bpf_ktime_get_ns();
-	bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, data, data_size);
+    bpf_ringbuf_output(&events, data, data_size, 0);
 }
 
 static inline struct super_block *_sb_from_dentry(struct dentry *dentry)

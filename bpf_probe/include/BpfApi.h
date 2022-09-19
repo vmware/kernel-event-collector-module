@@ -220,10 +220,10 @@ namespace bpf_probe {
 
         void OnEvent(bpf_probe::Data data);
 
-        static void on_perf_submit(void *cb_cookie, void *data, int data_size);
+        static int on_ring_submit(void *cb_cookie, void *data, uint64_t data_size);
 
         struct sensor_bpf*          m_sensor;
-        struct perf_buffer*         m_events_pb;
+        struct ring_buffer*         m_events_rb;
         const std::string           m_kptr_restrict_path;
         bool                        m_bracket_kptr_restrict;
         bool                        m_first_syscall_lookup;
