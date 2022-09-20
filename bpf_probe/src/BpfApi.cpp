@@ -12,11 +12,19 @@
  */
 #ifdef LOCAL_BUILD
 #include <bcc/BPF.h>
-#include <bcc/perf_reader.h>
 #else
 #include <BPF.h>
-#include <perf_reader.h>
 #endif
+
+// Required prefixing to load correct headers
+#include <bcc/perf_reader.h>
+#include <bcc/common.h>
+#include <bcc/libbpf.h>
+
+// May need to verify correct libbpf header!!
+// Probably should update CMakefile to use only target_include_directories
+#include <libbpf.h>
+
 #include <climits>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -24,6 +32,8 @@
 #include <chrono>
 #include <exception>
 #include <boost/filesystem.hpp>
+
+#include <sys/epoll.h>
 
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
@@ -48,18 +58,30 @@ BpfApi::BpfApi()
     , m_has_lru_hash(false)
     , m_ProgType{PROG_TYPE_UNINITIALIZED}
     , m_skel(nullptr)
+    , m_epoll_fd(-1)
 {
 }
 
 BpfApi::~BpfApi()
 {
-    if (m_ProgType == PROG_TYPE_LIBBPF)
+    if (m_skel)
     {
-        if (m_skel)
+        sensor_bpf__destroy(m_skel);
+        m_skel = nullptr;
+
+        if (m_epoll_fd >= 0)
         {
-            // Destroy skel
-            sensor_bpf__destroy(m_skel);
-            m_skel = nullptr;
+            close(m_epoll_fd);
+            m_epoll_fd = -1;
+        }
+
+        if (m_perf_reader.size())
+        {
+            for (auto perf_reader : m_perf_reader)
+            {
+                perf_reader_free(perf_reader);
+            }
+            m_perf_reader.clear();
         }
     }
 }
@@ -84,6 +106,7 @@ bool BpfApi::Init(const std::string & bpf_program)
 
         if (m_skel)
         {
+           // m_ncpu = get_online_cpus();
             m_ProgType = PROG_TYPE_LIBBPF;
         }
     }
@@ -141,7 +164,20 @@ void BpfApi::Reset()
         sensor_bpf__destroy(m_skel);
         m_skel = nullptr;
 
-        // TODO: free perf_reader list
+        if (m_epoll_fd >= 0)
+        {
+            close(m_epoll_fd);
+            m_epoll_fd = -1;
+        }
+
+        if (m_perf_reader.size())
+        {
+            for (auto perf_reader : m_perf_reader)
+            {
+                perf_reader_free(perf_reader);
+            }
+            m_perf_reader.clear();
+        }
     }
 
     // Calling ebpf::BPF::detach_all multiple times on the same object results in double free and segfault.
@@ -213,7 +249,7 @@ bool BpfApi::AttachProbe(const char * name,
                          ProbeType    type)
 {
     // Just return true even though if we don't care
-    if (m_ProgType == PROG_TYPE_LIBBPF)
+    if (m_skel)
     {
         return true;
     }
@@ -273,15 +309,80 @@ bool BpfApi::AttachProbe(const char * name,
 
 bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 {
-    if (m_ProgType == PROG_TYPE_LIBBPF && m_skel)
+    if (m_skel)
     {
-        // For each CPU
-        // perf_reader_new
-        // perf_reader_mmap
-        //  Perhaps set perf_reader_set_fd
-        // 
+        // Get events map
+        int map_fd = bpf_map__fd(m_skel->maps.events);
+        // if (!m_skel->maps.events)
+        // {
+        //     m_ErrorMessage = std::string("bpf perf map 'events' not allocated");
+        //     return false;
+        // }
+        // int map_fd = m_skel->maps.events->fd;
+        if (map_fd < 0)
+        {
+            m_ErrorMessage = std::string("bpf perf map 'events' fd not initialized");
+            return false;
+        }
 
+        // Create epollfd instance as well!!!
+        m_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+        if (m_epoll_fd < 0)
+        {
+            m_ErrorMessage = std::string("create epoll fd failed");
+            return false;
+        }
 
+        for (auto cpu : m_ncpu)
+        {
+            // perf_reader is opaque
+            struct perf_reader *perf_reader = static_cast<struct perf_reader *>(bpf_open_perf_buffer(
+                on_perf_submit,
+                on_perf_peek,
+                nullptr,
+                static_cast<void*>(this),
+                -1,
+                cpu,
+                1024
+            ));
+
+            if (perf_reader)
+            {
+                m_perf_reader.push_back(perf_reader);
+
+                int key = cpu;
+                int perf_buf_fd = perf_reader_fd(perf_reader);
+
+                struct epoll_event event = {};
+                
+                event.events = EPOLLIN;
+                event.data.ptr = static_cast<void *>(perf_reader);
+                if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, perf_buf_fd, &event) != 0)
+                {
+                    perf_reader_free(perf_reader);
+                    
+                    m_ErrorMessage = std::string("epoll_ctl failed to add perf buf fd");
+                    return false;
+                }
+
+                // thin wrapper to bpf_map_update_elem
+                int err = bpf_update_elem(map_fd, &key, &perf_buf_fd, 0);
+
+                if (err)
+                {
+                    m_ErrorMessage = std::string("bpf_map_update_elem for perf buf map");
+                    return false;
+                }
+            }
+            else
+            {
+                m_ErrorMessage = std::string("bpf_open_perf_buffer failed");
+                return false;
+            }
+        }
+
+        m_epoll_data.reset(new epoll_event[m_perf_reader.size()]);
+        return true;
     }
 
     if (!m_BPF)
@@ -324,7 +425,7 @@ int BpfApi::PollEvents()
     //   https://kinvolk.io/blog/2018/02/timing-issues-when-using-bpf-with-virtual-cpus/
     // Here is a reference implementation of the fix.  (I used this as a reference, but developed my own solution.)
     //  https://github.com/iovisor/gobpf/blob/65e4048660d6c4339ebae113ac55b1af6f01305d/elf/perf.go#L147
-    if (!m_BPF)
+    if (!m_BPF && (!m_skel || m_perf_reader.size() == 0))
     {
         return -1;
     }
@@ -334,14 +435,21 @@ int BpfApi::PollEvents()
 
     if (m_did_leave_events)
     {
-// 
-// +    for (auto it : cpu_readers_)
-// +        perf_reader_event_read(it.second);
-//
-//
         // We left events on a CPU queue so we need to bypass the poll
         m_did_leave_events = false;
-        m_BPF->read_perf_buffer("events");
+
+        if (m_perf_reader.size() > 0)
+        {
+            // For each CPU online read
+            for (auto perf_reader : m_perf_reader)
+            {
+                perf_reader_event_read(perf_reader);
+            }
+        }
+        else if (m_BPF)
+        {
+            m_BPF->read_perf_buffer("events");
+        }
     }
     else
     {
@@ -355,9 +463,24 @@ int BpfApi::PollEvents()
         }
         m_did_leave_events = false;
 
-        // TODO: Figure out how to poll, might just be libbpf's regular epoll?
 
-        auto result = m_BPF->poll_perf_buffer("events", timeout_ms);
+        int result = -1;
+
+        // epoll all perf buffers and then consume
+        if (m_BPF)
+        {
+            result = m_BPF->poll_perf_buffer("events", timeout_ms);
+        }
+        else
+        {
+            auto result = epoll_wait(m_epoll_fd, m_epoll_data.get(),
+                                     m_perf_reader.size(), timeout_ms);
+
+            for (int i = 0; i < result; i++)
+            {
+                perf_reader_event_read(static_cast<perf_reader *>(m_epoll_data[i].data.ptr));
+            }
+        }
 
         if (result < 0)
         {

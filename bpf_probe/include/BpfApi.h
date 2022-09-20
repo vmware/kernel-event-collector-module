@@ -8,7 +8,10 @@
 #include <functional>
 #include <memory>
 #include <list>
+#include <vector>
 #include <chrono>
+
+#include <sys/epoll.h>
 
 // A number of calls are annotated with 'warn_unused_result' in their definition, so a
 // normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
@@ -26,6 +29,7 @@ namespace ebpf {
 #define PROG_TYPE_LIBBPF 1
 
 struct sensor_bpf;
+struct perf_reader;
 
 namespace cb_endpoint {
 namespace bpf_probe {
@@ -149,6 +153,10 @@ namespace bpf_probe {
         : public IBpfApi
     {
     public:
+        using CpuList = std::vector<int>;
+        using PerfReaderList = std::vector<struct perf_reader *>;
+        using EpollEventData = std::unique_ptr<epoll_event[]>;
+
         BpfApi();
         virtual ~BpfApi();
 
@@ -203,7 +211,13 @@ namespace bpf_probe {
         bool                        m_did_leave_events;
         bool                        m_has_lru_hash;
         int                         m_ProgType;
+
+        // libbpf related resources
         struct sensor_bpf *         m_skel;
+        int                         m_epoll_fd;
+        CpuList                     m_ncpu;
+        PerfReaderList              m_perf_reader;
+        EpollEventData              m_epoll_data;
     };
 }
 }
