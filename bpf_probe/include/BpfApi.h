@@ -178,6 +178,8 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
+        int                         m_ProgType;
+
     private:
 
         void LookupSyscallName(const char * name, std::string & syscall_name);
@@ -210,7 +212,6 @@ namespace bpf_probe {
         uint64_t                    m_event_count;
         bool                        m_did_leave_events;
         bool                        m_has_lru_hash;
-        int                         m_ProgType;
 
         // libbpf related resources
         struct sensor_bpf *         m_skel;

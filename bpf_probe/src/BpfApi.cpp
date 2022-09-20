@@ -37,7 +37,7 @@
 
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
-namespace fs = boost::filesystem;
+namespace fs = boost::filesystem; 
 
 #define DEBUG_ORDER(BLOCK)
 //#define DEBUG_ORDER(BLOCK) BLOCK while(0)
@@ -46,7 +46,8 @@ namespace fs = boost::filesystem;
 //#define DEBUG_HARVEST(BLOCK) BLOCK while(0)
 
 BpfApi::BpfApi()
-    : m_BPF(nullptr)
+    : m_ProgType{PROG_TYPE_UNINITIALIZED}
+    , m_BPF(nullptr)
     , m_kptr_restrict_path("/proc/sys/kernel/kptr_restrict")
     , m_bracket_kptr_restrict(false)
     , m_first_syscall_lookup(true)
@@ -56,7 +57,6 @@ BpfApi::BpfApi()
     , m_event_count(0)
     , m_did_leave_events(false)
     , m_has_lru_hash(false)
-    , m_ProgType{PROG_TYPE_UNINITIALIZED}
     , m_skel(nullptr)
     , m_epoll_fd(-1)
 {
@@ -159,6 +159,8 @@ bool BpfApi::Init(const std::string & bpf_program)
 
 void BpfApi::Reset()
 {
+    m_ProgType = PROG_TYPE_UNINITIALIZED;
+
     if (m_skel)
     {
         sensor_bpf__destroy(m_skel);

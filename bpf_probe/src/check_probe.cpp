@@ -24,8 +24,6 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 static std::string s_bpf_program;
 static bool check_udp_maps = false;
 
-static bool LoadBTFProbe();
-
 static int libbpf_print_fn(enum libbpf_print_level level,
                            const char *format, va_list args)
 {
@@ -125,39 +123,25 @@ static void ReadProbeSource(const std::string &probe_source)
     }
 }
 
-static bool LoadBTFProbe()
-{
-    struct sensor_bpf *skel = NULL;
 
-    skel = sensor_bpf__open_and_load();
-
-    if (!skel)
-    {
-        sensor_bpf__destroy(skel);
-        return false;
-    }
-    else
-    {
-        printf("Loaded BTF Sensor!\n");
-    }
-
-    return true;
-}
 
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
 {
-    if (LoadBTFProbe())
-    {
-        return true;
-    }
-
     if (bpf_program.empty())
     {
         printf("Invalid argument to 'LoadProbe'\n");
         return false;
     }
 
-    if (!bpf_api.Init(bpf_program))
+    bool init = bpf_api.Init(bpf_program);
+    int prog_type = bpf_api.m_ProgType;
+
+    const char *prog_type_name = "UNINIT";
+    if (prog_type == PROG_TYPE_BCC) prog_type_name = "BCC";
+    if (prog_type == PROG_TYPE_LIBBPF) prog_type_name = "LIBBPF";
+    fprintf(stderr, "prog_type: %s\n", prog_type_name);
+
+    if (!init)
     {
         printf("Failed to init BPF program: %s\n",
                bpf_api.GetErrorMessage().c_str());
