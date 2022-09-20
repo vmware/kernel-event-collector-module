@@ -106,7 +106,7 @@ bool BpfApi::Init(const std::string & bpf_program)
 
         if (m_skel)
         {
-           // m_ncpu = get_online_cpus();
+            m_ncpu = ebpf::get_online_cpus();
             m_ProgType = PROG_TYPE_LIBBPF;
         }
     }
