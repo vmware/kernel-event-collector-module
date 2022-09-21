@@ -6,24 +6,14 @@
 
 #include "sensor.skel.h"
 
-/* Building directly with cmake will expect these libraries in the default
- * locations associated with bcc, but building with the internal CB build
- * utility expects the packaged location of this header to be slightly different
- */
-#ifdef LOCAL_BUILD
+// bcc headers
 #include <bcc/BPF.h>
-#else
-#include <BPF.h>
-#endif
-
-// Required prefixing to load correct headers
 #include <bcc/perf_reader.h>
 #include <bcc/common.h>
-#include <bcc/libbpf.h>
+#include <bcc/libbpf.h> // helper library, not real libbpf
 
-// May need to verify correct libbpf header!!
-// Probably should update CMakefile to use only target_include_directories
-#include <libbpf.h>
+// real libbpf from conan package
+#include <bpf/libbpf.h>
 
 #include <climits>
 #include <stdlib.h>

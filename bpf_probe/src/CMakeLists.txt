@@ -47,6 +47,8 @@ add_library(bpf-probe STATIC
         ${EPBF_PROG_CPP})
 add_dependencies(bpf-probe bcc_prog)
 set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
+target_include_directories(bpf-probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
+
 
 if (NOT ${LOCAL_BUILD})
     target_link_libraries(bpf-probe
@@ -91,6 +93,7 @@ set(TARGET_ARCH __TARGET_ARCH_${ARCH})
 
 message("CONAN_BIN_DIRS_LLVM: ${CONAN_BIN_DIRS_LLVM}")
 message("CONAN_BIN_DIRS_BPFTOOL: ${CONAN_BIN_DIRS_BPFTOOL}")
+message("CONAN_INCLUDE_DIRS_LIBBPF: ${CONAN_INCLUDE_DIRS_LIBBPF}")
 
 add_custom_command(
     OUTPUT ${BPF_ELF_FILE} ${BPF_SKEL_FILE}
