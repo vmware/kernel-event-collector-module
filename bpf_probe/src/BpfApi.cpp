@@ -303,6 +303,12 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 {
     if (m_skel)
     {
+        if (sensor_bpf__attach(m_skel))
+        {
+            m_ErrorMessage = std::string("sensor_bpf__attach failed");
+            return false;
+        }
+
         // Get events map
         int map_fd = bpf_map__fd(m_skel->maps.events);
         // if (!m_skel->maps.events)
@@ -324,6 +330,30 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
             m_ErrorMessage = std::string("create epoll fd failed");
             return false;
         }
+
+        // {
+        //     int key = -1;
+        //     int err = bpf_get_first_key(map_fd, &key, sizeof(key));
+        //     if (err < 0)
+        //     {
+        //         err = -errno;
+        //         fprintf(stderr, "bpf_get_first_key(%d) = %d", map_fd, errno);
+        //     }
+        //     else
+        //     {
+        //         while (err >= 0)
+        //         {
+        //             fprintf(stderr, "map_fd:%d key:%d\n", map_fd, key);
+
+        //             int next_key = -1;
+        //             err = bpf_get_next_key(map_fd, &key, &next_key);
+        //             if (err >= 0)
+        //             {
+        //                 key = next_key;
+        //             }
+        //         }
+        //     }
+        // }
 
         for (auto cpu : m_ncpu)
         {
@@ -359,7 +389,6 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 
                 // thin wrapper to bpf_map_update_elem
                 int err = bpf_update_elem(map_fd, &key, &perf_buf_fd, 0);
-
                 if (err)
                 {
                     m_ErrorMessage = std::string("bpf_map_update_elem for perf buf map");
@@ -374,6 +403,8 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
         }
 
         m_epoll_data.reset(new epoll_event[m_perf_reader.size()]);
+        m_eventCallbackFn = std::move(callback);
+
         return true;
     }
 
@@ -465,9 +496,8 @@ int BpfApi::PollEvents()
         }
         else
         {
-            auto result = epoll_wait(m_epoll_fd, m_epoll_data.get(),
+            result = epoll_wait(m_epoll_fd, m_epoll_data.get(),
                                      m_perf_reader.size(), timeout_ms);
-
             for (int i = 0; i < result; i++)
             {
                 perf_reader_event_read(static_cast<perf_reader *>(m_epoll_data[i].data.ptr));
