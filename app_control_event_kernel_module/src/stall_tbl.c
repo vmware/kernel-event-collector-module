@@ -151,9 +151,11 @@ static void stall_tbl_wake_entries(struct stall_tbl *stall_tbl)
             spin_lock(&entry->lock);
             entry->mode = DYNSEC_STALL_MODE_DISABLE;
             entry->response = DYNSEC_RESPONSE_ALLOW;
-            spin_unlock(&entry->lock);
 
-            wake_up(&entry->wq);
+            if (waitqueue_active(&entry->wq)) {
+                wake_up(&entry->wq);
+            }
+            spin_unlock(&entry->lock);
         }
         unlock_stall_bkt(&stall_tbl->bkt[i], flags);
     }
