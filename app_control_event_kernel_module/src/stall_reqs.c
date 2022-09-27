@@ -102,7 +102,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
         // Place it back into queue OR resume task if we
         // don't have a timeout during the stall.
         if (event->report_flags & DYNSEC_REPORT_STALL) {
-            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0, 0);
+            stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_EPERM, 0, 0);
         }
         free_dynsec_event(event);
         event = NULL;
@@ -144,7 +144,7 @@ static ssize_t dynsec_stall_read(struct file *file, char __user *ubuf,
             // Place it back into queue OR resume task if we
             // don't have a timeout during the stall.
             if (event->report_flags & DYNSEC_REPORT_STALL) {
-                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_ALLOW, 0, 0);
+                stall_tbl_resume(stall_tbl, &key, DYNSEC_RESPONSE_EPERM, 0, 0);
             }
             free_dynsec_event(event);
             event = NULL;
