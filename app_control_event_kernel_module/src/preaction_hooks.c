@@ -709,7 +709,7 @@ static void dynsec_do_unlink(int dfd, const char __user *pathname,
         return;
     }
 
-    if (!path.dentry && !path.dentry->d_inode) {
+    if (!path.dentry || !path.dentry->d_inode) {
         path_put(&path);
         return;
     }
@@ -901,7 +901,7 @@ static void dynsec_do_link(int olddfd, const char __user *oldname,
         return;
     }
 
-    if (!oldpath.dentry && !oldpath.dentry->d_inode) {
+    if (!oldpath.dentry || !oldpath.dentry->d_inode) {
         path_put(&oldpath);
         return;
     }
