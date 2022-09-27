@@ -4,15 +4,7 @@
 #include "BpfApi.h"
 #include "bcc_sensor.h"
 
-/* Building directly with cmake will expect these libraries in the default
- * locations associated with bcc, but building with the internal CB build
- * utility expects the packaged location of this header to be slightly different
- */
-#ifdef LOCAL_BUILD
 #include <bcc/BPF.h>
-#else
-#include <BPF.h>
-#endif
 #include <climits>
 #include <stdlib.h>
 #include <fcntl.h>
