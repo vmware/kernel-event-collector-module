@@ -126,7 +126,7 @@ struct mount {
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 // TODO: Fix our kprobe syscall names so arm64 works too
-_Bool LINUX_HAS_SYSCALL_WRAPPER = 0;
+_Bool LINUX_HAS_SYSCALL_WRAPPER = 1;
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
@@ -971,6 +971,19 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execve, const char __user *filename,
 //Note that this can be called more than one from the same pid
 SEC("kretprobe/__x64_sys_execve")
 int BPF_KPROBE(after_sys_execve)
+{
+    struct exec_data data = {};
+
+    __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
+    data.retval = PT_REGS_RC(ctx);
+
+    send_event(ctx, &data, sizeof(struct exec_data));
+
+    return 0;
+}
+
+SEC("kretprobe/__x64_sys_execveat")
+int BPF_KPROBE(after_sys_execveat)
 {
     struct exec_data data = {};
 
