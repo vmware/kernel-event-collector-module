@@ -156,6 +156,7 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
 #define PROT_EXEC               0x4                /* Page can be executed.  */
 
+// TODO: Fix architecture specific macro definitions
 # define MAP_DENYWRITE          0x00800                /* ETXTBSY */
 # define MAP_EXECUTABLE         0x01000                /* Mark it as an executable.  */
 
@@ -397,6 +398,7 @@ struct {
 
 #endif /* __BCC__ : end of  BCC macro conversions */
 
+// TODO: Update this definition to handle arm64 or remove it
 #ifndef PT_REGS_RC
 #define PT_REGS_RC(x) ((x)->ax)
 #endif
@@ -1911,6 +1913,7 @@ out:
     return 0;
 }
 
+// Hook should have never been added
 //int on_cgroup_attach_task(struct pt_regs *ctx, struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup)
 //{
 //    struct kernfs_node *node = NULL;
