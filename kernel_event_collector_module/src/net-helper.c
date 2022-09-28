@@ -129,7 +129,7 @@ void ec_set_sockaddr_port(CB_SOCK_ADDR *addr, uint32_t port)
     }
 }
 
-void ec_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right)
+void ec_copy_sockaddr(CB_SOCK_ADDR *left, const CB_SOCK_ADDR *right)
 {
     if (right->sa_addr.sa_family == AF_INET)
     {
@@ -140,7 +140,7 @@ void ec_copy_sockaddr(CB_SOCK_ADDR *left, CB_SOCK_ADDR *right)
     }
 }
 
-void ec_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right)
+void ec_copy_sockaddr_in(struct sockaddr_in *left, const struct sockaddr_in *right)
 {
     if (left && right)
     {
@@ -150,7 +150,7 @@ void ec_copy_sockaddr_in(struct sockaddr_in *left, struct sockaddr_in *right)
     }
 }
 
-void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right)
+void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, const struct sockaddr_in6 *right)
 {
     if (left && right)
     {
@@ -161,7 +161,7 @@ void ec_copy_sockaddr_in6(struct sockaddr_in6 *left, struct sockaddr_in6 *right)
 }
 
 void ec_print_address(
-    char                  *msg,
+    const char            *msg,
     const struct sock     *sk,
     const struct sockaddr *localAddr,
     const struct sockaddr *remoteAddr)
