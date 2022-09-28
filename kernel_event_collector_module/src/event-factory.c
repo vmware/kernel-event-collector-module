@@ -300,7 +300,7 @@ void ec_event_send_modload(
 
 void ec_event_send_net_proxy(
     ProcessHandle   * process_handle,
-    char             *msg,
+    const char       *msg,
     CB_EVENT_TYPE     net_event_type,
     CB_SOCK_ADDR     *localAddr,
     CB_SOCK_ADDR     *remoteAddr,
@@ -344,7 +344,7 @@ void ec_event_send_net_proxy(
 
 void ec_event_send_net(
     ProcessHandle   * process_handle,
-    char             *msg,
+    const char       *msg,
     CB_EVENT_TYPE     net_event_type,
     CB_SOCK_ADDR     *localAddr,
     CB_SOCK_ADDR     *remoteAddr,
