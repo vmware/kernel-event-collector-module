@@ -36,8 +36,7 @@ namespace fs = boost::filesystem;
 //#define DEBUG_HARVEST(BLOCK) BLOCK while(0)
 
 BpfApi::BpfApi()
-    : m_ProgType{PROG_TYPE_UNINITIALIZED}
-    , m_BPF(nullptr)
+    : m_BPF(nullptr)
     , m_kptr_restrict_path("/proc/sys/kernel/kptr_restrict")
     , m_bracket_kptr_restrict(false)
     , m_first_syscall_lookup(true)
@@ -50,6 +49,7 @@ BpfApi::BpfApi()
     , m_skel(nullptr)
     , m_epoll_fd(-1)
 {
+    m_ProgInstanceType = BpfApi::ProgInstanceType::Uninitialized;
 }
 
 BpfApi::~BpfApi()
@@ -78,34 +78,26 @@ BpfApi::~BpfApi()
 
 void BpfApi::CleanBuildDir()
 {
-    if (m_ProgType == PROG_TYPE_LIBBPF)
-    {
-        return;
-    }
-
     // delete the contents of the directory /var/tmp/bcc
     // resolves DSEN-13711
     IGNORE_UNUSED_RETURN_VALUE(fs::remove_all("/var/tmp/bcc"));
 }
 
-bool BpfApi::Init(const std::string & bpf_program)
+bool BpfApi::Init_libbpf()
 {
-    if (!m_skel)
-    {
-        m_skel = sensor_bpf__open_and_load();
-
-        if (m_skel)
-        {
-            m_ncpu = ebpf::get_online_cpus();
-            m_ProgType = PROG_TYPE_LIBBPF;
-        }
-    }
-
+    m_skel = sensor_bpf__open_and_load();
     if (m_skel)
     {
+        m_ncpu = ebpf::get_online_cpus();
+        m_ProgInstanceType = BpfApi::ProgInstanceType::LibbpfAutoAttached;
         return true;
     }
 
+    return false;
+}
+
+bool BpfApi::Init_bcc(const std::string & bpf_program)
+{
     m_BPF = std::unique_ptr<ebpf::BPF>(new ebpf::BPF());
     if (!m_BPF)
     {
@@ -128,7 +120,7 @@ bool BpfApi::Init(const std::string & bpf_program)
 
     if (result.ok())
     {
-        m_ProgType = PROG_TYPE_BCC;
+        m_ProgInstanceType = BpfApi::ProgInstanceType::Bcc;
 
         // A compile time BPF program will create map "has_lru".
         // Should throw invalid_argument if not found or wrong map type.
@@ -147,9 +139,33 @@ bool BpfApi::Init(const std::string & bpf_program)
     return result.ok();
 }
 
+bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
+{
+    bool result = false;
+
+    if (try_bcc_first)
+    {
+        result = Init_bcc(bpf_program);
+        if (!result)
+        {
+            result = Init_libbpf();
+        }
+    }
+    else
+    {
+        result = Init_libbpf();
+        if (!result)
+        {
+            result = Init_bcc(bpf_program);
+        }
+    }
+
+    return result;
+}
+
 void BpfApi::Reset()
 {
-    m_ProgType = PROG_TYPE_UNINITIALIZED;
+    m_ProgInstanceType = BpfApi::ProgInstanceType::Uninitialized;
 
     if (m_skel)
     {
@@ -178,8 +194,6 @@ void BpfApi::Reset()
     {
         m_BPF.reset();
     }
-
-    m_ProgType = PROG_TYPE_UNINITIALIZED;
 }
 
 // Used for telling us how we mapped keys and value pairs
@@ -203,7 +217,7 @@ bool BpfApi::IsLRUCapable() const
 // syscall for ARM architecture. So, handling the same for ARM here.
 void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
 {
-    if (m_ProgType == PROG_TYPE_LIBBPF)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
     {
         return;
     }
@@ -241,7 +255,7 @@ bool BpfApi::AttachProbe(const char * name,
                          ProbeType    type)
 {
     // Just return true even though if we don't care
-    if (m_skel)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
     {
         return true;
     }
@@ -299,24 +313,34 @@ bool BpfApi::AttachProbe(const char * name,
     return result.ok();
 }
 
-bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
+bool BpfApi::AutoAttach()
 {
-    if (m_skel)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
     {
+        if (!m_skel)
+        {
+            m_ErrorMessage = std::string("Cannot Auto Attach null bpf skeleton");
+            return false;
+        }
+
         if (sensor_bpf__attach(m_skel))
         {
             m_ErrorMessage = std::string("sensor_bpf__attach failed");
             return false;
         }
+        return true;
+    }
 
+    m_ErrorMessage = std::string("Cannot Auto Attach With InstanceType");
+    return false;
+}
+
+bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
+{
+    if (m_skel)
+    {
         // Get events map
         int map_fd = bpf_map__fd(m_skel->maps.events);
-        // if (!m_skel->maps.events)
-        // {
-        //     m_ErrorMessage = std::string("bpf perf map 'events' not allocated");
-        //     return false;
-        // }
-        // int map_fd = m_skel->maps.events->fd;
         if (map_fd < 0)
         {
             m_ErrorMessage = std::string("bpf perf map 'events' fd not initialized");

@@ -53,6 +53,13 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
+        void setup_AutoAttach(bool result)
+        {
+            ::mock(BPF_API_SCOPE)
+                    .expectOneCall(__MOCKED_FUNCTION__)
+                    .andReturnValue(result);
+        }
+
         void setup_RegisterEventCallback(BpfApi::EventCallbackFn callback, bool result)
         {
             ::mock(BPF_API_SCOPE)
@@ -67,7 +74,8 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
-        bool Init(const std::string & bpf_prog) override
+        bool Init(const std::string & bpf_prog,
+                  bool try_bcc_first) override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
@@ -88,6 +96,13 @@ namespace tdd_mock {
         bool AttachProbe(const char * name,
                                       const char * callback,
                                       ProbeType    type) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool AutoAttach() override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);

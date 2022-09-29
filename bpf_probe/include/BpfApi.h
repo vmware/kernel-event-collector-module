@@ -24,10 +24,6 @@ namespace ebpf {
     class BPF;
 }
 
-#define PROG_TYPE_UNINITIALIZED -1
-#define PROG_TYPE_BCC 0
-#define PROG_TYPE_LIBBPF 1
-
 struct sensor_bpf;
 struct perf_reader;
 
@@ -77,9 +73,17 @@ namespace bpf_probe {
             Tracepoint
         };
 
+        enum class ProgInstanceType
+        {
+            Uninitialized,
+            LibbpfAutoAttached,
+            Bcc,
+        };
+
         virtual ~IBpfApi() = default;
 
-        virtual bool Init(const std::string & bpf_program) = 0;
+        virtual bool Init(const std::string & bpf_program,
+                          bool try_bcc_first = false) = 0;
 
         virtual void Reset() = 0;
 
@@ -90,6 +94,8 @@ namespace bpf_probe {
             const char * callback,
             ProbeType     type) = 0;
 
+        virtual bool AutoAttach() = 0;
+
         virtual bool RegisterEventCallback(EventCallbackFn callback) = 0;
 
         virtual int PollEvents() = 0;
@@ -97,6 +103,24 @@ namespace bpf_probe {
         const std::string &GetErrorMessage() const
         {
             return m_ErrorMessage;
+        }
+
+        ProgInstanceType GetProgInstanceType() const
+        {
+            return m_ProgInstanceType;
+        }
+
+        static const char *InstanceTypeToString(const ProgInstanceType &progInstanceType)
+        {
+            const char *str = "Unknown";
+            switch (progInstanceType)
+            {// LCOV_EXCL_START
+            case ProgInstanceType::Uninitialized: str = "Uninitialized"; break;
+            case ProgInstanceType::LibbpfAutoAttached: str = "LibbpfAutoAttached"; break;
+            case ProgInstanceType::Bcc: str = "Bcc"; break;
+            default: break;
+            }// LCOV_EXCL_END
+            return str;
         }
 
         static const char *TypeToString(uint8_t type)
@@ -147,6 +171,7 @@ namespace bpf_probe {
     protected:
         std::string                 m_ErrorMessage;
         EventCallbackFn             m_eventCallbackFn;
+        ProgInstanceType            m_ProgInstanceType;
     };
 
     class BpfApi
@@ -160,7 +185,8 @@ namespace bpf_probe {
         BpfApi();
         virtual ~BpfApi();
 
-        bool Init(const std::string & bpf_program) override;
+        bool Init(const std::string & bpf_program,
+                  bool try_bcc_first = false) override;
         void Reset() override;
         bool IsLRUCapable() const override;
 
@@ -168,6 +194,8 @@ namespace bpf_probe {
             const char * name,
             const char * callback,
             ProbeType     type) override;
+
+        bool AutoAttach() override;
 
         bool RegisterEventCallback(EventCallbackFn callback) override;
 
@@ -178,9 +206,15 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
-        int                         m_ProgType;
+        ProgInstanceType GetProgInstanceType() const
+        {
+            return m_ProgInstanceType;
+        }
 
     private:
+
+        bool Init_bcc(const std::string & bpf_program);
+        bool Init_libbpf();
 
         void LookupSyscallName(const char * name, std::string & syscall_name);
 

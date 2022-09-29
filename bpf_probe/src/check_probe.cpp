@@ -22,19 +22,20 @@ static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 
 static std::string s_bpf_program;
-static bool check_udp_maps = false;
+static bool try_bcc_first = false;
 
 static int libbpf_print_fn(enum libbpf_print_level level,
                            const char *format, va_list args)
 {
     if (level == LIBBPF_DEBUG)
         return 0;
-    return vfprintf(stderr, format, args);
+    return vfprintf(stdout, format, args);
 }
 
 int main(int argc, char *argv[])
 {
     ParseArgs(argc, argv);
+
     libbpf_set_print(libbpf_print_fn);
 
     printf("Attempting to load probe...\n");
@@ -61,25 +62,32 @@ static void PrintUsage()
     printf("Usage: -- [options]\nOptions:\n");
     printf(" -h - this message\n");
     printf(" -p - probe source file to test\n");
+    printf(" -L - try loading libbpf first\n");
+    printf(" -B - try loading BCC first\n");
 }
 
 static void ParseArgs(int argc, char** argv)
 {
     int                 option_index    = 0;
     struct option const long_options[]  = {
-        {"help",           no_argument,       nullptr, 'h'},
-        {"probe-source",   required_argument, nullptr, 'p'},
+        {"help",                no_argument,       nullptr, 'h'},
+        {"probe-source",        required_argument, nullptr, 'p'},
+        {"try-bcc-first",       no_argument,       nullptr, 'B'},
+        {"try-libbpf-first",    no_argument,       nullptr, 'L'},
         {nullptr, 0,       nullptr, 0}};
 
     while(true)
     {
-        int opt = getopt_long(argc, argv, "hp:u", long_options, &option_index);
+        int opt = getopt_long(argc, argv, "hp:LB", long_options, &option_index);
         if(-1 == opt) break;
 
         switch(opt)
         {
-            case 'u':
-                check_udp_maps = true;
+            case 'L':
+                try_bcc_first = false;
+                break;
+            case 'B':
+                try_bcc_first = true;
                 break;
             case 'p':
                 ReadProbeSource(optarg);
@@ -132,21 +140,27 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
         printf("Invalid argument to 'LoadProbe'\n");
         return false;
     }
+    const char *preferred_instance = "Unknown";
+    if (try_bcc_first)
+    {
+        preferred_instance = "Bcc";
+    }
+    else
+    {
+        preferred_instance = "Libbpf";
+    }
 
-    bool init = bpf_api.Init(bpf_program);
-    int prog_type = bpf_api.m_ProgType;
-
-    const char *prog_type_name = "UNINIT";
-    if (prog_type == PROG_TYPE_BCC) prog_type_name = "BCC";
-    if (prog_type == PROG_TYPE_LIBBPF) prog_type_name = "LIBBPF";
-    fprintf(stderr, "prog_type: %s\n", prog_type_name);
-
+    bool init = bpf_api.Init(bpf_program, try_bcc_first);
     if (!init)
     {
         printf("Failed to init BPF program: %s\n",
                bpf_api.GetErrorMessage().c_str());
         return false;
     }
+
+    BpfApi::ProgInstanceType instance_type = bpf_api.GetProgInstanceType();
+    printf("PreferredInstance: %s InstanceType: %s\n", preferred_instance,
+           BpfApi::InstanceTypeToString(instance_type));
 
     if (!BpfProgram::InstallHooks(bpf_api, BpfProgram::DEFAULT_HOOK_LIST))
     {
