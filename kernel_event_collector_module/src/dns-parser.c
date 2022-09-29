@@ -89,6 +89,9 @@ int ec_dns_parse_data(char                *dns_data,
 
     response->status = DNS_STATUS_OK;
 
+    // CID-17632
+    //  This call uses __ec_dns_check_overrun while looping over the data to properly ensure we do not overrun the packet
+    // coverity[tainted_data]
     dataPos += __ec_dns_parse_name(response->qname, dataPos, dns_data, dns_data_len, &xcode);
     TRY(xcode == S_OK);
 
@@ -103,6 +106,9 @@ int ec_dns_parse_data(char                *dns_data,
 
     for (i = 0; i < response->record_count; i++)
     {
+        // CID-17632
+        //  This call uses __ec_dns_check_overrun while looping over the data to properly ensure we do not overrun the packet
+        // coverity[tainted_data]
         dataPos = __ec_dns_parse_record(&response->records[i], dataPos, dns_data, response->qname, dns_data_len, &xcode);
         if (xcode != S_OK)
         {
@@ -150,6 +156,7 @@ int __ec_dns_parse_name(char     *to,
     {
         move_buf += move_increment;
 
+        // This is a simplified check from what is done in __ec_dns_check_overrun
         TRY_SET_MSG(from < dataEnd, DNS_ERROR_INVALID_DATA,
                     DL_ERROR, "DNS name too long for buffer.");
 

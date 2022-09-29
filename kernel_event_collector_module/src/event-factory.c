@@ -82,7 +82,8 @@ void ec_event_send_start(
     event->processStart.path  = ec_mem_get(ec_process_cmdline(process_handle), context);// take reference
     event->processStart.path_size = ec_mem_size(event->processStart.path);
 
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -99,7 +100,8 @@ void ec_event_send_last_exit(PCB_EVENT        event,
            event->procInfo.all_process_details.array[EXEC].start_time,
            event->procInfo.all_process_details.array[EXEC_PARENT].pid);
 
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -126,6 +128,8 @@ void ec_event_send_exit(
             // This is a fork exit, so send it now
             //  Note: This exit event may be collected by the agent before events
             //        produced by this fork.
+            // Coverity thinks that we leak the event because we use containerof to get the list node
+            // coverity[leaked_storage]
             ec_send_event(event, context);
             status_msg = "<SEND> ";
         } else
@@ -182,8 +186,8 @@ void ec_event_send_block(
         event->blockResponse.path_size = ec_mem_size(event->blockResponse.path);
     }
 
-
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -235,7 +239,8 @@ void ec_event_send_file(
         event->fileGeneric.path_size = ec_mem_size(path_data->path);
     }
 
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -294,7 +299,8 @@ void ec_event_send_modload(
         event->moduleLoad.path_size = ec_mem_size(event->moduleLoad.path);
     }
 
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -338,7 +344,8 @@ void ec_event_send_net_proxy(
         event->netConnect.server_size = ec_mem_size(event->netConnect.actual_server);
     }
 
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -387,7 +394,8 @@ void ec_event_send_dns(
     // Clear this from the input because it is now owned by the event.
     response->records = NULL;
 
-    // Queue it to be sent to usermode
+    // Coverity thinks that we leak the event because we use containerof to get the list node
+    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
