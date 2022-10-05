@@ -126,6 +126,8 @@ struct mount {
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 // TODO: Fix our kprobe syscall names so arm64 works too
+// Field should not be needed to be defined once we start
+// linking to newer libbpf like 1.0.0+
 _Bool LINUX_HAS_SYSCALL_WRAPPER = 1;
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";

@@ -23,20 +23,31 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 
 static std::string s_bpf_program;
 static bool try_bcc_first = false;
+static unsigned int verbosity = 0;
 
 static int libbpf_print_fn(enum libbpf_print_level level,
                            const char *format, va_list args)
 {
-    if (level == LIBBPF_DEBUG)
-        return 0;
-    return vfprintf(stdout, format, args);
+    switch (verbosity)
+    {
+    case 0:
+        if (level == LIBBPF_DEBUG)
+            return 0;
+        return vfprintf(stdout, format, args);
+
+    case 1:
+        if (level == LIBBPF_DEBUG)
+            return vfprintf(stderr, format, args);
+        return vfprintf(stdout, format, args);
+
+    default:
+        return vfprintf(stdout, format, args);
+    }
 }
 
 int main(int argc, char *argv[])
 {
     ParseArgs(argc, argv);
-
-    libbpf_set_print(libbpf_print_fn);
 
     printf("Attempting to load probe...\n");
     std::unique_ptr<BpfApi> bpf_api = std::unique_ptr<BpfApi>(new BpfApi());
@@ -45,6 +56,8 @@ int main(int argc, char *argv[])
         printf("Create probe failed\n");
         return 1;
     }
+
+    bpf_api->SetLibBpfLogCallback(libbpf_print_fn);
 
     if (!LoadProbe(*bpf_api, (!s_bpf_program.empty() ? s_bpf_program : BpfProgram::DEFAULT_PROGRAM)))
     {
@@ -64,6 +77,7 @@ static void PrintUsage()
     printf(" -p - probe source file to test\n");
     printf(" -L - try loading libbpf first\n");
     printf(" -B - try loading BCC first\n");
+    printf(" -v - Add verbosity\n");
 }
 
 static void ParseArgs(int argc, char** argv)
@@ -74,15 +88,19 @@ static void ParseArgs(int argc, char** argv)
         {"probe-source",        required_argument, nullptr, 'p'},
         {"try-bcc-first",       no_argument,       nullptr, 'B'},
         {"try-libbpf-first",    no_argument,       nullptr, 'L'},
+        {"verbose",             no_argument,       nullptr, 'v'},
         {nullptr, 0,       nullptr, 0}};
 
     while(true)
     {
-        int opt = getopt_long(argc, argv, "hp:LB", long_options, &option_index);
+        int opt = getopt_long(argc, argv, "hp:LBv", long_options, &option_index);
         if(-1 == opt) break;
 
         switch(opt)
         {
+            case 'v':
+                verbosity += 1;
+                break;
             case 'L':
                 try_bcc_first = false;
                 break;

@@ -48,6 +48,7 @@ BpfApi::BpfApi()
     , m_has_lru_hash(false)
     , m_skel(nullptr)
     , m_epoll_fd(-1)
+    , m_log_fn(nullptr)
 {
     m_ProgInstanceType = BpfApi::ProgInstanceType::Uninitialized;
 }
@@ -73,6 +74,12 @@ BpfApi::~BpfApi()
             }
             m_perf_reader.clear();
         }
+    }
+
+    // Ensure C global holds our reference
+    if (m_log_fn)
+    {
+        libbpf_set_print(nullptr);
     }
 }
 
@@ -706,4 +713,26 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
         memcpy(data, orig_data, data_size);
         bpfApi->OnEvent(static_cast<bpf_probe::data *>(data));
     }
+}
+
+// "Global" default callback libbpf log function
+int BpfApi::default_libbpf_log(enum libbpf_print_level level,
+                               const char *format,
+                               va_list args)
+{
+    if (level == LIBBPF_DEBUG)
+    {
+        return 0;
+    }
+
+    return vfprintf(stderr, format, args);
+}
+
+// Allow instance to provide their own custom logger.
+// BCC specific message should have their own callback fn.
+libbpf_print_fn_t BpfApi::SetLibBpfLogCallback(libbpf_print_fn_t log_fn)
+{
+    m_log_fn = log_fn;
+
+    return libbpf_set_print(log_fn);
 }

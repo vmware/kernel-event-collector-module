@@ -29,12 +29,14 @@ include_directories(${PROJECT_SOURCE_DIR}/../include)
 
 set(EPBF_PROG_CPP ${CMAKE_CURRENT_BINARY_DIR}/cb_ebpfprog.cpp)
 set(EBPF_PPRG_SRC ${PROJECT_SOURCE_DIR}/bcc_sensor.c)
+set(SENSOR_BPF_SRC ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
+set(SENSOR_BPF_SRC_R ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.h)
 set(GENERATE_SH   ${PROJECT_SOURCE_DIR}/generate.sh)
 
 add_custom_command(
-        OUTPUT ${EPBF_PROG_CPP}
+        OUTPUT ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC_R}
         COMMAND chmod a+x ${GENERATE_SH}
-        COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${EPBF_PROG_CPP}
+        COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC}
         DEPENDS ${GENERATE_SH} ${EBPF_PPRG_SRC}
         COMMENT "Generating BPF Program ${EPBF_PROG_CPP}"
 )
@@ -53,27 +55,20 @@ target_include_directories(bpf-probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
 if (NOT ${LOCAL_BUILD})
     target_link_libraries(bpf-probe
             CONAN_PKG::bcc
-            CONAN_PKG::libbpf
 
             -Wl,--whole-archive
             CONAN_PKG::llvm
             CONAN_LIB::elfutils_elf
             -Wl,--no-whole-archive
             CONAN_PKG::Boost
-
-            z rt dl pthread m
-            )
+    )
 else()
     target_link_libraries(bpf-probe
         bcc
-        z
-        rt
-        dl
-        pthread
-        m
         boost
     )
 endif()
+target_link_libraries(bpf-probe z rt dl pthread m)
 add_dependencies(bpf-probe bpf_skel)
 target_include_directories(bpf-probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 #target_include_directories(check_probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
@@ -117,7 +112,6 @@ add_executable(check_probe check_probe.cpp)
 target_link_libraries(check_probe
         bpf-probe
         z rt dl pthread m
-#        CONAN_PKG::libbpf # Only link if not part of BpfApi
 )
 add_dependencies(check_probe bpf_skel)
 target_include_directories(check_probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

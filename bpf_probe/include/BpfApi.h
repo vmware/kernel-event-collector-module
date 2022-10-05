@@ -13,6 +13,8 @@
 
 #include <sys/epoll.h>
 
+#include <bpf/libbpf.h>
+
 // A number of calls are annotated with 'warn_unused_result' in their definition, so a
 // normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
 // the compiler into properly allowing the call to be ignored.
@@ -211,6 +213,12 @@ namespace bpf_probe {
             return m_ProgInstanceType;
         }
 
+        libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn);
+
+        static int default_libbpf_log(enum libbpf_print_level level,
+                                      const char *format,
+                                      va_list args);
+
     private:
 
         bool Init_bcc(const std::string & bpf_program);
@@ -253,6 +261,9 @@ namespace bpf_probe {
         CpuList                     m_ncpu;
         PerfReaderList              m_perf_reader;
         EpollEventData              m_epoll_data;
+
+        // C style function pointer.
+        libbpf_print_fn_t           m_log_fn;
     };
 }
 }
