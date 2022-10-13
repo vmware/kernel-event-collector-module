@@ -161,6 +161,8 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 // TODO: Fix architecture specific macro definitions
 # define MAP_DENYWRITE          0x00800                /* ETXTBSY */
 # define MAP_EXECUTABLE         0x01000                /* Mark it as an executable.  */
+# define MAP_PRIVATE            0x00002
+# define MAP_FIXED              0x00010
 
 #define     S_IFMT              00170000
 #define     S_IFREG             0100000
@@ -1083,6 +1085,7 @@ SEC("kprobe/security_mmap_file")
 int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, unsigned long flags)
 {
     unsigned long exec_flags;
+    unsigned long file_flags;
     DECLARE_FILE_EVENT(data);
 
     if (!file) {
@@ -1092,9 +1095,26 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
         goto out;
     }
 
-    exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-    if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
-        goto out;
+    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(5, 14, 0)) {
+        exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
+        if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
+        	goto out;
+        }
+    } else {
+    	// This fix is to adjust the flag changes in 5.14 kernel to match the user space pipeline requirement
+    	//  - MAP_EXECUTABLE flag is not available for exec mmap function
+    	//  - MAP_DENYWRITE flag is "reverted" for ld.so and normal mmap
+
+    	bpf_core_read(&file_flags, sizeof(file_flags), &(file->f_flags));
+    	if (file_flags & FMODE_EXEC && flags == (MAP_FIXED | MAP_PRIVATE)) {
+    		goto out;
+    	}
+
+    	if (flags & MAP_DENYWRITE) {
+    		flags &= ~MAP_DENYWRITE;
+    	} else {
+    		flags |= MAP_DENYWRITE;
+    	}
     }
 
     __init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
