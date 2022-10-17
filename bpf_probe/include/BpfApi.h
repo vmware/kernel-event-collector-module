@@ -102,6 +102,8 @@ namespace bpf_probe {
 
         virtual int PollEvents() = 0;
 
+        virtual libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) = 0;
+
         const std::string &GetErrorMessage() const
         {
             return m_ErrorMessage;
@@ -213,7 +215,7 @@ namespace bpf_probe {
             return m_ProgInstanceType;
         }
 
-        libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn);
+        libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) override;
 
         static int default_libbpf_log(enum libbpf_print_level level,
                                       const char *format,

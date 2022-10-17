@@ -122,6 +122,11 @@ namespace tdd_mock {
                 .actualCall(__FUNCTION__);
             return ::mock(BPF_API_SCOPE).intReturnValue();
         }
+
+        libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) override
+        {
+            return nullptr;
+        }
     };
 }
 }
