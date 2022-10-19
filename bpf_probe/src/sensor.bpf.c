@@ -1847,34 +1847,38 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
     struct sock *skp = *skpp;
     data.ipver = BPF_CORE_READ(skp, __sk_common.skc_family);
 
-    // TODO: Use more CORE operations instead of stack storage
-    if (msgpp)
+    struct msghdr *msg;
+    if (msgpp && (msg = *msgpp))
     {
-        struct msghdr msghdr;
+        void *msg_name = BPF_CORE_READ(msg, msg_name);
+        int msg_namelen = BPF_CORE_READ(msg, msg_namelen);
 
-        bpf_probe_read(&msghdr, sizeof(msghdr), *msgpp);
-
-        if (msghdr.msg_name && msghdr.msg_namelen > 0)
+        if (msg_name && msg_namelen > 0)
         {
-            if (check_family(skp, AF_INET) && msghdr.msg_namelen >= sizeof(struct sockaddr_in))
+            switch (BPF_CORE_READ(skp, __sk_common.skc_family))
             {
-                struct sockaddr_in addr_in;
-                bpf_probe_read(&addr_in, sizeof(addr_in), msghdr.msg_name);
-                data.remote_port = addr_in.sin_port;
-                data.remote_addr = addr_in.sin_addr.s_addr;
+            case AF_INET: {
+                struct sockaddr_in *addr_in = (typeof(addr_in))msg_name;
 
+                data.remote_port = BPF_CORE_READ(addr_in, sin_port);
+                data.remote_addr = BPF_CORE_READ(addr_in, sin_addr.s_addr);
                 addr_in_msghr = true;
+                break;
             }
-            else if (check_family(skp, AF_INET6) && msghdr.msg_namelen >= sizeof(struct sockaddr_in6))
-            {
-                struct sockaddr_in6 addr_in;
-                bpf_probe_read(&addr_in, sizeof(addr_in), msghdr.msg_name);
-                data.remote_port = addr_in.sin6_port;
+
+            case AF_INET6: {
+                struct sockaddr_in6 *addr_in6 = (typeof(addr_in6))msg_name;
+
+                data.remote_port = BPF_CORE_READ(addr_in6, sin6_port);
                 bpf_probe_read(
                     &data.remote_addr6, sizeof(data.remote_addr6),
-                    addr_in.sin6_addr.in6_u.u6_addr32);
-
+                    BPF_CORE_READ(addr_in6, sin6_addr.in6_u.u6_addr32));
                 addr_in_msghr = true;
+                break;
+            }
+
+            default:
+                goto out;
             }
         }
     }
@@ -1888,8 +1892,9 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
         data.remote_port = BPF_CORE_READ(skp, __sk_common.skc_dport); // already network order
     }
 
-    if (check_family(skp, AF_INET))
+    switch (BPF_CORE_READ(skp, __sk_common.skc_family))
     {
+    case AF_INET: {
         data.local_addr = BPF_CORE_READ(skp, __sk_common.skc_rcv_saddr);
         if (!addr_in_msghr)
         {
@@ -1914,9 +1919,10 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
             goto out;
         }
 #endif /* CACHE_UDP */
+        break;
     }
-    else if (check_family(skp, AF_INET6))
-    {
+
+    case AF_INET6: {
         if (!addr_in_msghr)
         {
             __be32 *daddr = BPF_CORE_READ(skp, __sk_common.skc_v6_daddr.in6_u.u6_addr32);
@@ -1939,6 +1945,11 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
             goto out;
         }
 #endif /* CACHE_UDP */
+        break;
+    }
+
+    default:
+        goto out;
     }
     send_event(ctx, &data, sizeof(data));
 
