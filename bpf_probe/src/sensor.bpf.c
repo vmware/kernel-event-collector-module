@@ -135,7 +135,7 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 //////////// Missing imports ///////////
 #define BPF_F_CURRENT_CPU 0xffffffffULL
 #define AF_INET     2       /* internetwork: UDP, TCP, etc. */
-#define AF_INET6    28      /* IPv6 */
+#define AF_INET6    10      /* IPv6 */
 #define BPF_ANY     0 /* create new element or update existing */
 #define BPF_NOEXIST 1 /* create new element if it didn't exist */
 #define BPF_EXIST   2 /* update existing element */
@@ -1794,8 +1794,7 @@ int BPF_KRETPROBE(trace_udp_recvmsg_return)
     return 0;
 }
 
-SEC("kprobe/udp_sendmsg")
-int BPF_KPROBE(trace_udp_sendmsg, struct sock *sk, struct msghdr *msg)
+static int trace_udp_sendmsg(struct sock *sk, struct msghdr *msg)
 {
     u64 id;
 
@@ -1805,8 +1804,20 @@ int BPF_KPROBE(trace_udp_sendmsg, struct sock *sk, struct msghdr *msg)
     return 0;
 }
 
-SEC("kretprobe/udp_sendmsg")
-int BPF_KRETPROBE(trace_udp_sendmsg_return)
+SEC("kprobe/udp_sendmsg")
+int BPF_KPROBE(kprobe_udp_sendmsg, struct sock *sk, struct msghdr *msg)
+{
+    return trace_udp_sendmsg(sk, msg);
+}
+
+SEC("kprobe/udpv6_sendmsg")
+int BPF_KPROBE(kprobe_udpv6_sendmsg, struct sock *sk, struct msghdr *msg)
+{
+    return trace_udp_sendmsg(sk, msg);
+}
+
+
+static int trace_udp_sendmsg_return(struct pt_regs *ctx)
 {
     int ret = PT_REGS_RC(ctx);
     u64 id  = bpf_get_current_pid_tgid();
@@ -1836,6 +1847,7 @@ int BPF_KRETPROBE(trace_udp_sendmsg_return)
     struct sock *skp = *skpp;
     data.ipver = BPF_CORE_READ(skp, __sk_common.skc_family);
 
+    // TODO: Use more CORE operations instead of stack storage
     if (msgpp)
     {
         struct msghdr msghdr;
@@ -1860,7 +1872,7 @@ int BPF_KRETPROBE(trace_udp_sendmsg_return)
                 data.remote_port = addr_in.sin6_port;
                 bpf_probe_read(
                     &data.remote_addr6, sizeof(data.remote_addr6),
-                    &addr_in.sin6_addr);
+                    addr_in.sin6_addr.in6_u.u6_addr32);
 
                 addr_in_msghr = true;
             }
@@ -1908,11 +1920,11 @@ int BPF_KRETPROBE(trace_udp_sendmsg_return)
         if (!addr_in_msghr)
         {
             __be32 *daddr = BPF_CORE_READ(skp, __sk_common.skc_v6_daddr.in6_u.u6_addr32);
-            bpf_probe_read(&data.remote_addr6, sizeof(data.remote_addr6), &daddr);
+            bpf_probe_read(&data.remote_addr6, sizeof(data.remote_addr6), daddr);
         }
 
         __be32 *saddr = BPF_CORE_READ(skp, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
-        bpf_probe_read(&data.local_addr6, sizeof(data.local_addr6), &saddr);
+        bpf_probe_read(&data.local_addr6, sizeof(data.local_addr6), saddr);
 
 #ifdef CACHE_UDP
         struct ip6_key ip_key = {};
@@ -1934,6 +1946,18 @@ out:
     bpf_map_delete_elem(&currsock3, &id);
     bpf_map_delete_elem(&currsock2, &id);
     return 0;
+}
+
+SEC("kretprobe/udp_sendmsg")
+int BPF_KRETPROBE(kretpobe_udp_sendmsg)
+{
+    return trace_udp_sendmsg_return(ctx);
+}
+
+SEC("kretprobe/udpv6_sendmsg")
+int BPF_KRETPROBE(kretpobe_udpv6_sendmsg)
+{
+    return trace_udp_sendmsg_return(ctx);
 }
 
 // Hook should have never been added
