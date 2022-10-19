@@ -372,19 +372,19 @@ struct {
 # define bpf_core_read bpf_probe_read
 
 #define bpf_perf_event_output(ctx, map_addr, _, data, data_size) \
-    (*(map_addr).perf_submit(ctx, data, data_size))
+    ((*map_addr).perf_submit(ctx, data, data_size))
 
 #define bpf_map_lookup_elem(map, key) \
-    (*(map).lookup(key))
+    ((*map).lookup(key))
 
 #define bpf_map_delete_elem(map, key) \
-    (*(map).delete(key))
+    ((*map).delete(key))
 
 #define bpf_map_update_elem(map, key, value, type) \
     { if (type == BPF_NOEXIST) {                   \
-          *(map).insert(key, value);               \
+          (*map).insert(key, value);               \
       } else {                                     \
-          *(map).update(key, value);               \
+          (*map).update(key, value);               \
       }                                            \
     }
 
