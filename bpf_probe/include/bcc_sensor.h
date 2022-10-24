@@ -61,6 +61,7 @@ namespace bpf_probe {
         uint32_t uid;
         uint32_t ppid;
         uint32_t mnt_ns;
+        uint8_t cgroup[12];
     };
 
     struct data {

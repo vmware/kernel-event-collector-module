@@ -450,6 +450,7 @@ struct data_header {
 	u32 uid;
 	u32 ppid;
 	u32 mnt_ns;
+    u8 cgroup[12];
 };
 
 struct data {
@@ -550,13 +551,28 @@ static inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe
 	}
 }
 
+static void get_cgroup(struct data_header *header)
+{
+    struct task_struct * task = (struct task_struct *)bpf_get_current_task();
+    char* cgroup_path;
+    struct kernfs_node *kn = (struct kernfs_node *)BPF_CORE_READ(task, cgroups, subsys[cpuset_cgrp_id], cgroup, kn);
+    if (kn) {
+        cgroup_path = (char *)BPF_CORE_READ(kn, name);
+    } else {
+        cgroup_path = "no cgroup";
+    }
+    //memcpy(c);
+    bpf_probe_read_str(header->cgroup, sizeof(header->cgroup), cgroup_path);
+}
 
 static void send_event(
 	struct pt_regs *ctx,
 	void           *data,
 	size_t          data_size)
 {
-	((struct data*)data)->header.event_time = bpf_ktime_get_ns();
+    struct data_header *header = &((struct data*)data)->header;
+    //get_cgroup(header);
+	header->event_time = bpf_ktime_get_ns();
     bpf_ringbuf_output(&events, data, data_size, 0);
 }
 
@@ -733,6 +749,7 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
 		if (BPF_CORE_READ(task, real_parent)) {
 			header->ppid = BPF_CORE_READ(task, real_parent, tgid);
 		}
+        get_cgroup(header);
 		header->mnt_ns = __get_mnt_ns_id(task);
 	}
 #endif /* __BCC_UNDER_4_8__ */
