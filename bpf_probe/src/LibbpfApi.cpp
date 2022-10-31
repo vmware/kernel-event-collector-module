@@ -10,14 +10,13 @@
 #include <chrono>
 #include <exception>
 #include <unistd.h>
-//#include <boost/filesystem.hpp>
 
 #include <sys/resource.h>
 #include <bpf/libbpf.h>
-
 //#include <bpf/bpf.h>
 
 #include "sensor.skel.h"
+
 
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
@@ -47,9 +46,13 @@ BpfApi::BpfApi()
 BpfApi::~BpfApi()
 {
 }
-
-static int on_ring_submit_libbpf(void *ctx, void *data, uint64_t size)
+static int on_ring_submit_libbpf(void *ctx, void *orig_data, uint64_t size)
 {
+    data *data = reinterpret_cast<cb_endpoint::bpf_probe::data *>(new (std::nothrow) char[size]);
+    if (!data) {
+        return -1;
+    }
+    memcpy(data, orig_data, size);
     auto bpfApi = static_cast<BpfApi*>(ctx);
     if (bpfApi)
     { 
