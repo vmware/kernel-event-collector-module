@@ -542,11 +542,136 @@ struct _file_event
     };
 };
 
-#define DECLARE_FILE_EVENT(DATA) struct _file_event DATA = {}
-#define GENERIC_DATA(DATA)  ((struct data*)&((struct _file_event*)(DATA))->_data)
-#define FILE_DATA(DATA)  ((struct file_data*)&((struct _file_event*)(DATA))->_file_data)
-#define PATH_DATA(DATA)  ((struct path_data*)&((struct _file_event*)(DATA))->_path_data)
-#define RENAME_DATA(DATA)  ((struct rename_data*)&((struct _file_event*)(DATA))->_rename_data)
+#ifdef __BCC__
+BPF_LRU(xpad, u64, struct _file_event);
+#else
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, u64);
+    __type(value, struct _file_event);
+} xpad SEC(".maps");
+// struct {
+//     __uint(type, BPF_MAP_TYPE_LRU_HASH);
+//     __uint(max_entries, 2);
+//     __type(key, u64);
+//     __type(value, struct _file_event);
+// } pcpu_xpad SEC(".maps");
+
+static const struct _file_event empty_file_event = {};
+#endif
+
+#ifdef __BCC__
+#define DECLARE_FILE_EVENT(DATA) struct _file_event __DATA = {}, struct _file_event *DATA = &__DATA
+#define RELEASE_DATA(DATA) do { } while (0)
+#else
+#define DECLARE_FILE_EVENT(DATA) \
+u64 DATA_id = 0; \
+struct _file_event *DATA = __current_blob(NULL, &DATA_id)
+
+#define RELEASE_DATA(DATA)                      \
+do {                                            \
+    if ((DATA)) {                                 \
+        __release_blob(NULL, (DATA), DATA_id);       \
+        (DATA) = NULL;                            \
+    }                                           \
+} while (0)
+#endif
+#define GENERIC_DATA(DATA)  (&((struct _file_event *)(DATA))->_data)
+#define FILE_DATA(DATA)  (&((struct _file_event*)(DATA))->_file_data)
+#define PATH_DATA(DATA)  (&((struct _file_event*)(DATA))->_path_data)
+#define RENAME_DATA(DATA)  (&((struct _file_event*)(DATA))->_rename_data)
+
+static void *__current_blob(struct bpf_map *map, u64 *id)
+{
+    void *data;
+    u64 local_id;
+
+    if (!map)
+    {
+        map = (struct bpf_map *)&xpad;
+    }
+
+    local_id = bpf_get_current_pid_tgid();
+
+    if (bpf_map_update_elem(map, &local_id, &empty_file_event, BPF_NOEXIST))
+    {
+        return NULL;
+    }
+
+    data = bpf_map_lookup_elem(&xpad, &local_id);
+    if (id && data)
+    {
+        *id = local_id;
+    }
+
+    return data;
+}
+
+static u64 __task_pid_tgid(const struct task_struct *task)
+{
+    u64 id = 0;
+
+    BPF_CORE_READ_INTO(&id, task, pid);
+    id = (id << 32);
+
+    return (id | BPF_CORE_READ(task, tgid));
+}
+
+static void *__get_blob_by_task(struct bpf_map *map,
+                                const struct task_struct *task, u64 *id)
+{
+    void *data;
+    u64 local_id;
+
+    if (!map)
+    {
+        map = (struct bpf_map *)&xpad;
+    }
+
+    if (!task)
+    {
+        return NULL;
+    }
+
+    local_id = __task_pid_tgid(task);
+
+    if (bpf_map_update_elem(map, &local_id, &empty_file_event, BPF_NOEXIST))
+    {
+        return NULL;
+    }
+
+    data = bpf_map_lookup_elem(&xpad, &local_id);
+    if (id && data)
+    {
+        *id = local_id;
+    }
+    return data;
+}
+
+static void __release_blob(struct bpf_map *map, void *data, u64 id)
+{
+    if (!map)
+    {
+        map = (struct bpf_map *)&xpad;
+    }
+
+    if (data)
+    {
+        bpf_map_delete_elem(map, &id);
+    }
+}
+
+static void __release_blob_by_task(struct bpf_map *map, void *data,
+                                   const struct task_struct *task)
+{
+    if (task)
+    {
+        u64 id = __task_pid_tgid(task);
+
+        __release_blob(map, data, id);
+    }
+}
 
 static inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr) {
     // Note that these functions are not 100% compatible.  The read_str function returns the number of bytes read,
@@ -953,10 +1078,12 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execveat, int fd,
                  const char __user *const __user *envp, int flags)
 {
     DECLARE_FILE_EVENT(data);
+    if (!data) return 0;
 
-    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-    submit_all_args(ctx, argv, PATH_DATA(&data));
+    submit_all_args(ctx, argv, PATH_DATA(data));
+    RELEASE_DATA(data);
 
     return 0;
 }
@@ -967,10 +1094,12 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execve, const char __user *filename,
                const char __user *const __user *envp)
 {
     DECLARE_FILE_EVENT(data);
+    if (!data) return 0;
 
-    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-    submit_all_args(ctx, argv, PATH_DATA(&data));
+    submit_all_args(ctx, argv, PATH_DATA(data));
+    RELEASE_DATA(data);
 
     return 0;
 }
@@ -1062,23 +1191,28 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
     void *cachep = bpf_map_lookup_elem(&file_write_cache, &file_cache_key);
     if (cachep) {
         DECLARE_FILE_EVENT(data);
-        __init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+        if (!data) goto out_del;
+
+        __init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
 #ifdef __BCC_UNDER_4_10__
-        FILE_DATA(&data)->device = __get_device_from_file(file);
-            FILE_DATA(&data)->inode = __get_inode_from_file(file);
+        FILE_DATA(data)->device = __get_device_from_file(file);
+            FILE_DATA(data)->inode = __get_inode_from_file(file);
 #else
-        FILE_DATA(&data)->device = ((struct file_data_cache *) cachep)->device;
-        FILE_DATA(&data)->inode = ((struct file_data_cache *) cachep)->inode;
+        FILE_DATA(data)->device = ((struct file_data_cache *) cachep)->device;
+        FILE_DATA(data)->inode = ((struct file_data_cache *) cachep)->inode;
 #endif /* __BCC_UNDER_4_10__ */
 
-        send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+        send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
-        __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(&data));
-        send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+        __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
+        send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+        RELEASE_DATA(data);
     }
 
+out_del:
     bpf_map_delete_elem(&file_write_cache, &file_cache_key);
+
     return 0;
 }
 
@@ -1087,7 +1221,8 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
 {
     unsigned long exec_flags;
     unsigned long file_flags;
-    DECLARE_FILE_EVENT(data);
+    u64 DATA_id = 0;
+    struct _file_event *data = NULL;
 
     if (!file) {
         goto out;
@@ -1118,20 +1253,28 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     	}
     }
 
-    __init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    data = __current_blob(NULL, &DATA_id);
+    if (!data)
+    {
+        goto out;
+    }
+
+    __init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
     // event specific data
-    FILE_DATA(&data)->device = __get_device_from_file(file);
-    FILE_DATA(&data)->inode = __get_inode_from_file(file);
-    FILE_DATA(&data)->flags = flags;
-    FILE_DATA(&data)->prot = prot;
+    FILE_DATA(data)->device = __get_device_from_file(file);
+    FILE_DATA(data)->inode = __get_inode_from_file(file);
+    FILE_DATA(data)->flags = flags;
+    FILE_DATA(data)->prot = prot;
     // submit initial event data
-    send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+    send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
     // submit file path event data
-    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(&data));
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
+    RELEASE_DATA(data);
+
     return 0;
 }
 
@@ -1145,7 +1288,9 @@ out:
 SEC("kprobe/security_file_open")
 int BPF_KPROBE(on_security_file_open, struct file *file)
 {
-    DECLARE_FILE_EVENT(data);
+    // DECLARE_FILE_EVENT(data);
+    u64 DATA_id = 0;
+    struct _file_event *data = NULL;
     struct super_block *sb = NULL;
     struct inode *inode = NULL;
     int mode;
@@ -1185,26 +1330,31 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
         type = EVENT_FILE_READ;
     }
 
-    __init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-    FILE_DATA(&data)->device = __get_device_from_file(file);
-    FILE_DATA(&data)->inode = __get_inode_from_file(file);
-    FILE_DATA(&data)->flags = BPF_CORE_READ(file, f_flags);
-    FILE_DATA(&data)->prot = BPF_CORE_READ(file, f_mode);
-    FILE_DATA(&data)->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data = __current_blob(NULL, &DATA_id);
+    if (!data) goto out;
+
+    __init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+    FILE_DATA(data)->device = __get_device_from_file(file);
+    FILE_DATA(data)->inode = __get_inode_from_file(file);
+    FILE_DATA(data)->flags = BPF_CORE_READ(file, f_flags);
+    FILE_DATA(data)->prot = BPF_CORE_READ(file, f_mode);
+    FILE_DATA(data)->fs_magic = BPF_CORE_READ(sb, s_magic);
 
     if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
     {
         // This allows us to send the last-write event on file close
-        __track_write_entry(file, FILE_DATA(&data));
+        __track_write_entry(file, FILE_DATA(data));
     }
 
-    send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+    send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
-    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(&data));
+    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
 
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 
 out:
+    RELEASE_DATA(data);
+
     return 0;
 }
 
@@ -1236,17 +1386,13 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 SEC("kprobe/security_inode_unlink")
 int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentry)
 {
-    DECLARE_FILE_EVENT(data);
-    // struct super_block *sb = NULL;
-    // int mode;
-
-    if (!dentry) {
-        goto out;
+    if (dentry) {
+        DECLARE_FILE_EVENT(data);
+        if (!data) return 0;
+        __send_dentry_delete(ctx, data, dentry);
+        RELEASE_DATA(data);
     }
 
-    __send_dentry_delete(ctx, &data, dentry);
-
-out:
     return 0;
 }
 
@@ -1258,38 +1404,42 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
     DECLARE_FILE_EVENT(data);
     struct super_block *sb = NULL;
 
+    if (!data) goto out;
+
     // send event for delete of source file
-    if (!__send_dentry_delete(ctx, &data, old_dentry)) {
+    if (!__send_dentry_delete(ctx, data, old_dentry)) {
         goto out;
     }
 
-    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
     sb = _sb_from_dentry(old_dentry);
 
-    RENAME_DATA(&data)->device = __get_device_from_dentry(old_dentry);
-    RENAME_DATA(&data)->old_inode = __get_inode_from_dentry(old_dentry);
-    RENAME_DATA(&data)->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
+    RENAME_DATA(data)->device = __get_device_from_dentry(old_dentry);
+    RENAME_DATA(data)->old_inode = __get_inode_from_dentry(old_dentry);
+    RENAME_DATA(data)->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
 
-    __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->old_inode);
+    __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->old_inode);
 
     // If the target destination already exists
     if (new_dentry)
     {
-        __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->new_inode);
+        __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->new_inode);
 
-        RENAME_DATA(&data)->new_inode  = __get_inode_from_dentry(new_dentry);
+        RENAME_DATA(data)->new_inode  = __get_inode_from_dentry(new_dentry);
     }
     else
     {
-        RENAME_DATA(&data)->new_inode  = 0;
+        RENAME_DATA(data)->new_inode  = 0;
     }
 
-    send_event(ctx, RENAME_DATA(&data), sizeof(struct rename_data));
+    send_event(ctx, RENAME_DATA(data), sizeof(struct rename_data));
 
-    __do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    __do_dentry_path(ctx, new_dentry, PATH_DATA(data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
+    RELEASE_DATA(data);
+
     return 0;
 }
 
@@ -1984,7 +2134,7 @@ int BPF_KRETPROBE(kretpobe_udpv6_sendmsg)
 //    bpf_probe_read(&cgroup_dirname, sizeof(cgroup_dirname), &(node->name));
 //
 //    struct container_data data = {};
-//    __init_header(EVENT_CONTAINER_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+//    __init_header(EVENT_CONTAINER_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 //
 //
 //    // Check for common container prefixes, and then try to read the full-length CONTAINER_ID
