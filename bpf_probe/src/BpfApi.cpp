@@ -4,7 +4,17 @@
 #include "BpfApi.h"
 #include "bcc_sensor.h"
 
+#include "sensor.skel.h"
+
+// bcc headers
 #include <bcc/BPF.h>
+#include <bcc/perf_reader.h>
+#include <bcc/common.h>
+#include <bcc/libbpf.h> // helper library, not real libbpf
+
+// real libbpf from conan package
+#include <bpf/libbpf.h>
+
 #include <climits>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -13,9 +23,11 @@
 #include <exception>
 #include <boost/filesystem.hpp>
 
+#include <sys/epoll.h>
+
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
-namespace fs = boost::filesystem;
+namespace fs = boost::filesystem; 
 
 #define DEBUG_ORDER(BLOCK)
 //#define DEBUG_ORDER(BLOCK) BLOCK while(0)
@@ -34,11 +46,41 @@ BpfApi::BpfApi()
     , m_event_count(0)
     , m_did_leave_events(false)
     , m_has_lru_hash(false)
+    , m_skel(nullptr)
+    , m_epoll_fd(-1)
+    , m_log_fn(nullptr)
 {
+    m_ProgInstanceType = BpfApi::ProgInstanceType::Uninitialized;
 }
 
 BpfApi::~BpfApi()
 {
+    if (m_skel)
+    {
+        sensor_bpf__destroy(m_skel);
+        m_skel = nullptr;
+
+        if (m_epoll_fd >= 0)
+        {
+            close(m_epoll_fd);
+            m_epoll_fd = -1;
+        }
+
+        if (m_perf_reader.size())
+        {
+            for (auto perf_reader : m_perf_reader)
+            {
+                perf_reader_free(perf_reader);
+            }
+            m_perf_reader.clear();
+        }
+    }
+
+    // Ensure C global holds our reference
+    if (m_log_fn)
+    {
+        libbpf_set_print(nullptr);
+    }
 }
 
 void BpfApi::CleanBuildDir()
@@ -48,7 +90,20 @@ void BpfApi::CleanBuildDir()
     IGNORE_UNUSED_RETURN_VALUE(fs::remove_all("/var/tmp/bcc"));
 }
 
-bool BpfApi::Init(const std::string & bpf_program)
+bool BpfApi::Init_libbpf()
+{
+    m_skel = sensor_bpf__open_and_load();
+    if (m_skel)
+    {
+        m_ncpu = ebpf::get_online_cpus();
+        m_ProgInstanceType = BpfApi::ProgInstanceType::LibbpfAutoAttached;
+        return true;
+    }
+
+    return false;
+}
+
+bool BpfApi::Init_bcc(const std::string & bpf_program)
 {
     m_BPF = std::unique_ptr<ebpf::BPF>(new ebpf::BPF());
     if (!m_BPF)
@@ -72,6 +127,8 @@ bool BpfApi::Init(const std::string & bpf_program)
 
     if (result.ok())
     {
+        m_ProgInstanceType = BpfApi::ProgInstanceType::Bcc;
+
         // A compile time BPF program will create map "has_lru".
         // Should throw invalid_argument if not found or wrong map type.
         try
@@ -89,8 +146,55 @@ bool BpfApi::Init(const std::string & bpf_program)
     return result.ok();
 }
 
+bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
+{
+    bool result = false;
+
+    if (try_bcc_first)
+    {
+        result = Init_bcc(bpf_program);
+        if (!result)
+        {
+            result = Init_libbpf();
+        }
+    }
+    else
+    {
+        result = Init_libbpf();
+        if (!result)
+        {
+            result = Init_bcc(bpf_program);
+        }
+    }
+
+    return result;
+}
+
 void BpfApi::Reset()
 {
+    m_ProgInstanceType = BpfApi::ProgInstanceType::Uninitialized;
+
+    if (m_skel)
+    {
+        sensor_bpf__destroy(m_skel);
+        m_skel = nullptr;
+
+        if (m_epoll_fd >= 0)
+        {
+            close(m_epoll_fd);
+            m_epoll_fd = -1;
+        }
+
+        if (m_perf_reader.size())
+        {
+            for (auto perf_reader : m_perf_reader)
+            {
+                perf_reader_free(perf_reader);
+            }
+            m_perf_reader.clear();
+        }
+    }
+
     // Calling ebpf::BPF::detach_all multiple times on the same object results in double free and segfault.
     // ebpf::BPF::~BPF calls detach_all so the best thing is to delete the object.
     if (m_BPF)
@@ -120,6 +224,11 @@ bool BpfApi::IsLRUCapable() const
 // syscall for ARM architecture. So, handling the same for ARM here.
 void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
 {
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    {
+        return;
+    }
+
     if (!name)
     {
         return;
@@ -152,6 +261,12 @@ bool BpfApi::AttachProbe(const char * name,
                          const char * callback,
                          ProbeType    type)
 {
+    // Just return true even though if we don't care
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    {
+        return true;
+    }
+
     if (!m_BPF)
     {
         return false;
@@ -205,8 +320,125 @@ bool BpfApi::AttachProbe(const char * name,
     return result.ok();
 }
 
+bool BpfApi::AutoAttach()
+{
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    {
+        if (!m_skel)
+        {
+            m_ErrorMessage = std::string("Cannot Auto Attach null bpf skeleton");
+            return false;
+        }
+
+        if (sensor_bpf__attach(m_skel))
+        {
+            m_ErrorMessage = std::string("sensor_bpf__attach failed");
+            return false;
+        }
+        return true;
+    }
+
+    m_ErrorMessage = std::string("Cannot Auto Attach With InstanceType");
+    return false;
+}
+
 bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 {
+    if (m_skel)
+    {
+        // Get events map
+        int map_fd = bpf_map__fd(m_skel->maps.events);
+        if (map_fd < 0)
+        {
+            m_ErrorMessage = std::string("bpf perf map 'events' fd not initialized");
+            return false;
+        }
+
+        // Create epollfd instance as well!!!
+        m_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+        if (m_epoll_fd < 0)
+        {
+            m_ErrorMessage = std::string("create epoll fd failed");
+            return false;
+        }
+
+        // {
+        //     int key = -1;
+        //     int err = bpf_get_first_key(map_fd, &key, sizeof(key));
+        //     if (err < 0)
+        //     {
+        //         err = -errno;
+        //         fprintf(stderr, "bpf_get_first_key(%d) = %d", map_fd, errno);
+        //     }
+        //     else
+        //     {
+        //         while (err >= 0)
+        //         {
+        //             fprintf(stderr, "map_fd:%d key:%d\n", map_fd, key);
+
+        //             int next_key = -1;
+        //             err = bpf_get_next_key(map_fd, &key, &next_key);
+        //             if (err >= 0)
+        //             {
+        //                 key = next_key;
+        //             }
+        //         }
+        //     }
+        // }
+
+        for (auto cpu : m_ncpu)
+        {
+            // perf_reader is opaque
+            struct perf_reader *perf_reader = static_cast<struct perf_reader *>(bpf_open_perf_buffer(
+                on_perf_submit,
+                on_perf_peek,
+                nullptr,
+                static_cast<void*>(this),
+                -1,
+                cpu,
+                1024
+            ));
+
+            if (perf_reader)
+            {
+                m_perf_reader.push_back(perf_reader);
+
+                int key = cpu;
+                int perf_buf_fd = perf_reader_fd(perf_reader);
+
+                struct epoll_event event = {};
+                
+                event.events = EPOLLIN;
+                event.data.ptr = static_cast<void *>(perf_reader);
+                if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, perf_buf_fd, &event) != 0)
+                {
+                    perf_reader_free(perf_reader);
+                    
+                    m_ErrorMessage = std::string("epoll_ctl failed to add perf buf fd");
+                    return false;
+                }
+
+                // thin wrapper to bpf_map_update_elem
+                int err = bpf_update_elem(map_fd, &key, &perf_buf_fd, 0);
+                if (err)
+                {
+                    m_ErrorMessage = std::string("bpf_map_update_elem for perf buf map");
+                    return false;
+                }
+            }
+            else
+            {
+                m_ErrorMessage = std::string("bpf_open_perf_buffer failed");
+                return false;
+            }
+        }
+
+        m_epoll_data.reset(new epoll_event[m_perf_reader.size()]);
+        m_eventCallbackFn = std::move(callback);
+
+        return true;
+    }
+
     if (!m_BPF)
     {
         return false;
@@ -247,7 +479,7 @@ int BpfApi::PollEvents()
     //   https://kinvolk.io/blog/2018/02/timing-issues-when-using-bpf-with-virtual-cpus/
     // Here is a reference implementation of the fix.  (I used this as a reference, but developed my own solution.)
     //  https://github.com/iovisor/gobpf/blob/65e4048660d6c4339ebae113ac55b1af6f01305d/elf/perf.go#L147
-    if (!m_BPF)
+    if (!m_BPF && (!m_skel || m_perf_reader.size() == 0))
     {
         return -1;
     }
@@ -259,7 +491,19 @@ int BpfApi::PollEvents()
     {
         // We left events on a CPU queue so we need to bypass the poll
         m_did_leave_events = false;
-        m_BPF->read_perf_buffer("events");
+
+        if (m_perf_reader.size() > 0)
+        {
+            // For each CPU online read
+            for (auto perf_reader : m_perf_reader)
+            {
+                perf_reader_event_read(perf_reader);
+            }
+        }
+        else if (m_BPF)
+        {
+            m_BPF->read_perf_buffer("events");
+        }
     }
     else
     {
@@ -272,7 +516,24 @@ int BpfApi::PollEvents()
             timeout_ms = 1;
         }
         m_did_leave_events = false;
-        auto result = m_BPF->poll_perf_buffer("events", timeout_ms);
+
+
+        int result = -1;
+
+        // epoll all perf buffers and then consume
+        if (m_BPF)
+        {
+            result = m_BPF->poll_perf_buffer("events", timeout_ms);
+        }
+        else
+        {
+            result = epoll_wait(m_epoll_fd, m_epoll_data.get(),
+                                     m_perf_reader.size(), timeout_ms);
+            for (int i = 0; i < result; i++)
+            {
+                perf_reader_event_read(static_cast<perf_reader *>(m_epoll_data[i].data.ptr));
+            }
+        }
 
         if (result < 0)
         {
@@ -454,194 +715,24 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
     }
 }
 
-
-bool BpfApi::ClearUDPCache4()
+// "Global" default callback libbpf log function
+int BpfApi::default_libbpf_log(enum libbpf_print_level level,
+                               const char *format,
+                               va_list args)
 {
-    bool okay = false;
-
-    if (!m_BPF)
+    if (level == LIBBPF_DEBUG)
     {
-        return false;
+        return 0;
     }
 
-    if (IsLRUCapable())
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
-                                                  bpf_probe::ip_entry>("ip_cache");
-            auto result = udp_cache.clear_table_non_atomic();
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-    else
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<uint32_t,
-                                                   bpf_probe::ip_key>("ip_cache");
-            auto result = udp_cache.clear_table_non_atomic();
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-
-    return okay;
+    return vfprintf(stderr, format, args);
 }
 
-bool BpfApi::ClearUDPCache6()
+// Allow instance to provide their own custom logger.
+// BCC specific message should have their own callback fn.
+libbpf_print_fn_t BpfApi::SetLibBpfLogCallback(libbpf_print_fn_t log_fn)
 {
-    bool okay = false;
+    m_log_fn = log_fn;
 
-    if (!m_BPF)
-    {
-        return false;
-    }
-
-    if (IsLRUCapable())
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip6_key,
-                                                   bpf_probe::ip_entry>("ip6_cache");
-            auto result = udp_cache.clear_table_non_atomic();
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-    else
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<uint32_t,
-                                                   bpf_probe::ip6_key>("ip6_cache");
-            auto result = udp_cache.clear_table_non_atomic();
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-
-    return okay;
-}
-
-bool BpfApi::InsertUDPCache4(const bpf_probe::ip_key &key,
-                             const bpf_probe::ip_entry &value)
-{
-    bool okay = false;
-
-    if (IsLRUCapable())
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
-                                                   bpf_probe::ip_entry>("ip_cache");
-            auto result = udp_cache.update_value(key, value);
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-    else
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<uint32_t,
-                                                   bpf_probe::ip_key>("ip_cache");
-            auto result = udp_cache.update_value(key.pid, key);
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-
-    return okay;
-}
-
-bool BpfApi::RemoveEntryUDPCache4(const bpf_probe::ip_key &key)
-{
-    bool okay = false;
-
-    if (IsLRUCapable())
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
-                                                   bpf_probe::ip_entry>("ip_cache");
-            auto result = udp_cache.remove_value(key);
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-    else
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<uint32_t,
-                                                   bpf_probe::ip_key>("ip_cache");
-            auto result = udp_cache.remove_value(key.pid);
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-
-    return okay;
-}
-
-bool BpfApi::GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                  bpf_probe::ip_entry &value)
-{
-    bool okay = false;
-
-    if (IsLRUCapable())
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<bpf_probe::ip_key,
-                                                   bpf_probe::ip_entry>("ip_cache");
-            auto result = udp_cache.get_value(key, value);
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-
-    return okay;
-}
-
-bool BpfApi::GetEntryUDPCache4(const uint32_t &pid,
-                               bpf_probe::ip_key &value)
-{
-    bool okay = false;
-
-    if (!IsLRUCapable())
-    {
-        try
-        {
-            auto udp_cache = m_BPF->get_hash_table<uint32_t,
-                                                   bpf_probe::ip_key>("ip_cache");
-            auto result = udp_cache.get_value(pid, value);
-            okay = result.ok();
-        }
-        catch (std::invalid_argument &ia)
-        {
-        }
-    }
-
-    return okay;
+    return libbpf_set_print(log_fn);
 }

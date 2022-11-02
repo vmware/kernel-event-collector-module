@@ -29,12 +29,14 @@ include_directories(${PROJECT_SOURCE_DIR}/../include)
 
 set(EPBF_PROG_CPP ${CMAKE_CURRENT_BINARY_DIR}/cb_ebpfprog.cpp)
 set(EBPF_PPRG_SRC ${PROJECT_SOURCE_DIR}/bcc_sensor.c)
+set(SENSOR_BPF_SRC ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
+set(SENSOR_BPF_SRC_R ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.h)
 set(GENERATE_SH   ${PROJECT_SOURCE_DIR}/generate.sh)
 
 add_custom_command(
-        OUTPUT ${EPBF_PROG_CPP}
+        OUTPUT ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC_R}
         COMMAND chmod a+x ${GENERATE_SH}
-        COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${EPBF_PROG_CPP}
+        COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC}
         DEPENDS ${GENERATE_SH} ${EBPF_PPRG_SRC}
         COMMENT "Generating BPF Program ${EPBF_PROG_CPP}"
 )
@@ -47,6 +49,8 @@ add_library(bpf-probe STATIC
         ${EPBF_PROG_CPP})
 add_dependencies(bpf-probe bcc_prog)
 set_property(TARGET bpf-probe PROPERTY POSITION_INDEPENDENT_CODE 1)
+target_include_directories(bpf-probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
+
 
 if (NOT ${LOCAL_BUILD})
     target_link_libraries(bpf-probe
@@ -57,32 +61,69 @@ if (NOT ${LOCAL_BUILD})
             CONAN_LIB::elfutils_elf
             -Wl,--no-whole-archive
             CONAN_PKG::Boost
-
-            z rt dl pthread m
-            )
+    )
 else()
     target_link_libraries(bpf-probe
         bcc
-        z
-        rt
-        dl
-        pthread
-        m
         boost
     )
 endif()
+target_link_libraries(bpf-probe z rt dl pthread m)
+add_dependencies(bpf-probe bpf_skel)
+target_include_directories(bpf-probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+#target_include_directories(check_probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
+
+
+set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
+set(BPF_ELF_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.o)
+set(BPF_ELF_FILE_UNSTRIP ${BPF_ELF_FILE}.unstripped)
+set(BPF_SKEL_FILE ${CMAKE_CURRENT_BINARY_DIR}/sensor.skel.h)
+set(CLANG $ENV{HOST_COMMAND_PREFIX} ${CONAN_BIN_DIRS_LLVM}/clang)
+set(LLVM_STRIP $ENV{HOST_COMMAND_PREFIX} ${CONAN_BIN_DIRS_LLVM}/llvm-strip)
+set(BPFTOOL $ENV{HOST_COMMAND_PREFIX} ${CONAN_BIN_DIRS_BPFTOOL}/bpftool)
+
+set(ARCH x86)
+if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
+set(ARCH arm64)
+endif()
+set(VMLINUX_INCLUDE ${PROJECT_SOURCE_DIR}/../include/vmlinux/${ARCH})
+set(TARGET_ARCH __TARGET_ARCH_${ARCH})
+
+message("CONAN_BIN_DIRS_LLVM: ${CONAN_BIN_DIRS_LLVM}")
+message("CONAN_BIN_DIRS_BPFTOOL: ${CONAN_BIN_DIRS_BPFTOOL}")
+message("CONAN_INCLUDE_DIRS_LIBBPF: ${CONAN_INCLUDE_DIRS_LIBBPF}")
+
+add_custom_command(
+    OUTPUT ${BPF_ELF_FILE} ${BPF_SKEL_FILE}
+    COMMAND ${CLANG} -g -O2 -Wall
+        -target bpf
+        -D${TARGET_ARCH}
+        -I${CONAN_INCLUDE_DIRS_LIBBPF}
+        -I${VMLINUX_INCLUDE}
+        -c ${BPF_C_FILE}
+        -o ${BPF_ELF_FILE_UNSTRIP}
+    COMMAND ${LLVM_STRIP} -g ${BPF_ELF_FILE_UNSTRIP} -o ${BPF_ELF_FILE}
+    COMMAND ${BPFTOOL} gen skeleton ${BPF_ELF_FILE} > ${BPF_SKEL_FILE}
+    DEPENDS ${BPF_C_FILE}
+)
+add_custom_target(bpf_skel ALL DEPENDS ${BPF_ELF_FILE} ${BPF_SKEL_FILE})
 
 add_executable(check_probe check_probe.cpp)
 target_link_libraries(check_probe
         bpf-probe
-        z rt dl pthread m)
+        z rt dl pthread m
+)
+add_dependencies(check_probe bpf_skel)
+target_include_directories(check_probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(check_probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
 
 add_subdirectory(tests)
 
 include(constants.cmake)
 
 install(TARGETS check_probe PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
-
+install(FILES ${BPF_SKEL_FILE} DESTINATION include)
+install(FILES ${BPF_ELF_FILE} ${BPF_ELF_FILE_UNSTRIP} DESTINATION lib)
 
 set(CPACK_OUTPUT_FILE_PREFIX $ENV{BUILD_DIR}/install-packages/$ENV{CMAKE_SYSTEM_PROCESSOR})
 set(CPACK_GENERATOR "TGZ")
