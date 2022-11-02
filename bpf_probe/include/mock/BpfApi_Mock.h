@@ -53,6 +53,13 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
+        void setup_AutoAttach(bool result)
+        {
+            ::mock(BPF_API_SCOPE)
+                    .expectOneCall(__MOCKED_FUNCTION__)
+                    .andReturnValue(result);
+        }
+
         void setup_RegisterEventCallback(BpfApi::EventCallbackFn callback, bool result)
         {
             ::mock(BPF_API_SCOPE)
@@ -67,7 +74,8 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
-        bool Init(const std::string & bpf_prog) override
+        bool Init(const std::string & bpf_prog,
+                  bool try_bcc_first) override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
@@ -94,6 +102,13 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
 
+        bool AutoAttach() override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
         bool RegisterEventCallback(EventCallbackFn callback) override
         {
             ::mock(BPF_API_SCOPE)
@@ -108,49 +123,9 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).intReturnValue();
         }
 
-        bool ClearUDPCache4() override
+        libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) override
         {
-            ::mock(BPF_API_SCOPE)
-                .actualCall(__FUNCTION__);
-            return ::mock(BPF_API_SCOPE).boolReturnValue();
-        }
-
-        bool ClearUDPCache6() override
-        {
-            ::mock(BPF_API_SCOPE)
-                .actualCall(__FUNCTION__);
-            return ::mock(BPF_API_SCOPE).boolReturnValue();
-        }
-
-        bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                             const bpf_probe::ip_entry &value) override
-        {
-            ::mock(BPF_API_SCOPE)
-                .actualCall(__FUNCTION__);
-            return ::mock(BPF_API_SCOPE).boolReturnValue();
-        }
-
-        bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override
-        {
-            ::mock(BPF_API_SCOPE)
-                .actualCall(__FUNCTION__);
-            return ::mock(BPF_API_SCOPE).boolReturnValue();
-        }
-
-        bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                  bpf_probe::ip_entry &value) override
-        {
-            ::mock(BPF_API_SCOPE)
-                .actualCall(__FUNCTION__);
-            return ::mock(BPF_API_SCOPE).boolReturnValue();
-        }
-
-        bool GetEntryUDPCache4(const uint32_t &pid,
-                               bpf_probe::ip_key &value) override
-        {
-            ::mock(BPF_API_SCOPE)
-                .actualCall(__FUNCTION__);
-            return ::mock(BPF_API_SCOPE).boolReturnValue();
+            return nullptr;
         }
     };
 }

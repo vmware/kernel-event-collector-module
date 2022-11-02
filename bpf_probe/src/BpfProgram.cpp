@@ -13,6 +13,11 @@ bool BpfProgram::InstallHooks(
 {
     std::map<std::string, bool> status_map;
 
+    if (bpf_api.GetProgInstanceType() == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    {
+        return bpf_api.AutoAttach();
+    }
+
     // Loop over all the probes we need to install
     for (int i = 0; hook_list[i].name != NULL; ++i)
     {

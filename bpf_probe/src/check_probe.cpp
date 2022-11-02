@@ -4,6 +4,8 @@
 #include "BpfApi.h"
 #include "BpfProgram.h"
 
+#include "sensor.skel.h"
+
 #include <getopt.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -18,10 +20,30 @@ static void PrintUsage();
 static void ParseArgs(int argc, char** argv);
 static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
-static bool CheckUDPMaps(BpfApi &bpf_api);
 
 static std::string s_bpf_program;
-static bool check_udp_maps = false;
+static bool try_bcc_first = false;
+static unsigned int verbosity = 0;
+
+static int libbpf_print_fn(enum libbpf_print_level level,
+                           const char *format, va_list args)
+{
+    switch (verbosity)
+    {
+    case 0:
+        if (level == LIBBPF_DEBUG)
+            return 0;
+        return vfprintf(stdout, format, args);
+
+    case 1:
+        if (level == LIBBPF_DEBUG)
+            return vfprintf(stderr, format, args);
+        return vfprintf(stdout, format, args);
+
+    default:
+        return vfprintf(stdout, format, args);
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -35,6 +57,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    bpf_api->SetLibBpfLogCallback(libbpf_print_fn);
+
     if (!LoadProbe(*bpf_api, (!s_bpf_program.empty() ? s_bpf_program : BpfProgram::DEFAULT_PROGRAM)))
     {
         printf("Load probe failed\n");
@@ -42,16 +66,6 @@ int main(int argc, char *argv[])
     }
 
     printf("Probe loaded!\n");
-
-    if (check_udp_maps)
-    {
-        if (!CheckUDPMaps(*bpf_api))
-        {
-            return 1;
-        }
-
-        printf("UDPv4 Cache Map Works!\n");
-    }
 
     return 0;
 }
@@ -61,27 +75,37 @@ static void PrintUsage()
     printf("Usage: -- [options]\nOptions:\n");
     printf(" -h - this message\n");
     printf(" -p - probe source file to test\n");
-    printf(" -u - check UDP maps usage\n");
+    printf(" -L - try loading libbpf first\n");
+    printf(" -B - try loading BCC first\n");
+    printf(" -v - Add verbosity\n");
 }
 
 static void ParseArgs(int argc, char** argv)
 {
     int                 option_index    = 0;
     struct option const long_options[]  = {
-        {"help",           no_argument,       nullptr, 'h'},
-        {"probe-source",   required_argument, nullptr, 'p'},
-        {"check-udp-maps",     no_argument,       nullptr, 'u'},
+        {"help",                no_argument,       nullptr, 'h'},
+        {"probe-source",        required_argument, nullptr, 'p'},
+        {"try-bcc-first",       no_argument,       nullptr, 'B'},
+        {"try-libbpf-first",    no_argument,       nullptr, 'L'},
+        {"verbose",             no_argument,       nullptr, 'v'},
         {nullptr, 0,       nullptr, 0}};
 
     while(true)
     {
-        int opt = getopt_long(argc, argv, "hp:u", long_options, &option_index);
+        int opt = getopt_long(argc, argv, "hp:LBv", long_options, &option_index);
         if(-1 == opt) break;
 
         switch(opt)
         {
-            case 'u':
-                check_udp_maps = true;
+            case 'v':
+                verbosity += 1;
+                break;
+            case 'L':
+                try_bcc_first = false;
+                break;
+            case 'B':
+                try_bcc_first = true;
                 break;
             case 'p':
                 ReadProbeSource(optarg);
@@ -125,6 +149,8 @@ static void ReadProbeSource(const std::string &probe_source)
     }
 }
 
+
+
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
 {
     if (bpf_program.empty())
@@ -132,13 +158,27 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
         printf("Invalid argument to 'LoadProbe'\n");
         return false;
     }
+    const char *preferred_instance = "Unknown";
+    if (try_bcc_first)
+    {
+        preferred_instance = "Bcc";
+    }
+    else
+    {
+        preferred_instance = "Libbpf";
+    }
 
-    if (!bpf_api.Init(bpf_program))
+    bool init = bpf_api.Init(bpf_program, try_bcc_first);
+    if (!init)
     {
         printf("Failed to init BPF program: %s\n",
                bpf_api.GetErrorMessage().c_str());
         return false;
     }
+
+    BpfApi::ProgInstanceType instance_type = bpf_api.GetProgInstanceType();
+    printf("PreferredInstance: %s InstanceType: %s\n", preferred_instance,
+           BpfApi::InstanceTypeToString(instance_type));
 
     if (!BpfProgram::InstallHooks(bpf_api, BpfProgram::DEFAULT_HOOK_LIST))
     {
@@ -148,76 +188,4 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
     }
 
     return true;
-}
-
-static bool CheckUDPMaps(BpfApi &bpf_api)
-{
-    bool result = true;
-    ip_key ip4_key;
-    ip_entry value;
-
-    value.flow = FLOW_TX | FLOW_TX;
-    memset(&ip4_key, 'A', sizeof(ip4_key));
-
-    // Verify Update/Insert works
-    if (!bpf_api.InsertUDPCache4(ip4_key, value))
-    {
-        printf("Unable to insert into UDPv4 hashmap\n");
-        return false;
-    }
-
-    // Verify remove works
-    if (!bpf_api.RemoveEntryUDPCache4(ip4_key))
-    {
-        printf("Unable to remove entry from UDPv4 hashmap\n");
-        result = false;
-    }
-
-    // Re-insert to setup Get/Lookup
-    if (!bpf_api.InsertUDPCache4(ip4_key, value))
-    {
-        printf("Unable to insert/update entry in UDPv4 hashmap\n");
-        result = false;
-    }
-
-    if (bpf_api.IsLRUCapable())
-    {
-        ip_entry found_value = {};
-
-        if (!bpf_api.GetEntryUDPLRUCache4(ip4_key, found_value))
-        {
-            printf("Unable to get LRU UDPv4 entry just inserted\n");
-            result = false;
-        }
-
-        if (found_value.flow != value.flow)
-        {
-            printf("Found LRU entry does not match inserted value\n");
-            result = false;
-        }
-    }
-    else
-    {
-        ip_key found_value = {};
-
-        if (!bpf_api.GetEntryUDPCache4(ip4_key.pid, found_value))
-        {
-            printf("Unable to get NonLRU UDPv4 entry just inserted\n");
-            result = false;
-        }
-
-        if (memcmp(&found_value, &ip4_key, sizeof(found_value)) != 0)
-        {
-            printf("Found NonLRU entry does not match inserted value\n");
-            result = false;
-        }
-    }
-
-    if (!bpf_api.ClearUDPCache4())
-    {
-        printf("Unable to Clear UDP Cache\n");
-        result = false;
-    }
-
-    return result;
 }

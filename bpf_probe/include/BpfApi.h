@@ -8,7 +8,12 @@
 #include <functional>
 #include <memory>
 #include <list>
+#include <vector>
 #include <chrono>
+
+#include <sys/epoll.h>
+
+#include <bpf/libbpf.h>
 
 // A number of calls are annotated with 'warn_unused_result' in their definition, so a
 // normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
@@ -21,6 +26,8 @@ namespace ebpf {
     class BPF;
 }
 
+struct sensor_bpf;
+struct perf_reader;
 
 namespace cb_endpoint {
 namespace bpf_probe {
@@ -68,9 +75,17 @@ namespace bpf_probe {
             Tracepoint
         };
 
+        enum class ProgInstanceType
+        {
+            Uninitialized,
+            LibbpfAutoAttached,
+            Bcc,
+        };
+
         virtual ~IBpfApi() = default;
 
-        virtual bool Init(const std::string & bpf_program) = 0;
+        virtual bool Init(const std::string & bpf_program,
+                          bool try_bcc_first = false) = 0;
 
         virtual void Reset() = 0;
 
@@ -81,29 +96,36 @@ namespace bpf_probe {
             const char * callback,
             ProbeType     type) = 0;
 
+        virtual bool AutoAttach() = 0;
+
         virtual bool RegisterEventCallback(EventCallbackFn callback) = 0;
 
         virtual int PollEvents() = 0;
+
+        virtual libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) = 0;
 
         const std::string &GetErrorMessage() const
         {
             return m_ErrorMessage;
         }
 
-        virtual bool ClearUDPCache4() = 0;
+        ProgInstanceType GetProgInstanceType() const
+        {
+            return m_ProgInstanceType;
+        }
 
-        virtual bool ClearUDPCache6() = 0;
-
-        virtual bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                                     const bpf_probe::ip_entry &value) = 0;
-
-        virtual bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) = 0;
-
-        virtual bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                          bpf_probe::ip_entry &value) = 0;
-
-        virtual bool GetEntryUDPCache4(const uint32_t &pid,
-                                       bpf_probe::ip_key &value) = 0;
+        static const char *InstanceTypeToString(const ProgInstanceType &progInstanceType)
+        {
+            const char *str = "Unknown";
+            switch (progInstanceType)
+            {// LCOV_EXCL_START
+            case ProgInstanceType::Uninitialized: str = "Uninitialized"; break;
+            case ProgInstanceType::LibbpfAutoAttached: str = "LibbpfAutoAttached"; break;
+            case ProgInstanceType::Bcc: str = "Bcc"; break;
+            default: break;
+            }// LCOV_EXCL_END
+            return str;
+        }
 
         static const char *TypeToString(uint8_t type)
         {
@@ -153,16 +175,22 @@ namespace bpf_probe {
     protected:
         std::string                 m_ErrorMessage;
         EventCallbackFn             m_eventCallbackFn;
+        ProgInstanceType            m_ProgInstanceType;
     };
 
     class BpfApi
         : public IBpfApi
     {
     public:
+        using CpuList = std::vector<int>;
+        using PerfReaderList = std::vector<struct perf_reader *>;
+        using EpollEventData = std::unique_ptr<epoll_event[]>;
+
         BpfApi();
         virtual ~BpfApi();
 
-        bool Init(const std::string & bpf_program) override;
+        bool Init(const std::string & bpf_program,
+                  bool try_bcc_first = false) override;
         void Reset() override;
         bool IsLRUCapable() const override;
 
@@ -170,6 +198,8 @@ namespace bpf_probe {
             const char * name,
             const char * callback,
             ProbeType     type) override;
+
+        bool AutoAttach() override;
 
         bool RegisterEventCallback(EventCallbackFn callback) override;
 
@@ -180,22 +210,21 @@ namespace bpf_probe {
             return m_ErrorMessage;
         }
 
-        bool ClearUDPCache4() override;
+        ProgInstanceType GetProgInstanceType() const
+        {
+            return m_ProgInstanceType;
+        }
 
-        bool ClearUDPCache6() override;
+        libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) override;
 
-        bool InsertUDPCache4(const bpf_probe::ip_key &key,
-                             const bpf_probe::ip_entry &value) override;
-
-        bool RemoveEntryUDPCache4(const bpf_probe::ip_key &key) override;
-
-        bool GetEntryUDPLRUCache4(const bpf_probe::ip_key &key,
-                                  bpf_probe::ip_entry &value) override;
-
-        bool GetEntryUDPCache4(const uint32_t &pid,
-                               bpf_probe::ip_key &value) override;
+        static int default_libbpf_log(enum libbpf_print_level level,
+                                      const char *format,
+                                      va_list args);
 
     private:
+
+        bool Init_bcc(const std::string & bpf_program);
+        bool Init_libbpf();
 
         void LookupSyscallName(const char * name, std::string & syscall_name);
 
@@ -227,6 +256,16 @@ namespace bpf_probe {
         uint64_t                    m_event_count;
         bool                        m_did_leave_events;
         bool                        m_has_lru_hash;
+
+        // libbpf related resources
+        struct sensor_bpf *         m_skel;
+        int                         m_epoll_fd;
+        CpuList                     m_ncpu;
+        PerfReaderList              m_perf_reader;
+        EpollEventData              m_epoll_data;
+
+        // C style function pointer.
+        libbpf_print_fn_t           m_log_fn;
     };
 }
 }
