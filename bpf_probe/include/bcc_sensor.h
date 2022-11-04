@@ -126,8 +126,10 @@ namespace bpf_probe {
     struct rename_data {
         struct data_header header;
 
-        uint64_t old_inode, new_inode;
-        uint32_t old_device, new_device;
+        uint64_t old_inode;
+        uint64_t new_inode;
+        uint32_t device;
+        uint64_t fs_magic;
     };
 
     // UDP Hashtable Fields
