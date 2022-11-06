@@ -126,9 +126,18 @@ void *__ec_mem_alloc(const size_t size, ProcessContext *context, bool doVirtualA
         if (!doVirtualAlloc)
         {
             new_allocation = kmalloc(real_size, GFP_MODE(context));
+            if (!new_allocation)
+            {
+                TRACE(DL_ERROR, "kmalloc failed, mode %s, pid: %d", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL", context->pid);
+            }
         } else if (doVirtualAlloc && IS_NON_ATOMIC(context))
         {
             new_allocation = vmalloc(real_size);
+
+            if (!new_allocation)
+            {
+                TRACE(DL_ERROR, "vmalloc failed, mode %s, pid: %d", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL", context->pid);
+            }
         } else
         {
             TRACE(DL_ERROR, "Generic MEM alloc failed: ATOMIC not allowed for vmalloc");
@@ -181,7 +190,7 @@ void __ec_mem_free(void *value, const char *fn, uint32_t line)
         } else
         {
             TRACE(DL_ERROR, "Generic MEM cache magic does not match.  Failed to free memory: %p", value);
-            dump_stack();
+            CB_BUG();
         }
     }
 }
@@ -199,7 +208,7 @@ void *ec_mem_get(void *value, ProcessContext *context)
         {
             value = 0;
             TRACE(DL_ERROR, "Generic MEM cache magic does not match.  Failed to free memory: %p", value);
-            dump_stack();
+            CB_BUG()
         }
     }
     return value;
@@ -219,7 +228,7 @@ size_t ec_mem_size(const void *value)
         } else
         {
             TRACE(DL_ERROR, "Generic MEM cache magic does not match.  Failed to free memory: %p", value);
-            dump_stack();
+            CB_BUG();
         }
     }
     return size;
