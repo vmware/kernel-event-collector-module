@@ -142,6 +142,8 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
     // In theory we should see `CLONE_THREAD` in flags, but I have often found this to be garbage data.
     if (tid != pid)
     {
+        TRACE(DL_PROC_TRACKING, "Ignoring thread tid=%d pid=%d", tid, pid);
+
         return;
     }
 

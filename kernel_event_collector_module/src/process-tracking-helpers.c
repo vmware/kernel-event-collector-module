@@ -194,6 +194,9 @@ ProcessHandle *ec_process_handle_alloc(PosixIdentity *posix_identity, ProcessCon
 
         // Path and cmdline are allowed to be NULL, and should be tested accordingly
         TRY(process_handle->exec_handle.identity);
+    } else
+    {
+        TRACE(DL_ERROR, "%s: Failed to allocate ProcessHandle [%d]", __func__, posix_identity->tid);
     }
     return process_handle;
 

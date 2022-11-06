@@ -32,13 +32,17 @@ void ec_sorted_tracking_table_for_each(for_rbtree_node callback, void *priv, Pro
     data.rb_callback = callback;
     data.priv        = priv;
 
-    ec_rbtree_init(&data.tree,
+    if (!ec_rbtree_init(&data.tree,
                    offsetof(SORTED_PROCESS, start_time),
                    offsetof(SORTED_PROCESS, node),
                    __ec_rbtree_compare_process_start_time,
                    __ec_rbtree_get_ref,
                    __ec_rbtree_put_ref,
-                   context);
+                   context))
+    {
+        TRACE(DL_ERROR, "%s: Failed ec_rbtree_init", __func__);
+        return;
+    }
 
     ec_hashtbl_read_for_each(&g_process_tracking_data.table, __ec_sort_process_tracking_table, &data, context);
 

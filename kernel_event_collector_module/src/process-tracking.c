@@ -20,7 +20,7 @@ void __ec_process_exec_identity_print_callback(void *data, ProcessContext *conte
 void __ec_exec_identity_delete_callback(void *value, ProcessContext *context);
 
 ExecIdentity *ec_process_tracking_alloc_exec_identity(ProcessContext *context);
-void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
+bool ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
 ProcessHandle *ec_process_tracking_add_process(PosixIdentity *posix_identity, ProcessContext *context);
 
 process_tracking_data __read_mostly g_process_tracking_data = {
@@ -161,7 +161,9 @@ ProcessHandle *ec_process_tracking_create_process(
         // TODO: We really need to build my parent
         // This gives us a local reference
         exec_identity = ec_process_tracking_alloc_exec_identity(context);
-        TRY(exec_identity);
+
+        TRY_MSG(exec_identity,
+                   DL_WARNING, "%s: error allocating exec identity for pid[%d]", __func__, pid);
 
         exec_identity->exec_details.pid                = parent;
         exec_identity->exec_details.start_time         = start_time;
@@ -249,7 +251,6 @@ ProcessHandle *ec_process_tracking_create_process(
 
         process_handle = ec_process_tracking_add_process(posix_identity, context);
         TRY(process_handle);
-
 
         // We have recorded this in the tracking table, so mark it as active
         atomic64_inc(&ec_process_exec_identity(process_handle)->active_process_count);
@@ -518,6 +519,7 @@ bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context)
 
 CATCH_DEFAULT:
     ec_process_tracking_put_handle(process_handle, context);
+
     return result;
 }
 
@@ -584,21 +586,29 @@ ExecIdentity *ec_process_tracking_alloc_exec_identity(ProcessContext *context)
     ExecIdentity *exec_identity = NULL;
 
     exec_identity = (ExecIdentity *)ec_mem_cache_alloc(&g_process_tracking_data.exec_identity_cache, context);
-    ec_process_tracking_init_exec_identity(exec_identity, context);
+    if (!ec_process_tracking_init_exec_identity(exec_identity, context))
+    {
+        ec_mem_cache_put(exec_identity, context);
+        return false;
+    }
     return ec_process_tracking_get_exec_identity_ref(exec_identity, context);
 }
 
-void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
+bool ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
 {
     if (exec_identity)
     {
         atomic64_set(&exec_identity->active_process_count, 0);
-        ec_spinlock_init(&exec_identity->string_lock, context);
         exec_identity->path_data          = NULL;
         exec_identity->cmdline            = NULL;
         exec_identity->is_interpreter     = false;
         exec_identity->is_complete        = false;
+        CANCEL(ec_spinlock_init(&exec_identity->string_lock, context), false);
+
+        return true;
     }
+
+    return false;
 }
 
 void __ec_exec_identity_delete_callback(void *value, ProcessContext *context)
