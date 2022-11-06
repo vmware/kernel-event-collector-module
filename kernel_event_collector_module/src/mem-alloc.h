@@ -5,6 +5,10 @@
 
 #include "process-context.h"
 
+extern int g_mem_alloc_fail_interval __read_mostly;
+extern bool g_mem_alloc_fail_dump_stack __read_mostly;
+extern bool g_mem_alloc_fail_enabled __read_mostly;
+
 bool ec_mem_init(ProcessContext *context);
 void ec_mem_shutdown(ProcessContext *context);
 int64_t ec_mem_allocated_count(ProcessContext *context);

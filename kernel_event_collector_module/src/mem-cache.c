@@ -10,6 +10,7 @@
 #include "cb-spinlock.h"
 
 extern bool g_enable_mem_cache_tracking __read_mostly;
+int g_mem_cache_fail_interval __read_mostly;
 
 static struct
 {
@@ -28,6 +29,7 @@ typedef struct cache_buffer {
 } cache_buffer_t;
 
 #define CACHE_BUFFER_MAGIC   0xDEADBEEF
+#define CACHE_BUFFER_FREE_MAGIC   0xBEEFDEAD
 static const size_t CACHE_BUFFER_SZ = sizeof(cache_buffer_t);
 
 #ifdef MEM_DEBUG
@@ -169,6 +171,25 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
 {
     void *value = NULL;
 
+    if (g_mem_cache_fail_interval)
+    {
+        static int counter;
+
+        ++counter;
+
+        if (counter % g_mem_cache_fail_interval == 0)
+        {
+            TRACE(DL_ERROR, "%d %s: returning NULL on call %d", context->pid, __func__, counter);
+            if (g_mem_alloc_fail_dump_stack)
+            {
+                dump_stack();
+            }
+            ++g_mem_cache_fail_interval;
+            counter = 0;
+            return NULL;
+        }
+    }
+
     if (likely(cache && cache->kmem_cache))
     {
         value = kmem_cache_alloc(cache->kmem_cache, CHECK_GFP(context));
@@ -250,6 +271,8 @@ void __ec_mem_cache_release(cache_buffer_t *cache_buffer, ProcessContext *contex
                 list_del_init(&cache_buffer->list);
                 ec_write_unlock(&cache->lock, context);
             }
+
+            cache_buffer->magic = CACHE_BUFFER_FREE_MAGIC;
 
             if (likely(cache_buffer->cache->kmem_cache))
             {

@@ -45,6 +45,8 @@ bool     g_process_tracking_ref_debug __read_mostly;
 bool     g_path_cache_ref_debug __read_mostly;
 bool     g_panic_on_error __read_mostly;
 
+uint32_t s_mem_fail_debug __read_mostly; // local flag
+
 CB_DRIVER_CONFIG g_driver_config  __read_mostly = {
     .processes =            ENABLE,
     .module_loads =         ENABLE,
@@ -62,6 +64,8 @@ module_param_named(enable_mem_cache_tracking, g_enable_mem_cache_tracking, bool,
 module_param_named(process_tracking_ref_debug, g_process_tracking_ref_debug, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(path_cache_ref_debug, g_path_cache_ref_debug, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(panic_on_error, g_panic_on_error, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(mem_fail_debug, s_mem_fail_debug, uint, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
 
 // Store string param to later on convert to unsigned long long
 module_param_string(enableHooks, enableHooksStr, HOOK_MASK_LEN,
@@ -534,6 +538,12 @@ bool ec_enable_module(ProcessContext *context)
             ec_event_send_discover_flush(context);
             ec_process_tracking_send_process_discovery(context);
             TRACE(DL_INIT, "%s Module enable operation succeeded. ", __func__);
+
+            if (s_mem_fail_debug)
+            {
+                g_mem_cache_fail_interval = s_mem_fail_debug;
+                g_mem_alloc_fail_interval = s_mem_fail_debug;
+            }
         }
             break;
     }

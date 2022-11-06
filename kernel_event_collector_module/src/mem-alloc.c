@@ -7,6 +7,10 @@
 #include "percpu-util.h"
 #include "cb-test.h"
 
+int g_mem_alloc_fail_interval __read_mostly;
+bool g_mem_alloc_fail_dump_stack __read_mostly;
+bool g_mem_alloc_fail_enabled __read_mostly;
+
 char *__ec_mem_strdup(const char *src, size_t size_in, ProcessContext *context);
 
 static struct
@@ -123,6 +127,26 @@ void *__ec_mem_alloc(const size_t size, ProcessContext *context, bool doVirtualA
     // Ensure that we are passed valid size (greater than 0 and does not overflow)
     if (size > 0 && size < real_size)
     {
+        if (g_mem_alloc_fail_interval)
+        {
+            static int counter;
+
+            ++counter;
+
+            if (counter % g_mem_alloc_fail_interval == 0)
+            {
+                TRACE(DL_ERROR, "%d %s: returning NULL on call %d", context->pid, __func__, counter);
+                if (g_mem_alloc_fail_dump_stack)
+                {
+                    dump_stack();
+                }
+                //++g_mem_alloc_fail_interval;
+                g_mem_alloc_fail_interval = 0;
+                counter = 0;
+                return NULL;
+            }
+        }
+
         if (!doVirtualAlloc)
         {
             new_allocation = kmalloc(real_size, GFP_MODE(context));

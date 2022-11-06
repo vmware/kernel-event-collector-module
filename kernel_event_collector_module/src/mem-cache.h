@@ -34,6 +34,7 @@ typedef struct CB_MEM_CACHE {
 }
 // checkpatch-no-ignore: COMPLEX_MACRO
 
+extern int g_mem_cache_fail_interval __read_mostly;
 
 bool ec_mem_cache_init(ProcessContext *context);
 void ec_mem_cache_shutdown(ProcessContext *context);
