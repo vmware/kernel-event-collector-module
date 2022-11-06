@@ -172,6 +172,8 @@ PathData *ec_file_get_path_data(
     {
         // If caller does not provide path_lookup->path_buffer we need to allocate one for use in this function.
         owned_path_buffer = path_lookup->path_buffer = ec_get_path_buffer(context);
+
+        TRY_MSG(owned_path_buffer, DL_ERROR, "%s: Failed to allocate path buffer", __func__);
     }
 
     // PSCLNX-5220
@@ -215,6 +217,7 @@ PathData *ec_file_get_path_data(
         path_lookup->path_buffer[PATH_MAX - 1] = 0;
 
         path_str = ec_mem_strdup(path_lookup->path_buffer, context);
+        TRY_MSG(path_str, DL_ERROR, "%s: ec_mem_strdup failed", __func__);
     }
 
     path_data = ec_path_cache_add(query.key.ns_id, query.key.device, query.key.inode, path_str, fs_magic, context);
@@ -230,6 +233,7 @@ CATCH_DEFAULT:
 
     if (!path_data)
     {
+        // No path was created so return a "not found" path_data
         // No path was created so return a "not found" path_data
         path_data = ec_path_cache_add(0, 0, 0, NULL, 0, context);
     }

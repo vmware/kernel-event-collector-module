@@ -39,6 +39,7 @@ bool ec_rbtree_init(CB_RBTREE *tree,
         tree->get_ref     = get_ref;
         tree->put_ref     = put_ref;
         ec_spinlock_init(&tree->lock, context);
+        CANCEL(tree->lock, false);
         ec_percpu_counter_init(&tree->count, 0, GFP_MODE(context));
         return true;
     }

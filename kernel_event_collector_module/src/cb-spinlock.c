@@ -2,6 +2,7 @@
 // Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
 // Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
 
+#include "priv.h"
 #include "cb-spinlock.h"
 #include "mem-alloc.h"
 #include "task-helper.h"
@@ -95,7 +96,7 @@ typedef struct {
     unsigned long flags;
 } linuxSpinlock_t;
 
-void ec_spinlock_init(uint64_t *sp, ProcessContext *context)
+bool ec_spinlock_init(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *new_spinlock = ec_mem_alloc(sizeof(linuxSpinlock_t), context);
 
@@ -110,13 +111,18 @@ void ec_spinlock_init(uint64_t *sp, ProcessContext *context)
     {
         pr_err("%s failed initialize spinlock pid=%d\n", __func__, ec_gettid(current));
         *sp = 0;
+        return false;
     }
+
+    return true;
 }
 
 void ec_write_lock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
     pid_t tid = ec_gettid(current);
+
+    CANCEL_VOID(spinlockp);
 
     DO_FOR_DEBUG({
         if (spinlockp->owner_pid == tid && !WRITE_CAN_LOCK(&spinlockp->sp))
@@ -138,6 +144,8 @@ void ec_write_unlock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
 
+    CANCEL_VOID(spinlockp);
+
     DO_FOR_DEBUG({
         if ((spinlockp->owner_pid != 0 && spinlockp->owner_pid != ec_gettid(current)) ||
             WRITE_CAN_LOCK(&spinlockp->sp))
@@ -156,6 +164,8 @@ void ec_read_lock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
     pid_t tid = ec_gettid(current);
+
+    CANCEL_VOID(spinlockp);
 
     DO_FOR_DEBUG({
         if (spinlockp->owner_pid == tid && !READ_CAN_LOCK(&spinlockp->sp))
@@ -177,6 +187,8 @@ void ec_read_unlock(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
 
+    CANCEL_VOID(spinlockp);
+
     DO_FOR_DEBUG({
         if ((spinlockp->owner_pid != 0 && spinlockp->owner_pid != ec_gettid(current)) ||
             WRITE_CAN_LOCK(&spinlockp->sp))//If write can lock, we can not have the read lock.  (Best I can do.)
@@ -194,6 +206,8 @@ void ec_read_unlock(uint64_t *sp, ProcessContext *context)
 void ec_spinlock_destroy(uint64_t *sp, ProcessContext *context)
 {
     linuxSpinlock_t *spinlockp = (linuxSpinlock_t *)*sp;
+
+    CANCEL_VOID(spinlockp);
 
     DO_FOR_DEBUG({
         if (!WRITE_CAN_LOCK(&spinlockp->sp))
