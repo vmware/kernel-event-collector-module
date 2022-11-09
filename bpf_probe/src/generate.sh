@@ -2,10 +2,15 @@
 # Copyright 2021 VMware Inc.  All rights reserved.
 # SPDX-License-Identifier: GPL-2.0
 
+#
+# Generates the embedded bcc source file
+#
+
 SOURCE_PROG=$1
-OUT_FILE=$2
-SHARED_SOURCE_PROG=$3
-SHARED_SOURCE_RAW_HDR=$4
+TRANSPORT_HDR=$2
+OUT_FILE=$3
+SHARED_SOURCE_PROG=$4
+SHARED_SOURCE_RAW_HDR=$5
 
 if [[ x"${SOURCE_PROG}" == x ]]
 then
@@ -18,9 +23,10 @@ then
 	exit 1
 fi
 
+transport_hdr=$(cat "${TRANSPORT_HDR}")
 bcc_prog=$(cat ${SOURCE_PROG})
 printf '#include "BpfProgram.h"\n' "${bcc_prog}" > "${OUT_FILE}"
-printf 'const std::string cb_endpoint::bpf_probe::BpfProgram::DEFAULT_PROGRAM = R"(\n%s\n)";\n' "${bcc_prog}" >> "${OUT_FILE}"
+printf 'const std::string cb_endpoint::bpf_probe::BpfProgram::DEFAULT_PROGRAM = R"(\n%s%s\n)";\n' "${transport_hdr}" "${bcc_prog}" >> "${OUT_FILE}"
 
 # Generate a C++ header that just contains the R("...") string
 # of the sensor source.

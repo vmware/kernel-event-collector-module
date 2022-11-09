@@ -3,6 +3,12 @@
  * SPDX-License-Identifier: GPL-2.0
  */
 
+//
+// NOTE:
+// Structs related to transport of data
+// payloads are inject at top of file.
+//
+
 // Struct randomization causes issues on 4.13 and some early versions of 4.14
 // These are redefined to work around this, per:
 // https://lists.iovisor.org/g/iovisor-dev/topic/21386300#1239
@@ -50,8 +56,6 @@
 #include <net/sock.h>
 #include <net/inet_sock.h>
 
-#define MAX_FNAME 255L
-#define CONTAINER_ID_LEN 64
 
 // Create BPF_LRU if it does not exist.
 // Support for lru hashes begins with 4.10, so a regular hash table must be used on earlier
@@ -120,121 +124,11 @@ struct mount {
 	void *cb_args;
 } __randomize_layout;
 
-enum event_type {
-	EVENT_PROCESS_EXEC_ARG,
-	EVENT_PROCESS_EXEC_PATH,
-	EVENT_PROCESS_EXEC_RESULT,
-	EVENT_PROCESS_EXIT,
-	EVENT_PROCESS_CLONE,
-	EVENT_FILE_READ,
-	EVENT_FILE_WRITE,
-	EVENT_FILE_CREATE,
-	EVENT_FILE_PATH,
-	EVENT_FILE_MMAP,
-	EVENT_FILE_TEST,
-	EVENT_NET_CONNECT_PRE,
-	EVENT_NET_CONNECT_ACCEPT,
-	EVENT_NET_CONNECT_DNS_RESPONSE,
-	EVENT_NET_CONNECT_WEB_PROXY,
-	EVENT_FILE_DELETE,
-	EVENT_FILE_CLOSE,
-	EVENT_FILE_RENAME,
-	EVENT_CONTAINER_CREATE
-};
-
 #define DNS_RESP_PORT_NUM 53
 #define DNS_RESP_MAXSIZE 512
 #define PROXY_SERVER_MAX_LEN 100
-#define DNS_SEGMENT_LEN 40
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
-
-// Tells us the state for a probe point's data message
-enum PP {
-	PP_NO_EXTRA_DATA,
-	PP_ENTRY_POINT,
-	PP_PATH_COMPONENT,
-	PP_FINALIZED,
-	PP_APPEND,
-	PP_DEBUG,
-};
-
-struct data_header {
-	u64 event_time; // Time the event collection started.  (Same across message parts.)
-	u8 type;
-	u8 state;
-
-	u32 tid;
-	u32 pid;
-	u32 uid;
-	u32 ppid;
-	u32 mnt_ns;
-};
-
-struct data {
-	struct data_header header;
-};
-
-struct exec_data {
-	struct data_header header;
-
-	int retval;
-};
-
-struct file_data {
-	struct data_header header;
-
-	u64 inode;
-	u32 device;
-	u64 flags; // MMAP only
-	u64 prot;  // MMAP only
-	u64 fs_magic;
-};
-
-struct container_data {
-	struct data_header header;
-
-	char container_id[CONTAINER_ID_LEN + 1];
-};
-
-struct path_data {
-	struct data_header header;
-
-	u8 size;
-	char fname[MAX_FNAME];
-};
-
-struct net_data {
-	struct data_header header;
-
-	u16 ipver;
-	u16 protocol;
-	union {
-		u32 local_addr;
-		u32 local_addr6[4];
-	};
-	u16 local_port;
-	union {
-		u32 remote_addr;
-		u32 remote_addr6[4];
-	};
-	u16 remote_port;
-};
-
-struct dns_data {
-	struct data_header header;
-
-	char dns[DNS_SEGMENT_LEN];
-	u32 name_len;
-};
-
-struct rename_data {
-    struct data_header header;
-
-    u64 old_inode, new_inode;
-    u32 device;
-    u64 fs_magic;
-};
 
 // THis is a helper struct for the "file like" events.  These follow a pattern where 3+n events are sent.
 //  The first event sends the device/inode.  Each path element is sent as a separate event.  Finally an event is sent
