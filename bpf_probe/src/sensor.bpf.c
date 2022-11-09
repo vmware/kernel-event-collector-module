@@ -292,6 +292,9 @@ struct {
     __uint(value_size, sizeof(u32));
 } events SEC(".maps");
 
+// Set to 1 when we want to change events map to be a ring buffer
+volatile const unsigned int USE_RINGBUF = 0;
+
 // This hash tracks the "observed" file-create events.  This will not be 100% accurate because we will report a
 //  file create for any file the first time it is opened with WRITE|TRUNCATE (even if it already exists).  It
 //  will however serve to de-dup some events.  (Ie.. If a program does frequent open/write/close.)
@@ -406,6 +409,9 @@ struct {
 // TODO: Update this definition to handle arm64 or remove it
 #ifndef PT_REGS_RC
 #define PT_REGS_RC(x) ((x)->ax)
+#endif
+#ifndef PT_REGS_RC_CORE
+#define PT_REGS_RC_CORE(x) PT_REGS_RC(x)
 #endif
 
 #define MAX_FNAME 255L
@@ -542,11 +548,43 @@ struct _file_event
     };
 };
 
-#define DECLARE_FILE_EVENT(DATA) struct _file_event DATA = {}
-#define GENERIC_DATA(DATA)  ((struct data*)&((struct _file_event*)(DATA))->_data)
-#define FILE_DATA(DATA)  ((struct file_data*)&((struct _file_event*)(DATA))->_file_data)
-#define PATH_DATA(DATA)  ((struct path_data*)&((struct _file_event*)(DATA))->_path_data)
-#define RENAME_DATA(DATA)  ((struct rename_data*)&((struct _file_event*)(DATA))->_rename_data)
+// Declare scratchpad, might be better as a percpu array
+// except that won't work on sleepable prog types.
+#ifdef __BCC__
+BPF_PER_CPU_ARRAY(xpad, struct _file_event, 1);
+#else
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, struct _file_event);
+} xpad SEC(".maps");
+
+static const struct _file_event empty_file_event = {};
+#endif
+
+#ifdef __BCC__
+#define DECLARE_FILE_EVENT(DATA) struct _file_event __##DATA = {}, struct _file_event *DATA = &__##DATA
+#else
+#define DECLARE_FILE_EVENT(DATA) struct _file_event *DATA = __current_blob()
+#endif
+#define GENERIC_DATA(DATA)  (&((struct _file_event *)(DATA))->_data)
+#define FILE_DATA(DATA)  (&((struct _file_event*)(DATA))->_file_data)
+#define PATH_DATA(DATA)  (&((struct _file_event*)(DATA))->_path_data)
+#define RENAME_DATA(DATA)  (&((struct _file_event*)(DATA))->_rename_data)
+
+static void *__current_blob(void)
+{
+    u32 index = 0;
+    struct _file_event *event_data = bpf_map_lookup_elem(&xpad, &index);
+
+    if (event_data)
+    {
+        __builtin_memset(event_data, 0, sizeof(*event_data));
+    }
+
+    return (void *)event_data;
+}
 
 static inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr) {
     // Note that these functions are not 100% compatible.  The read_str function returns the number of bytes read,
@@ -561,13 +599,21 @@ static inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe
 }
 
 
-static void send_event(
-    struct pt_regs *ctx,
-    void           *data,
-    size_t          data_size)
+static void send_event(void *ctx, void *data, size_t data_size)
 {
-    ((struct data*)data)->header.event_time = bpf_ktime_get_ns();
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, data, data_size);
+    if (USE_RINGBUF)
+    {
+        // TODO:
+        //  Refactor to permit sending ringbuff flags
+        //  instead of hardcoding BPF_RB_FORCE_WAKEUP.
+        (void)bpf_ringbuf_output(&events, data, data_size, BPF_RB_FORCE_WAKEUP);
+    }
+    else
+    {
+        // Only perf buffer instance should require the event timestamp
+        ((struct data*)data)->header.event_time = bpf_ktime_get_ns();
+        bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, data, data_size);
+    }
 }
 
 static inline struct super_block *_sb_from_dentry(struct dentry *dentry)
@@ -860,8 +906,14 @@ out:
     return;
 }
 
+#ifdef __BCC__
 #ifndef MAX_PATH_ITER
 #define MAX_PATH_ITER 24
+#endif
+#else
+// Likely can be 64 but this a safe middle ground
+#define MAX_FULL_PATH_ITER   40
+#define MAX_DENTRY_PATH_ITER 32
 #endif
 
 static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
@@ -880,7 +932,7 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 
     data->header.state = PP_PATH_COMPONENT;
 #pragma clang loop unroll(full)
-    for (int i = 1; i < MAX_PATH_ITER; ++i) {
+    for (int i = 1; i < MAX_FULL_PATH_ITER; ++i) {
         bpf_core_read(&parent_dentry, sizeof(struct dentry *), &dentry->d_parent);
 
         if (dentry == mnt_root || dentry == parent_dentry) {
@@ -920,7 +972,7 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry, s
 
     data->header.state = PP_PATH_COMPONENT;
 #pragma unroll
-    for (int i = 0; i < MAX_PATH_ITER; i++) {
+    for (int i = 0; i < MAX_DENTRY_PATH_ITER; i++) {
         bpf_core_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
 
         if (parent_dentry == dentry || parent_dentry == NULL) {
@@ -953,10 +1005,11 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execveat, int fd,
                  const char __user *const __user *envp, int flags)
 {
     DECLARE_FILE_EVENT(data);
+    if (!data) return 0;
 
-    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-    submit_all_args(ctx, argv, PATH_DATA(&data));
+    submit_all_args(ctx, argv, PATH_DATA(data));
 
     return 0;
 }
@@ -967,10 +1020,11 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execve, const char __user *filename,
                const char __user *const __user *envp)
 {
     DECLARE_FILE_EVENT(data);
+    if (!data) return 0;
 
-    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-    submit_all_args(ctx, argv, PATH_DATA(&data));
+    submit_all_args(ctx, argv, PATH_DATA(data));
 
     return 0;
 }
@@ -982,7 +1036,7 @@ int BPF_KPROBE(after_sys_execve)
     struct exec_data data = {};
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
-    data.retval = PT_REGS_RC(ctx);
+    data.retval = PT_REGS_RC_CORE(ctx);
 
     send_event(ctx, &data, sizeof(struct exec_data));
 
@@ -995,7 +1049,7 @@ int BPF_KPROBE(after_sys_execveat)
     struct exec_data data = {};
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
-    data.retval = PT_REGS_RC(ctx);
+    data.retval = PT_REGS_RC_CORE(ctx);
 
     send_event(ctx, &data, sizeof(struct exec_data));
 
@@ -1058,27 +1112,30 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
         return 0;
     }
     u64 file_cache_key = (u64)file;
+    DECLARE_FILE_EVENT(data);
+    if (!data) goto out;
 
     void *cachep = bpf_map_lookup_elem(&file_write_cache, &file_cache_key);
     if (cachep) {
-        DECLARE_FILE_EVENT(data);
-        __init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+        __init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
 #ifdef __BCC_UNDER_4_10__
-        FILE_DATA(&data)->device = __get_device_from_file(file);
-            FILE_DATA(&data)->inode = __get_inode_from_file(file);
+        FILE_DATA(data)->device = __get_device_from_file(file);
+            FILE_DATA(data)->inode = __get_inode_from_file(file);
 #else
-        FILE_DATA(&data)->device = ((struct file_data_cache *) cachep)->device;
-        FILE_DATA(&data)->inode = ((struct file_data_cache *) cachep)->inode;
+        FILE_DATA(data)->device = ((struct file_data_cache *) cachep)->device;
+        FILE_DATA(data)->inode = ((struct file_data_cache *) cachep)->inode;
 #endif /* __BCC_UNDER_4_10__ */
 
-        send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+        send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
-        __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(&data));
-        send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+        __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
+        send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
     }
 
     bpf_map_delete_elem(&file_write_cache, &file_cache_key);
+out:
+
     return 0;
 }
 
@@ -1087,7 +1144,7 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
 {
     unsigned long exec_flags;
     unsigned long file_flags;
-    DECLARE_FILE_EVENT(data);
+    struct _file_event *data = NULL;
 
     if (!file) {
         goto out;
@@ -1118,20 +1175,27 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     	}
     }
 
-    __init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    data = __current_blob();
+    if (!data)
+    {
+        goto out;
+    }
+
+    __init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
     // event specific data
-    FILE_DATA(&data)->device = __get_device_from_file(file);
-    FILE_DATA(&data)->inode = __get_inode_from_file(file);
-    FILE_DATA(&data)->flags = flags;
-    FILE_DATA(&data)->prot = prot;
+    FILE_DATA(data)->device = __get_device_from_file(file);
+    FILE_DATA(data)->inode = __get_inode_from_file(file);
+    FILE_DATA(data)->flags = flags;
+    FILE_DATA(data)->prot = prot;
     // submit initial event data
-    send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+    send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
     // submit file path event data
-    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(&data));
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
+
     return 0;
 }
 
@@ -1145,7 +1209,7 @@ out:
 SEC("kprobe/security_file_open")
 int BPF_KPROBE(on_security_file_open, struct file *file)
 {
-    DECLARE_FILE_EVENT(data);
+    struct _file_event *data = NULL;
     struct super_block *sb = NULL;
     struct inode *inode = NULL;
     int mode;
@@ -1185,26 +1249,30 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
         type = EVENT_FILE_READ;
     }
 
-    __init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-    FILE_DATA(&data)->device = __get_device_from_file(file);
-    FILE_DATA(&data)->inode = __get_inode_from_file(file);
-    FILE_DATA(&data)->flags = BPF_CORE_READ(file, f_flags);
-    FILE_DATA(&data)->prot = BPF_CORE_READ(file, f_mode);
-    FILE_DATA(&data)->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data = __current_blob();
+    if (!data) goto out;
+
+    __init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+    FILE_DATA(data)->device = __get_device_from_file(file);
+    FILE_DATA(data)->inode = __get_inode_from_file(file);
+    FILE_DATA(data)->flags = BPF_CORE_READ(file, f_flags);
+    FILE_DATA(data)->prot = BPF_CORE_READ(file, f_mode);
+    FILE_DATA(data)->fs_magic = BPF_CORE_READ(sb, s_magic);
 
     if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
     {
         // This allows us to send the last-write event on file close
-        __track_write_entry(file, FILE_DATA(&data));
+        __track_write_entry(file, FILE_DATA(data));
     }
 
-    send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+    send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
-    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(&data));
+    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
 
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 
 out:
+
     return 0;
 }
 
@@ -1236,17 +1304,12 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 SEC("kprobe/security_inode_unlink")
 int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentry)
 {
-    DECLARE_FILE_EVENT(data);
-    // struct super_block *sb = NULL;
-    // int mode;
-
-    if (!dentry) {
-        goto out;
+    if (dentry) {
+        DECLARE_FILE_EVENT(data);
+        if (!data) return 0;
+        __send_dentry_delete(ctx, data, dentry);
     }
 
-    __send_dentry_delete(ctx, &data, dentry);
-
-out:
     return 0;
 }
 
@@ -1258,46 +1321,49 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
     DECLARE_FILE_EVENT(data);
     struct super_block *sb = NULL;
 
+    if (!data) goto out;
+
     // send event for delete of source file
-    if (!__send_dentry_delete(ctx, &data, old_dentry)) {
+    if (!__send_dentry_delete(ctx, data, old_dentry)) {
         goto out;
     }
 
-    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
     sb = _sb_from_dentry(old_dentry);
 
-    RENAME_DATA(&data)->device = __get_device_from_dentry(old_dentry);
-    RENAME_DATA(&data)->old_inode = __get_inode_from_dentry(old_dentry);
-    RENAME_DATA(&data)->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
+    RENAME_DATA(data)->device = __get_device_from_dentry(old_dentry);
+    RENAME_DATA(data)->old_inode = __get_inode_from_dentry(old_dentry);
+    RENAME_DATA(data)->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
 
-    __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->old_inode);
+    __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->old_inode);
 
     // If the target destination already exists
     if (new_dentry)
     {
-        __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->new_inode);
+        __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->new_inode);
 
-        RENAME_DATA(&data)->new_inode  = __get_inode_from_dentry(new_dentry);
+        RENAME_DATA(data)->new_inode  = __get_inode_from_dentry(new_dentry);
     }
     else
     {
-        RENAME_DATA(&data)->new_inode  = 0;
+        RENAME_DATA(data)->new_inode  = 0;
     }
 
-    send_event(ctx, RENAME_DATA(&data), sizeof(struct rename_data));
+    send_event(ctx, RENAME_DATA(data), sizeof(struct rename_data));
 
-    __do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    __do_dentry_path(ctx, new_dentry, PATH_DATA(data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
+
     return 0;
 }
 
 SEC("kprobe/wake_up_new_task")
 int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
 {
-    // struct inode *pinode = NULL;
     struct file_data data = {};
+    struct file_data *file_data = &data;
     if (!task) {
         goto out;
     }
@@ -1306,9 +1372,9 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         goto out;
     }
 
-    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &data.header, task);
+    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, file_data, task);
 
-    data.header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
+    file_data->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
 
 #ifdef __BCC_UNDER_4_8__
     // Poorman's method for storing root fs path data->
@@ -1323,11 +1389,11 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
 #endif /* __BCC_UNDER_4_8__ */
 
     if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm) && BPF_CORE_READ(task, mm, exe_file)) {
-        data.device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
-        data.inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
+        file_data->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
+        file_data->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
     }
 
-    send_event(ctx, &data, sizeof(struct file_data));
+    send_event(ctx, file_data, sizeof(*file_data));
 
 out:
     return 0;
@@ -1502,7 +1568,7 @@ static inline int trace_connect_return(struct pt_regs *ctx)
 {
     u64 id = bpf_get_current_pid_tgid();
     // u32 pid = id >> 32;
-    int ret = PT_REGS_RC(ctx);
+    int ret = PT_REGS_RC_CORE(ctx);
     if (ret != 0) {
         bpf_map_delete_elem(&currsock, &id);
         return 0;
@@ -1567,7 +1633,7 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
     // u64 id = bpf_get_current_pid_tgid();
     // u32 pid = id >> 32;
 
-    struct sk_buff *skb = (struct sk_buff *)PT_REGS_RC(ctx);
+    struct sk_buff *skb = (struct sk_buff *)PT_REGS_RC_CORE(ctx);
     if (skb == NULL) {
         return 0;
     }
@@ -1690,7 +1756,7 @@ int BPF_KRETPROBE(trace_accept_return)
     // u64 id = bpf_get_current_pid_tgid();
     // u32 pid = id >> 32;
 
-    struct sock *newsk = (struct sock *)PT_REGS_RC(ctx);
+    struct sock *newsk = (struct sock *)PT_REGS_RC_CORE(ctx);
     if (newsk == NULL) {
         return 0;
     }
@@ -1740,7 +1806,7 @@ int BPF_KPROBE(trace_udp_recvmsg, struct sock *sk, struct msghdr *msg, size_t le
 SEC("kretprobe/udp_recvmsg")
 int BPF_KRETPROBE(trace_udp_recvmsg_return)
 {
-    int ret = PT_REGS_RC(ctx);
+    int ret = PT_REGS_RC_CORE(ctx);
     u64 id = bpf_get_current_pid_tgid();
     // u32 pid = id >> 32;
 
@@ -1819,7 +1885,7 @@ int BPF_KPROBE(kprobe_udpv6_sendmsg, struct sock *sk, struct msghdr *msg)
 
 static int trace_udp_sendmsg_return(struct pt_regs *ctx)
 {
-    int ret = PT_REGS_RC(ctx);
+    int ret = PT_REGS_RC_CORE(ctx);
     u64 id  = bpf_get_current_pid_tgid();
 
     struct sock **skpp;
