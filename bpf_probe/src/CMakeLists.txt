@@ -28,6 +28,7 @@ set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
 include_directories(${PROJECT_SOURCE_DIR}/../include)
 
 set(EPBF_PROG_CPP ${CMAKE_CURRENT_BINARY_DIR}/cb_ebpfprog.cpp)
+set(TRANSPORT_HDR ${PROJECT_SOURCE_DIR}/../include/transport.h)
 set(EBPF_PPRG_SRC ${PROJECT_SOURCE_DIR}/bcc_sensor.c)
 set(SENSOR_BPF_SRC ${PROJECT_SOURCE_DIR}/sensor.bpf.c)
 set(SENSOR_BPF_SRC_R ${CMAKE_CURRENT_BINARY_DIR}/sensor.bpf.h)
@@ -36,7 +37,7 @@ set(GENERATE_SH   ${PROJECT_SOURCE_DIR}/generate.sh)
 add_custom_command(
         OUTPUT ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC_R}
         COMMAND chmod a+x ${GENERATE_SH}
-        COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC}
+        COMMAND ${GENERATE_SH} ${EBPF_PPRG_SRC} ${TRANSPORT_HDR} ${EPBF_PROG_CPP} ${SENSOR_BPF_SRC}
         DEPENDS ${GENERATE_SH} ${EBPF_PPRG_SRC}
         COMMENT "Generating BPF Program ${EPBF_PROG_CPP}"
 )
@@ -100,6 +101,7 @@ add_custom_command(
         -D${TARGET_ARCH}
         -I${CONAN_INCLUDE_DIRS_LIBBPF}
         -I${VMLINUX_INCLUDE}
+        -I${PROJECT_SOURCE_DIR}/../include
         -c ${BPF_C_FILE}
         -o ${BPF_ELF_FILE_UNSTRIP}
     COMMAND ${LLVM_STRIP} -g ${BPF_ELF_FILE_UNSTRIP} -o ${BPF_ELF_FILE}
