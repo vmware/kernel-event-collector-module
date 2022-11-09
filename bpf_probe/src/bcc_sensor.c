@@ -251,7 +251,7 @@ struct _file_event
     };
 };
 
-#define DECLARE_FILE_EVENT(DATA) struct _file_event DATA = {}
+#define DECLARE_FILE_EVENT(DATA) struct _file_event __##DATA = {}; struct _file_event *DATA = &__##DATA
 #define GENERIC_DATA(DATA)  ((struct data*)&((struct _file_event*)(DATA))->_data)
 #define FILE_DATA(DATA)  ((struct file_data*)&((struct _file_event*)(DATA))->_file_data)
 #define PATH_DATA(DATA)  ((struct path_data*)&((struct _file_event*)(DATA))->_path_data)
@@ -593,9 +593,18 @@ out:
 }
 #endif
 
-#ifndef MAX_PATH_ITER
-#define MAX_PATH_ITER 24
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
+  #ifndef MAX_FULL_PATH_ITER
+    #define MAX_FULL_PATH_ITER 40
+  #endif
+  #ifndef MAX_DENTRY_PATH_ITER
+    #define MAX_DENTRY_PATH_ITER 32
+   #endif
+#else
+  #define MAX_FULL_PATH_ITER 24
+  #define MAX_DENTRY_PATH_ITER 24
 #endif
+
 static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 				 struct vfsmount *vfsmnt, struct path_data *data)
 {
@@ -612,7 +621,7 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 
 	data->header.state = PP_PATH_COMPONENT;
 #pragma clang loop unroll(full)
-	for (int i = 1; i < MAX_PATH_ITER; ++i) {
+	for (int i = 1; i < MAX_FULL_PATH_ITER; ++i) {
 		bpf_probe_read(&parent_dentry, sizeof(struct dentry *), &dentry->d_parent);
 
 		if (dentry == mnt_root || dentry == parent_dentry) {
@@ -653,7 +662,7 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 
 	data->header.state = PP_PATH_COMPONENT;
 #pragma unroll
-	for (int i = 0; i < MAX_PATH_ITER; i++) {
+	for (int i = 0; i < MAX_DENTRY_PATH_ITER; i++) {
 		bpf_probe_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
 
 		if (parent_dentry == dentry || parent_dentry == NULL) {
@@ -686,10 +695,11 @@ int syscall__on_sys_execveat(struct pt_regs *ctx, int fd,
 				 const char __user *const __user *envp, int flags)
 {
 	DECLARE_FILE_EVENT(data);
+	if (!data) return 0;
 
-	__init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	__init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-	submit_all_args(ctx, argv, PATH_DATA(&data));
+	submit_all_args(ctx, argv, PATH_DATA(data));
 
 	return 0;
 }
@@ -698,10 +708,11 @@ int syscall__on_sys_execve(struct pt_regs *ctx, const char __user *filename,
 			   const char __user *const __user *envp)
 {
 	DECLARE_FILE_EVENT(data);
+	if (!data) return 0;
 
-	__init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	__init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-	submit_all_args(ctx, argv, PATH_DATA(&data));
+	submit_all_args(ctx, argv, PATH_DATA(data));
 
 	return 0;
 }
@@ -794,20 +805,22 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 	void *cachep = file_write_cache.lookup(&file_cache_key);
 	if (cachep) {
 		DECLARE_FILE_EVENT(data);
-		__init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+		if (!data) return 0;
+
+		__init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
-		FILE_DATA(&data)->device = ((struct file_data_cache *)cachep)->device;
-		FILE_DATA(&data)->inode = ((struct file_data_cache *)cachep)->inode;
+		FILE_DATA(data)->device = ((struct file_data_cache *)cachep)->device;
+		FILE_DATA(data)->inode = ((struct file_data_cache *)cachep)->inode;
 #else
-		FILE_DATA(&data)->device = __get_device_from_file(file);
-		FILE_DATA(&data)->inode = __get_inode_from_file(file);
+		FILE_DATA(data)->device = __get_device_from_file(file);
+		FILE_DATA(data)->inode = __get_inode_from_file(file);
 #endif
 
-		send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+		send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
-		__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(&data));
-		send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+		__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
+		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
 
 	file_write_cache.delete(&file_cache_key);
@@ -818,7 +831,6 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 			  unsigned long prot, unsigned long flags)
 {
 	unsigned long exec_flags;
-	DECLARE_FILE_EVENT(data);
 
 	if (!file) {
 		goto out;
@@ -847,19 +859,22 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 #endif
 
+	DECLARE_FILE_EVENT(data);
+	if (!data) goto out;
+
 	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
 
 	// event specific data
-	FILE_DATA(&data)->device = __get_device_from_file(file);
-	FILE_DATA(&data)->inode = __get_inode_from_file(file);
-	FILE_DATA(&data)->flags = flags;
-	FILE_DATA(&data)->prot = prot;
+	FILE_DATA(data)->device = __get_device_from_file(file);
+	FILE_DATA(data)->inode = __get_inode_from_file(file);
+	FILE_DATA(data)->flags = flags;
+	FILE_DATA(data)->prot = prot;
 	// submit initial event data
-	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+	send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
 	// submit file path event data
-	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(&data));
-	send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
+	send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
 	return 0;
 }
@@ -873,7 +888,6 @@ out:
 // to create the file if needed. So this will likely be written to next.
 int on_security_file_open(struct pt_regs *ctx, struct file *file)
 {
-	DECLARE_FILE_EVENT(data);
 	struct super_block *sb = NULL;
 	struct inode *inode = NULL;
 	int mode;
@@ -913,24 +927,27 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 		type = EVENT_FILE_READ;
 	}
 
-	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-	FILE_DATA(&data)->device = __get_device_from_file(file);
-	FILE_DATA(&data)->inode = __get_inode_from_file(file);
-	FILE_DATA(&data)->flags = file->f_flags;
-	FILE_DATA(&data)->prot = file->f_mode;
-	FILE_DATA(&data)->fs_magic = sb->s_magic;
+	DECLARE_FILE_EVENT(data);
+	if (!data) goto out;
+
+	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+	FILE_DATA(data)->device = __get_device_from_file(file);
+	FILE_DATA(data)->inode = __get_inode_from_file(file);
+	FILE_DATA(data)->flags = file->f_flags;
+	FILE_DATA(data)->prot = file->f_mode;
+	FILE_DATA(data)->fs_magic = sb->s_magic;
 
 	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
 		// This allows us to send the last-write event on file close
-		__track_write_entry(file, FILE_DATA(&data));
+		__track_write_entry(file, FILE_DATA(data));
 	}
 
-	send_event(ctx, FILE_DATA(&data), sizeof(struct file_data));
+	send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
-	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(&data));
+	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
 
-	send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+	send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 
 out:
 	return 0;
@@ -938,7 +955,7 @@ out:
 
 static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry *dentry)
 {
-	if (dentry)
+	if (data && dentry)
 	{
 		struct super_block *sb = _sb_from_dentry(dentry);
 
@@ -964,17 +981,15 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 int on_security_inode_unlink(struct pt_regs *ctx, struct inode *dir,
 				 struct dentry *dentry)
 {
-	DECLARE_FILE_EVENT(data);
-	struct super_block *sb = NULL;
-	int mode;
+	if (dentry) {
+		DECLARE_FILE_EVENT(data);
 
-	if (!dentry) {
-		goto out;
+		if (data)
+		{
+			__send_dentry_delete(ctx, data, dentry);
+		}
 	}
 
-	__send_dentry_delete(ctx, &data, dentry);
-
-out:
 	return 0;
 }
 
@@ -982,40 +997,41 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 				 struct dentry *old_dentry, struct inode *new_dir,
 				 struct dentry *new_dentry, unsigned int flags)
 {
-	DECLARE_FILE_EVENT(data);
+    DECLARE_FILE_EVENT(data);
+    if (!data) goto out;
     struct super_block *sb = NULL;
 
     // send event for delete of source file
-    if (!__send_dentry_delete(ctx, &data, old_dentry)) {
+    if (!__send_dentry_delete(ctx, data, old_dentry)) {
         goto out;
     }
 
-    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
     sb = _sb_from_dentry(old_dentry);
 
-    RENAME_DATA(&data)->device = __get_device_from_dentry(old_dentry);
-    RENAME_DATA(&data)->old_inode = __get_inode_from_dentry(old_dentry);
-    RENAME_DATA(&data)->fs_magic = sb ? sb->s_magic : 0;
+    RENAME_DATA(data)->device = __get_device_from_dentry(old_dentry);
+    RENAME_DATA(data)->old_inode = __get_inode_from_dentry(old_dentry);
+    RENAME_DATA(data)->fs_magic = sb ? sb->s_magic : 0;
 
-    __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->old_inode);
+    __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->old_inode);
 
     // If the target destination already exists
     if (new_dentry)
     {
-        __file_tracking_delete(0, RENAME_DATA(&data)->device, RENAME_DATA(&data)->new_inode);
+        __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->new_inode);
 
-        RENAME_DATA(&data)->new_inode  = __get_inode_from_dentry(new_dentry);
+        RENAME_DATA(data)->new_inode  = __get_inode_from_dentry(new_dentry);
     }
     else
     {
-        RENAME_DATA(&data)->new_inode  = 0;
+        RENAME_DATA(data)->new_inode  = 0;
     }
 
-    send_event(ctx, RENAME_DATA(&data), sizeof(struct rename_data));
+    send_event(ctx, RENAME_DATA(data), sizeof(struct rename_data));
 
-    __do_dentry_path(ctx, new_dentry, PATH_DATA(&data));
-    send_event(ctx, GENERIC_DATA(&data), sizeof(struct data));
+    __do_dentry_path(ctx, new_dentry, PATH_DATA(data));
+    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
     return 0;
 }

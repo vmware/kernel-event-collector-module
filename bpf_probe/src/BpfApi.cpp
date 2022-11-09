@@ -24,6 +24,7 @@
 #include <boost/filesystem.hpp>
 
 #include <sys/epoll.h>
+#include <sys/resource.h>   // Only for setrlimit()
 
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
@@ -92,15 +93,46 @@ void BpfApi::CleanBuildDir()
 
 bool BpfApi::Init_libbpf()
 {
-    m_skel = sensor_bpf__open_and_load();
-    if (m_skel)
+    struct rlimit rlim_new = {
+        .rlim_cur   = RLIM_INFINITY,
+        .rlim_max   = RLIM_INFINITY,
+    };
+
+    // TODO: Remove when using libbpf 1.0.0+ aka BCC v0.25.0+
+    (void)setrlimit(RLIMIT_MEMLOCK, &rlim_new);
+
+    m_skel = sensor_bpf__open();
+    if (!m_skel)
     {
-        m_ncpu = ebpf::get_online_cpus();
-        m_ProgInstanceType = BpfApi::ProgInstanceType::LibbpfAutoAttached;
-        return true;
+        return false;
     }
 
-    return false;
+    m_ncpu = ebpf::get_online_cpus();
+
+    if (libbpf_probe_bpf_map_type(BPF_MAP_TYPE_RINGBUF, NULL))
+    {
+        // max_entries ideally should be perf buffer's size * m_cpu
+        // PAGE_SIZE may be larger on aarch64
+
+        // unsigned int max_entries = (1024 * 4096) * m_ncpu.size();
+
+        // bpf_map__set_max_entries(m_skel->maps.dummy_events, max_entries);
+        // bpf_map__set_type(m_skel->maps.dummy_events, BPF_MAP_TYPE_RINGBUF);
+        // bpf_map__set_key_size(m_skel->maps.dummy_events, 0);
+        // bpf_map__set_value_size(m_skel->maps.dummy_events, 0);
+        // m_skel->rodata->USE_RINGBUF = 1;
+    }
+
+    if (sensor_bpf__load(m_skel))
+    {
+        return false;
+    }
+
+    // TODO: Log if using ringbuf or perf buffer here
+
+    m_ProgInstanceType = BpfApi::ProgInstanceType::LibbpfAutoAttached;
+
+    return true;
 }
 
 bool BpfApi::Init_bcc(const std::string & bpf_program)
