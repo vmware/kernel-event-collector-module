@@ -3,129 +3,12 @@
  * SPDX-License-Identifier: GPL-2.0
  */
 
-#ifdef BCC_SEC
-#define __BCC__
-#endif
-
-#ifdef __BCC__  /* BCC specific headers */
-/* ---------------------------------------------------------------------*/
-
-// Struct randomization causes issues on 4.13 and some early versions of 4.14
-// These are redefined to work around this, per:
-// https://lists.iovisor.org/g/iovisor-dev/topic/21386300#1239
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
-#ifdef randomized_struct_fields_start
-#undef randomized_struct_fields_start
-#endif /* randomized_struct_fields_start */
-#define randomized_struct_fields_start struct {
-#ifdef randomized_struct_fields_end
-#undef randomized_struct_fields_end
-#endif /* randomized_struct_fields_end */
-#define randomized_struct_fields_end \
-    }                            \
-    ;
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0) */
-
-#ifndef KBUILD_MODNAME
-#define KBUILD_MODNAME "vmw_bcc_bpfsensor"
-#endif /* KBUILD_MODNAME */
-
-#include <uapi/linux/limits.h>
-#include <uapi/linux/in.h>
-#include <uapi/linux/ip.h>
-#include <uapi/linux/ipv6.h>
-#include <uapi/linux/ptrace.h>
-#include <uapi/linux/stat.h>
-#include <uapi/linux/udp.h>
-
-#include <linux/binfmts.h>
-#include <linux/dcache.h>
-#include <linux/fs.h>
-#include <linux/fs_struct.h>
-#include <linux/kdev_t.h>
-#include <linux/mm.h>
-#include <linux/mman.h>
-#include <linux/mount.h>
-#include <linux/nsproxy.h>
-#include <linux/ns_common.h>
-#include <linux/path.h>
-#include <linux/pid_namespace.h>
-#include <linux/sched.h>
-#include <linux/skbuff.h>
-
-#include <net/sock.h>
-#include <net/inet_sock.h>
-
-// Create BPF_LRU if it does not exist.
-// Support for lru hashes begins with 4.10, so a regular hash table must be used on earlier
-// kernels (https://github.com/iovisor/bcc/blob/master/docs/kernel-versions.md#tables-aka-maps)
-// This follows the form for other BPF_XXXX macros, so should work if it is ever added
-#ifndef BPF_LRU
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
-#define BPF_LRU1(_name) BPF_TABLE("lru_hash", u64, u64, _name, 10240)
-#define BPF_LRU2(_name, _key_type) \
-    BPF_TABLE("lru_hash", _key_type, u64, _name, 10240)
-#define BPF_LRU3(_name, _key_type, _leaf_type) \
-    BPF_TABLE("lru_hash", _key_type, _leaf_type, _name, 10240)
-// helper for default-variable macro function
-#define BPF_LRUX(_1, _2, _3, NAME, ...) NAME
-
-// Define a hash function, some arguments optional
-// BPF_LRU(name, key_type=u64, leaf_type=u64, size=10240)
-#define BPF_LRU(...) \
-    BPF_LRUX(__VA_ARGS__, BPF_LRU3, BPF_LRU2, BPF_LRU1)(__VA_ARGS__)
-#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
-#define BPF_LRU BPF_HASH
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
-#endif /* BPF_LRU */
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
-// Existence of map tells userspace if kernel is LRU map capable
-BPF_ARRAY(has_lru, uint32_t, 1);
-#define FALLBACK_FIELD_TYPE(A, B) A
-#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
-#define FALLBACK_FIELD_TYPE(A, B) B
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0) */
-
-// is this struct really needed here?
-struct mnt_namespace {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
-    atomic_t count;
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
-    struct ns_common ns;
-};
-
-struct mount {
-    struct hlist_node mnt_hash;
-    struct mount *mnt_parent;
-    struct dentry *mnt_mountpoint;
-    struct vfsmount mnt;
-    void *cb_args;
-} __randomize_layout;
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-#define MAXARG 30
-#else /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0) */
-#define MAXARG 20
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0) */
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
-#define __BCC_UNDER_4_10__
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) */
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
-#define __BCC_UNDER_4_8__
-#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0) */
-
-
-#else /* __BCC__ : non-BCC (libbpf specific) headers */
-/* ---------------------------------------------------------------------*/
-
 #include "vmlinux.h"
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
+#include "missing.h"
 #include "transport.h"
 
 // TODO: Fix our kprobe syscall names so arm64 works too
@@ -135,81 +18,32 @@ _Bool LINUX_HAS_SYSCALL_WRAPPER = 1;
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
-//////////// Missing imports ///////////
-#define BPF_F_CURRENT_CPU 0xffffffffULL
-#define AF_INET     2       /* internetwork: UDP, TCP, etc. */
-#define AF_INET6    10      /* IPv6 */
-#define BPF_ANY     0 /* create new element or update existing */
-#define BPF_NOEXIST 1 /* create new element if it didn't exist */
-#define BPF_EXIST   2 /* update existing element */
-
-// magic
-#define DEBUGFS_MAGIC           0x64626720
-#define SELINUX_MAGIC           0xf97cff8c
-#define SMACK_MAGIC             0x43415d53  /* "SMAC" */
-#define BPF_FS_MAGIC            0xcafe4a11
-#define BINDERFS_SUPER_MAGIC    0x6c6f6f70
-#define CGROUP_SUPER_MAGIC      0x27e0eb
-#define CGROUP2_SUPER_MAGIC     0x63677270
-#define TRACEFS_MAGIC           0x74726163
-#define DEVPTS_SUPER_MAGIC      0x1cd1
-#define FUTEXFS_SUPER_MAGIC     0xBAD1DEA
-#define PROC_SUPER_MAGIC        0x9fa0
-#define SOCKFS_MAGIC            0x534F434B
-#define SYSFS_MAGIC             0x62656572
-#define ANON_INODE_FS_MAGIC     0x09041934
-
-#define PROT_EXEC               0x4                /* Page can be executed.  */
-
-// TODO: Fix architecture specific macro definitions
-# define MAP_DENYWRITE          0x00800                /* ETXTBSY */
-# define MAP_EXECUTABLE         0x01000                /* Mark it as an executable.  */
-# define MAP_PRIVATE            0x00002
-# define MAP_FIXED              0x00010
-
-#define     S_IFMT              00170000
-#define     S_IFREG             0100000
-#define     S_ISREG(m)   (((m) & S_IFMT) == S_IFREG)
-
-/* File is opened for execution with sys_execve / sys_uselib */
-#define FMODE_EXEC      ((fmode_t)0x20)
-#define FMODE_CREATED   ((fmode_t)0x100000)
-
-//#define O_ACCMODE       00000003
-//#define O_RDONLY        00000000
-#define O_WRONLY        00000001
-#define O_RDWR          00000002
-
-#define PF_KTHREAD      0x00200000  /* I am a kernel thread */
-
-#define MSG_PEEK    2
-
-#define MINORBITS   20
-#define MINORMASK   ((1U << MINORBITS) - 1)
-
-#define MAJOR(dev)  ((unsigned int) ((dev) >> MINORBITS))
-#define MINOR(dev)  ((unsigned int) ((dev) & MINORMASK))
-
-static __always_inline u32 new_encode_dev(dev_t dev)
-{
-unsigned major = MAJOR(dev);
-unsigned minor = MINOR(dev);
-return (minor & 0xff) | (major << 8) | ((minor & ~0xff) << 12);
-}
-
-static inline uid_t __kuid_val(kuid_t uid)
-{
-return uid.val;
-}
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
+#define DNS_SEGMENT_FLAGS_START 0x01
+#define DNS_SEGMENT_FLAGS_END 0x02
+
+#define DNS_RESP_PORT_NUM 53
+#define DNS_RESP_MAXSIZE 512
+#define PROXY_SERVER_MAX_LEN 100
+
 #define MAXARG 30
 
-#define s6_addr32       in6_u.u6_addr32
+// Likely can be 64 but this a safer middle ground
+#define MAX_FULL_PATH_ITER   40
+// Can be much larger than MAX_FULL_PATH_ITER
+#define MAX_DENTRY_PATH_ITER 32
 
-#endif /* __BCC__ : end of specific BCC/libbpf headers */
-/* ---------------------------------------------------------------------*/
+// Union for the base data payloads
+struct _file_event {
+    union {
+        struct file_data   _file_data;
+        struct path_data   _path_data;
+        struct rename_data _rename_data;
+        struct data        _data;
+    };
+};
 
 struct file_data_cache {
     u64 pid;
@@ -217,77 +51,25 @@ struct file_data_cache {
     u64 inode;
 };
 
-#define CACHE_UDP
-
-#ifdef CACHE_UDP
 struct ip_key {
         uint32_t pid;
         uint16_t remote_port;
         uint16_t local_port;
         uint32_t remote_addr;
         uint32_t local_addr;
-    };
-    struct ip6_key {
-        uint32_t pid;
-        uint16_t remote_port;
-        uint16_t local_port;
-        uint32_t remote_addr6[4];
-        uint32_t local_addr6[4];
-    };
+};
+struct ip6_key {
+    uint32_t pid;
+    uint16_t remote_port;
+    uint16_t local_port;
+    uint32_t remote_addr6[4];
+    uint32_t local_addr6[4];
+};
 #define FLOW_TX 0x01
 #define FLOW_RX 0x02
-    struct ip_entry {
-        u8 flow;
-    };
-#endif /* CACHE_UDP */
-
-#ifdef __BCC__  /* BCC specific maps */
-/* ---------------------------------------------------------------------*/
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
-BPF_HASH(last_parent, u32, u32, 8192);
-BPF_HASH(root_fs, u32, void *, 3); // stores last known root fs
-#endif
-
-BPF_PERF_OUTPUT(events);
-
-// This hash tracks the "observed" file-create events.  This will not be 100% accurate because we will report a
-//  file create for any file the first time it is opened with WRITE|TRUNCATE (even if it already exists).  It
-//  will however serve to de-dup some events.  (Ie.. If a program does frequent open/write/close.)
-BPF_LRU(file_map, struct file_data_cache, u32);
-
-// Older kernels do not support the struct fields so allow for fallback
-BPF_LRU(file_write_cache, u64, FALLBACK_FIELD_TYPE(struct file_data_cache, u32));
-
-#ifdef CACHE_UDP
-BPF_LRU(ip_cache, FALLBACK_FIELD_TYPE(struct ip_key, u32),
-    FALLBACK_FIELD_TYPE(struct ip_entry, struct ip_key));
-BPF_LRU(ip6_cache, FALLBACK_FIELD_TYPE(struct ip6_key, u32),
-    FALLBACK_FIELD_TYPE(struct ip_entry, struct ip6_key));
-#endif  /* CACHE_UDP */
-
-BPF_LRU(currsock, u64, struct sock *);
-BPF_LRU(currsock2, u64, struct msghdr *);
-BPF_LRU(currsock3, u64, struct sock *);
-
-
-#else /* __BCC__ : non-BCC (libbpf specific) maps */
-/* ---------------------------------------------------------------------*/
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 8192);
-    __type(key, u32);
-    __type(value, u32);
-} last_parent SEC(".maps");
-
-// dummy map for compilation
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 3);
-    __type(key, u32);
-    __type(value, void *);
-} root_fs SEC(".maps");
+struct ip_entry {
+    u8 flow;
+};
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
@@ -301,6 +83,8 @@ volatile const unsigned int USE_RINGBUF = 0;
 // This hash tracks the "observed" file-create events.  This will not be 100% accurate because we will report a
 //  file create for any file the first time it is opened with WRITE|TRUNCATE (even if it already exists).  It
 //  will however serve to de-dup some events.  (Ie.. If a program does frequent open/write/close.)
+// TODO: On kernels with CONFIG_SECURITY_PATH support handle security_path_mknod
+// for when files are really created before being opened.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, struct file_data_cache);
@@ -315,7 +99,7 @@ struct {
     __uint(max_entries, 10240);
 } file_write_cache SEC(".maps");
 
-#ifdef CACHE_UDP
+// TODO: Scale to also be per proto
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, struct ip_key);
@@ -329,8 +113,8 @@ struct {
     __type(value, struct ip_entry);
     __uint(max_entries, 10240);
 } ip6_cache SEC(".maps");
-#endif  /* CACHE_UDP */
 
+// TODO: Scale to be per family
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, u64);
@@ -352,98 +136,8 @@ struct {
     __uint(max_entries, 10240);
 } currsock3 SEC(".maps");
 
-#endif /* __BCC__ : end of specific BCC/libbpf maps */
-/* ---------------------------------------------------------------------*/
-
-#ifdef __BCC__  /* BCC macro conversions */
-
-#define ___concat(a, b) a ## b
-#define ___apply(fn, n) ___concat(fn, n)
-#define ___nth(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, __11, N, ...) N
-#define ___narg(...) ___nth(_, ##__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
-
-#define ___arrow1(a) a
-#define ___arrow2(a, b) a->b
-#define ___arrow3(a, b, c) a->b->c
-#define ___arrow4(a, b, c, d) a->b->c->d
-#define ___arrow5(a, b, c, d, e) a->b->c->d->e
-#define ___arrow6(a, b, c, d, e, f) a->b->c->d->e->f
-#define ___arrow7(a, b, c, d, e, f, g) a->b->c->d->e->f->g
-#define ___arrow8(a, b, c, d, e, f, g, h) a->b->c->d->e->f->g->h
-#define ___arrow9(a, b, c, d, e, f, g, h, i) a->b->c->d->e->f->g->h->i
-#define ___arrow10(a, b, c, d, e, f, g, h, i, j) a->b->c->d->e->f->g->h->i->j
-#define ___arrow(...) ___apply(___arrow, ___narg(__VA_ARGS__))(__VA_ARGS__)
-
-#define BPF_CORE_READ(...) ___arrow(__VA_ARGS__)
-
-# define bpf_core_read bpf_probe_read
-
-#define bpf_perf_event_output(ctx, map_addr, _, data, data_size) \
-    ((*map_addr).perf_submit(ctx, data, data_size))
-
-#define bpf_map_lookup_elem(map, key) \
-    ((*map).lookup(key))
-
-#define bpf_map_delete_elem(map, key) \
-    ((*map).delete(key))
-
-#define bpf_map_update_elem(map, key, value, type) \
-    { if (type == BPF_NOEXIST) {                   \
-          (*map).insert(key, value);               \
-      } else {                                     \
-          (*map).update(key, value);               \
-      }                                            \
-    }
-
-#define LINUX_KERNEL_VERSION LINUX_VERSION_CODE
-
-#define SEC(...)
-
-#define BPF_KPROBE_SYSCALL(name, ...) name(struct pt_regs *ctx, ##__VA_ARGS__)
-#define BPF_KPROBE(name, args...) name(struct pt_regs *ctx, ##__VA_ARGS__)
-#define BPF_KRETPROBE(name, args...) name(struct pt_regs *ctx, ##__VA_ARGS__)
-
-#else /* __BCC__ : non-BCC (libbpf specific) macro covversions */
-
-# define __user
-
-#endif /* __BCC__ : end of  BCC macro conversions */
-
-// TODO: Update this definition to handle arm64 or remove it
-#ifndef PT_REGS_RC
-#define PT_REGS_RC(x) ((x)->ax)
-#endif
-#ifndef PT_REGS_RC_CORE
-#define PT_REGS_RC_CORE(x) PT_REGS_RC(x)
-#endif
-
-#define DNS_SEGMENT_FLAGS_START 0x01
-#define DNS_SEGMENT_FLAGS_END 0x02
-
-#define DNS_RESP_PORT_NUM 53
-#define DNS_RESP_MAXSIZE 512
-#define PROXY_SERVER_MAX_LEN 100
-
-// THis is a helper struct for the "file like" events.  These follow a pattern where 3+n events are sent.
-//  The first event sends the device/inode.  Each path element is sent as a separate event.  Finally an event is sent
-//  to say the operation is complete.
-// The macros below help to access the correct object in the struct.
-struct _file_event
-{
-    union
-    {
-        struct file_data   _file_data;
-        struct path_data   _path_data;
-        struct rename_data _rename_data;
-        struct data        _data;
-    };
-};
-
 // Declare scratchpad, might be better as a percpu array
 // except that won't work on sleepable prog types.
-#ifdef __BCC__
-BPF_PER_CPU_ARRAY(xpad, struct _file_event, 1);
-#else
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
@@ -451,20 +145,13 @@ struct {
     __type(value, struct _file_event);
 } xpad SEC(".maps");
 
-static const struct _file_event empty_file_event = {};
-#endif
-
-#ifdef __BCC__
-#define DECLARE_FILE_EVENT(DATA) struct _file_event __##DATA = {}, struct _file_event *DATA = &__##DATA
-#else
 #define DECLARE_FILE_EVENT(DATA) struct _file_event *DATA = __current_blob()
-#endif
 #define GENERIC_DATA(DATA)  (&((struct _file_event *)(DATA))->_data)
 #define FILE_DATA(DATA)  (&((struct _file_event*)(DATA))->_file_data)
 #define PATH_DATA(DATA)  (&((struct _file_event*)(DATA))->_path_data)
 #define RENAME_DATA(DATA)  (&((struct _file_event*)(DATA))->_rename_data)
 
-static void *__current_blob(void)
+static __always_inline void *__current_blob(void)
 {
     u32 index = 0;
     struct _file_event *event_data = bpf_map_lookup_elem(&xpad, &index);
@@ -477,20 +164,12 @@ static void *__current_blob(void)
     return (void *)event_data;
 }
 
-static inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr) {
-    // Note that these functions are not 100% compatible.  The read_str function returns the number of bytes read,
-    //   while the old version returns 0 on success.  Some of the logic we use does depend on the non-zero result
-    //   (described later).
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 11, 0)) {
-        bpf_probe_read(dst, size, unsafe_ptr);
-        return size;
-    } else {
-        return bpf_probe_read_str(dst, size, unsafe_ptr);
-    }
+static __always_inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr) {
+    return bpf_probe_read_str(dst, size, unsafe_ptr);
 }
 
 
-static void send_event(void *ctx, void *data, size_t data_size)
+static __always_inline void send_event(void *ctx, void *data, size_t data_size)
 {
     if (USE_RINGBUF)
     {
@@ -507,7 +186,7 @@ static void send_event(void *ctx, void *data, size_t data_size)
     }
 }
 
-static inline struct super_block *_sb_from_dentry(struct dentry *dentry)
+static __always_inline struct super_block *_sb_from_dentry(struct dentry *dentry)
 {
     struct super_block *sb = NULL;
     // Can't get dentry info return NULL
@@ -528,7 +207,7 @@ out:
     return sb;
 }
 
-static inline struct super_block *_sb_from_file(struct file *file)
+static __always_inline struct super_block *_sb_from_file(struct file *file)
 {
     struct super_block *sb = NULL;
 
@@ -554,7 +233,7 @@ out:
     return sb;
 }
 
-static inline bool __is_special_filesystem(struct super_block *sb)
+static __always_inline bool __is_special_filesystem(struct super_block *sb)
 {
     if (!sb) {
         return false;
@@ -594,7 +273,7 @@ static inline bool __is_special_filesystem(struct super_block *sb)
     return false;
 }
 
-static inline unsigned int __get_mnt_ns_id(struct task_struct *task)
+static __always_inline unsigned int __get_mnt_ns_id(struct task_struct *task)
 {
     if (task && BPF_CORE_READ(task, nsproxy)) { // TODO: use bpf_core_field_exists()?
         return BPF_CORE_READ(task, nsproxy, mnt_ns, ns.inum);
@@ -602,7 +281,7 @@ static inline unsigned int __get_mnt_ns_id(struct task_struct *task)
     return 0;
 }
 
-static inline u32 __get_device_from_sb(struct super_block *sb)
+static __always_inline u32 __get_device_from_sb(struct super_block *sb)
 {
     dev_t device = 0;
     if (sb) {
@@ -611,17 +290,17 @@ static inline u32 __get_device_from_sb(struct super_block *sb)
     return new_encode_dev(device);
 }
 
-static inline u32 __get_device_from_dentry(struct dentry *dentry)
+static __always_inline u32 __get_device_from_dentry(struct dentry *dentry)
 {
     return __get_device_from_sb(_sb_from_dentry(dentry));
 }
 
-static inline u32 __get_device_from_file(struct file *file)
+static __always_inline u32 __get_device_from_file(struct file *file)
 {
     return __get_device_from_sb(_sb_from_file(file));
 }
 
-static inline u64 __get_inode_from_pinode(struct inode *pinode)
+static __always_inline u64 __get_inode_from_pinode(struct inode *pinode)
 {
     u64 inode = 0;
 
@@ -632,7 +311,7 @@ static inline u64 __get_inode_from_pinode(struct inode *pinode)
     return inode;
 }
 
-static inline u64 __get_inode_from_file(struct file *file)
+static __always_inline u64 __get_inode_from_file(struct file *file)
 {
     if (file) {
         struct inode *pinode = NULL;
@@ -644,7 +323,7 @@ static inline u64 __get_inode_from_file(struct file *file)
     return 0;
 }
 
-static inline u64 __get_inode_from_dentry(struct dentry *dentry)
+static __always_inline u64 __get_inode_from_dentry(struct dentry *dentry)
 {
     if (dentry) {
         struct inode *pinode = NULL;
@@ -656,21 +335,11 @@ static inline u64 __get_inode_from_dentry(struct dentry *dentry)
     return 0;
 }
 
-static inline void __init_header_with_task(u8 type, u8 state, struct data_header *header, struct task_struct *task)
+static __always_inline void __init_header_with_task(u8 type, u8 state, struct data_header *header, struct task_struct *task)
 {
     header->type = type;
     header->state = state;
 
-#ifdef __BCC_UNDER_4_8__
-    u64 id = bpf_get_current_pid_tgid();
-        header->tid = id & 0xffffffff;
-        header->pid = id >> 32;
-
-        u32 * ppid = bpf_map_lookup_elem(&last_parent, &header->pid);
-        if (ppid) {
-            header->ppid = *ppid;
-        }
-#else
     if (task) {
         header->tid = BPF_CORE_READ(task, pid);
         header->pid = BPF_CORE_READ(task, tgid);
@@ -682,17 +351,15 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
         }
         header->mnt_ns = __get_mnt_ns_id(task);
     }
-#endif /* __BCC_UNDER_4_8__ */
-
 }
 
 // Assumed current context is what is valid!
-static inline void __init_header(u8 type, u8 state, struct data_header *header)
+static __always_inline void __init_header(u8 type, u8 state, struct data_header *header)
 {
     __init_header_with_task(type, state, header, (struct task_struct *)bpf_get_current_task());
 }
 
-static inline size_t PATH_MSG_SIZE(struct path_data *data) {
+static __always_inline size_t PATH_MSG_SIZE(struct path_data *data) {
     if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 18, 0)) {
         return sizeof(struct path_data);
     } else {
@@ -700,7 +367,7 @@ static inline size_t PATH_MSG_SIZE(struct path_data *data) {
     }
 }
 
-static u8 __write_fname(struct path_data *data, const void *ptr)
+static __always_inline u8 __write_fname(struct path_data *data, const void *ptr)
 {
     if (!ptr)
     {
@@ -718,7 +385,7 @@ static u8 __write_fname(struct path_data *data, const void *ptr)
     return data->size;
 }
 
-static u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
+static __always_inline u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
 {
     // Note: On older kernel this may read past the actual arg list into the env.
     u8 result = __write_fname(data, ptr);
@@ -745,44 +412,33 @@ static void submit_all_args(struct pt_regs *ctx,
 
 #pragma unroll
     for (int i = 0; i < MAXARG; i++) {
-        if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 11, 0)) {
+        if (next_argp) {
+            // If there is more data to read in this arg, we tell the collector
+            //  to continue with the previous arg (and not add a ' ').
+            data->header.state = PP_APPEND;
+            argp = next_argp;
+            next_argp = NULL;
+        } else {
+            // This is a new arg
             data->header.state = PP_ENTRY_POINT;
             bpf_probe_read(&argp, sizeof(argp), &_argv[index++]);
-            if (!argp) {
-                // We have reached the last arg so bail out
-                goto out;
-            }
+        }
+        if (!argp) {
+            // We have reached the last arg so bail out
+            goto out;
+        }
 
-            __submit_arg(ctx, argp, data);
-        } else {
-            if (next_argp) {
-                // If there is more data to read in this arg, we tell the collector
-                //  to continue with the previous arg (and not add a ' ').
-                data->header.state = PP_APPEND;
-                argp = next_argp;
-                next_argp = NULL;
-            } else {
-                // This is a new arg
-                data->header.state = PP_ENTRY_POINT;
-                bpf_probe_read(&argp, sizeof(argp), &_argv[index++]);
-            }
-            if (!argp) {
-                // We have reached the last arg so bail out
-                goto out;
-            }
+        // Read the arg data and send an event.  We expect the result to be the bytes sent
+        //  in the event.  On older kernels, this may be 0 which is OK.  It just means that
+        //  we will always truncate the arg.
+        u8 bytes_written = __submit_arg(ctx, argp, data);
+        next_argp = NULL;
 
-            // Read the arg data and send an event.  We expect the result to be the bytes sent
-            //  in the event.  On older kernels, this may be 0 which is OK.  It just means that
-            //  we will always truncate the arg.
-            u8 bytes_written = __submit_arg(ctx, argp, data);
-            next_argp = NULL;
-
-            if (bytes_written == MAX_FNAME) {
-                // If we have filled the buffer exactly, it means that there is additional
-                //  data for this arg.
-                // Advance the read pointer by the bytes written (minus the null terminator)
-                next_argp = argp + bytes_written - 1;
-            }
+        if (bytes_written == MAX_FNAME) {
+            // If we have filled the buffer exactly, it means that there is additional
+            //  data for this arg.
+            // Advance the read pointer by the bytes written (minus the null terminator)
+            next_argp = argp + bytes_written - 1;
         }
     }
 
@@ -797,17 +453,7 @@ out:
     return;
 }
 
-#ifdef __BCC__
-#ifndef MAX_PATH_ITER
-#define MAX_PATH_ITER 24
-#endif
-#else
-// Likely can be 64 but this a safe middle ground
-#define MAX_FULL_PATH_ITER   40
-#define MAX_DENTRY_PATH_ITER 32
-#endif
-
-static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
+static int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
                  struct vfsmount *vfsmnt, struct path_data *data)
 {
     struct mount *real_mount = NULL;
@@ -856,7 +502,7 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
     return 0;
 }
 
-static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry, struct path_data *data)
+static int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry, struct path_data *data)
 {
     struct dentry *parent_dentry = NULL;
     struct qstr sp = {};
@@ -947,13 +593,13 @@ int BPF_KPROBE(after_sys_execveat)
     return 0;
 }
 
-static void __file_tracking_delete(u64 pid, u64 device, u64 inode)
+static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inode)
 {
     struct file_data_cache key = { .device = device, .inode = inode };
     bpf_map_delete_elem(&file_map, &key);
 }
 
-static inline void __track_write_entry(
+static __always_inline void __track_write_entry(
     struct file      *file,
     struct file_data *data)
 {
@@ -965,15 +611,9 @@ static inline void __track_write_entry(
 
     void *cachep = bpf_map_lookup_elem(&file_write_cache, &file_cache_key);
     if (cachep) {
-#ifdef __BCC_UNDER_4_10__
-        u32 cache_data = *(u32 *)cachep;
-        pid_t pid = cache_data;
-        cache_data = data->header.pid;
-#else
         struct file_data_cache cache_data = *((struct file_data_cache *) cachep);
         pid_t pid = cache_data.pid;
         cache_data.pid = data->header.pid;
-#endif /* __BCC_UNDER_4_10__ */
         // if we really care about that multiple tasks
         // these are likely threads or less likely inherited from a fork
         if (pid == data->header.pid) {
@@ -982,15 +622,11 @@ static inline void __track_write_entry(
 
         bpf_map_update_elem(&file_write_cache, &file_cache_key, &cache_data, BPF_ANY);
     } else {
-#ifdef __BCC_UNDER_4_10__
-        u32 cache_data = data->header.pid;
-#else
         struct file_data_cache cache_data = {
                 .pid = data->header.pid,
                 .device = data->device,
                 .inode = data->inode
         };
-#endif /* __BCC_UNDER_4_10__ */
         bpf_map_update_elem(&file_write_cache, &file_cache_key, &cache_data, BPF_NOEXIST);
     }
 }
@@ -1010,13 +646,8 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
     if (cachep) {
         __init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
-#ifdef __BCC_UNDER_4_10__
-        FILE_DATA(data)->device = __get_device_from_file(file);
-            FILE_DATA(data)->inode = __get_inode_from_file(file);
-#else
         FILE_DATA(data)->device = ((struct file_data_cache *) cachep)->device;
         FILE_DATA(data)->inode = ((struct file_data_cache *) cachep)->inode;
-#endif /* __BCC_UNDER_4_10__ */
 
         send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
@@ -1047,23 +678,23 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     if (LINUX_KERNEL_VERSION < KERNEL_VERSION(5, 14, 0)) {
         exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
         if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
-        	goto out;
+            goto out;
         }
     } else {
-    	// This fix is to adjust the flag changes in 5.14 kernel to match the user space pipeline requirement
-    	//  - MAP_EXECUTABLE flag is not available for exec mmap function
-    	//  - MAP_DENYWRITE flag is "reverted" for ld.so and normal mmap
+        // This fix is to adjust the flag changes in 5.14 kernel to match the user space pipeline requirement
+        //  - MAP_EXECUTABLE flag is not available for exec mmap function
+        //  - MAP_DENYWRITE flag is "reverted" for ld.so and normal mmap
 
-    	bpf_core_read(&file_flags, sizeof(file_flags), &(file->f_flags));
-    	if (file_flags & FMODE_EXEC && flags == (MAP_FIXED | MAP_PRIVATE)) {
-    		goto out;
-    	}
+        BPF_CORE_READ_INTO(&file_flags, file, f_flags);
+        if ((file_flags & FMODE_EXEC) && flags == (MAP_FIXED | MAP_PRIVATE)) {
+            goto out;
+        }
 
-    	if (flags & MAP_DENYWRITE) {
-    		flags &= ~MAP_DENYWRITE;
-    	} else {
-    		flags |= MAP_DENYWRITE;
-    	}
+        if (flags & MAP_DENYWRITE) {
+            flags &= ~MAP_DENYWRITE;
+        } else {
+            flags |= MAP_DENYWRITE;
+        }
     }
 
     data = __current_blob();
@@ -1090,11 +721,6 @@ out:
     return 0;
 }
 
-// This is not available on older kernels.  So it will mean that we can not detect file creates
-#ifndef FMODE_CREATED
-#define FMODE_CREATED 0
-#endif
-
 // This hook may not be very accurate but at least tells us the intent
 // to create the file if needed. So this will likely be written to next.
 SEC("kprobe/security_file_open")
@@ -1103,7 +729,6 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
     struct _file_event *data = NULL;
     struct super_block *sb = NULL;
     struct inode *inode = NULL;
-    int mode;
 
     if (!file) {
         goto out;
@@ -1122,12 +747,6 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
     if (!inode) {
         goto out;
     }
-#ifndef __BCC_UNDER_4_8__
-    bpf_core_read(&mode, sizeof(mode), &(inode->i_mode));
-    if (!S_ISREG(mode)) {
-        goto out;
-    }
-#endif /* __BCC_UNDER_4_8__ ndef */
 
     u8 type;
     if (BPF_CORE_READ(file, f_flags) & FMODE_EXEC) {
@@ -1263,21 +882,9 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         goto out;
     }
 
-    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, file_data, task);
+    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &file_data->header, task);
 
     file_data->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
-
-#ifdef __BCC_UNDER_4_8__
-    // Poorman's method for storing root fs path data->
-    // This is to prevent us from iterating past '/'
-    u32 index;
-    struct dentry *root_fs_dentry = BPF_CORE_READ(task, fs, root.dentry);
-    struct vfsmount *root_fs_vfsmount = BPF_CORE_READ(task, fs, root.mnt);
-    index = 0;
-    bpf_map_update_elem(&root_fs, &index, (void *)&root_fs_dentry, BPF_ANY);
-    index += 1;
-    bpf_map_update_elem(&root_fs, &index, (void *)&root_fs_vfsmount, BPF_ANY);
-#endif /* __BCC_UNDER_4_8__ */
 
     if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm) && BPF_CORE_READ(task, mm, exe_file)) {
         file_data->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
@@ -1290,25 +897,8 @@ out:
     return 0;
 }
 
-#ifdef CACHE_UDP
-static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
+static __always_inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
 {
-#ifdef __BCC_UNDER_4_10__
-    struct ip_key *ip_entry = bpf_map_lookup_elem(&ip_cache, &ip_key->pid);
-        if (ip_entry) {
-            if (ip_entry->remote_port == ip_key->remote_port &&
-                ip_entry->local_port == ip_key->local_port &&
-                ip_entry->remote_addr == ip_key->remote_addr &&
-                ip_entry->local_addr == ip_key->local_addr) {
-                return true;
-            } else {
-                // Update entry
-                bpf_map_update_elem(&ip_cache, &ip_key->pid, ip_key, BPF_ANY);
-            }
-        } else {
-            bpf_map_update_elem(&ip_cache, &ip_key->pid, ip_key, BPF_NOEXIST); // insert
-        }
-#else
     struct ip_key ip_key_alternate = *ip_key;
     struct ip_entry *ip_entry = NULL;
 
@@ -1335,34 +925,11 @@ static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
     } else {
         return true;
     }
-#endif /* __BCC_UNDER_4_10__ */
     return false;
 }
 
-static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
+static __always_inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 {
-#ifdef __BCC_UNDER_4_10__
-    struct ip6_key *ip_entry = bpf_map_lookup_elem(&ip6_cache, &ip6_key->pid);
-        if (ip_entry) {
-            if (ip_entry->remote_port == ip6_key->remote_port &&
-                ip_entry->local_port == ip6_key->local_port &&
-                ip_entry->remote_addr6[0] == ip6_key->remote_addr6[0] &&
-                ip_entry->remote_addr6[1] == ip6_key->remote_addr6[1] &&
-                ip_entry->remote_addr6[2] == ip6_key->remote_addr6[2] &&
-                ip_entry->remote_addr6[3] == ip6_key->remote_addr6[3] &&
-                ip_entry->local_addr6[0] == ip6_key->local_addr6[0] &&
-                ip_entry->local_addr6[1] == ip6_key->local_addr6[1] &&
-                ip_entry->local_addr6[2] == ip6_key->local_addr6[2] &&
-                ip_entry->local_addr6[3] == ip6_key->local_addr6[3]) {
-                return true;
-            } else {
-                // Update entry
-                bpf_map_update_elem(&ip6_cache, &ip6_key->pid, ip6_key, BPF_ANY);
-            }
-        } else {
-            bpf_map_update_elem(&ip6_cache, &ip6_key->pid, ip6_key, BPF_NOEXIST); // insert
-        }
-#else
     struct ip6_key ip6_key_alternate = *ip6_key;
     struct ip_entry *ip_entry = NULL;
 
@@ -1389,10 +956,8 @@ static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
     } else {
         return true;
     }
-#endif /* __BCC_UNDER_4_10__ */
     return false;
 }
-#endif /* CACHE_UDP */
 
 SEC("kprobe/do_exit")
 int BPF_KPROBE(on_do_exit, long code)
@@ -1411,26 +976,12 @@ int BPF_KPROBE(on_do_exit, long code)
 
     send_event(ctx, &data, sizeof(struct data));
 
-#ifdef __BCC_UNDER_4_8__
-    bpf_map_delete_elem(&last_parent, &data.header.pid);
-#endif /* __BCC_UNDER_4_8__ */
-
-#ifdef __BCC_UNDER_4_10__
-    #ifdef CACHE_UDP
-        // Remove burst cache entries
-        //  We only need to do this for older kernels that do not have an LRU
-        bpf_map_delete_elem(&ip_cache, &data.header.pid);
-        bpf_map_delete_elem(&ip6_cache, &data.header.pid);
-    #endif /* CACHE_UDP */
-#endif /* __BCC_UNDER_4_10__ */
-
-
 out:
     return 0;
 }
 
 
-static inline int trace_connect_entry(struct sock *sk)
+static __always_inline int trace_connect_entry(struct sock *sk)
 {
     u64 id = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&currsock, &id, &sk, BPF_ANY);
@@ -1449,13 +1000,13 @@ int BPF_KPROBE(trace_connect_v6_entry, struct sock *sk)
     return trace_connect_entry(sk);
 }
 
-static inline bool check_family(struct sock *sk, u16 expected_family)
+static __always_inline bool check_family(struct sock *sk, u16 expected_family)
 {
     u16 family = BPF_CORE_READ(sk, __sk_common.skc_family);
     return family == expected_family;
 }
 
-static inline int trace_connect_return(struct pt_regs *ctx)
+static __always_inline int trace_connect_return(struct pt_regs *ctx)
 {
     u64 id = bpf_get_current_pid_tgid();
     // u32 pid = id >> 32;
@@ -1529,18 +1080,6 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
         return 0;
     }
 
-#ifdef __BCC_UNDER_4_8__
-        // Older kernels we probe __skb_recv_datagram which can be used by
-        // other protocols. We filter by sk_family or skb->protocol
-        if (!BPF_CORE_READ(skb, sk)) {
-            return 0;
-        }
-
-        if (!(BPF_CORE_READ(skb, sk, sk_family) == AF_INET ||
-              BPF_CORE_READ(skb, sk, sk_family) == AF_INET6)) {
-            return 0;
-        }
-#endif /* __BCC_UNDER_4_8__ */
     struct udphdr *udphdr = NULL;
 
     // Get a pointer to the network header and the header length.
@@ -1565,7 +1104,6 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
         data.local_addr = BPF_CORE_READ(iphdr, daddr);
         data.remote_addr = BPF_CORE_READ(iphdr, saddr);
 
-#ifdef CACHE_UDP
         struct ip_key ip_key = {};
         ip_key.pid = data.header.pid;
         bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
@@ -1580,7 +1118,6 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
         if (has_ip_cache(&ip_key, FLOW_RX)) {
             return 0;
         }
-#endif /* CACHE_UDP */
     } else if (hdr_len == sizeof(struct ipv6hdr)) {
         // Why IPv6 address/port is read in a different way than IPv4:
         //  - BPF C compiled to BPF instructions don't always do what we expect
@@ -1593,7 +1130,6 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
         bpf_core_read(data.remote_addr6, sizeof(uint32_t) * 4,
                    &ipv6hdr->saddr.s6_addr32);
 
-#ifdef CACHE_UDP
         struct ip6_key ip_key = {};
         ip_key.pid = data.header.pid;
         bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
@@ -1608,7 +1144,6 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
         if (has_ip6_cache(&ip_key, FLOW_RX)) {
             return 0;
         }
-#endif /* CACHE_UDP */
     } else {
         return 0;
     }
@@ -1619,13 +1154,15 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
 }
 
 // check for system endianess
-static inline bool _is_big_endian(){
+static __always_inline bool _is_big_endian()
+{
     unsigned int x = 1;
     char *c = (char*) &x;
     return ((int)*c == 0);
 }
 
-static inline uint16_t _htons(uint16_t hostshort){
+static __always_inline uint16_t _htons(uint16_t hostshort)
+{
     if (_is_big_endian()) {
         return hostshort;
     } else {
@@ -1633,7 +1170,8 @@ static inline uint16_t _htons(uint16_t hostshort){
     }
 }
 
-static inline uint16_t _ntohs(uint16_t netshort){
+static __always_inline uint16_t _ntohs(uint16_t netshort)
+{
     if (_is_big_endian()) {
         return netshort;
     } else {
@@ -1858,8 +1396,6 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
             data.remote_addr = BPF_CORE_READ(skp, __sk_common.skc_daddr);
         }
 
-
-#ifdef CACHE_UDP
         struct ip_key ip_key = {};
         ip_key.pid = data.header.pid;
         bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
@@ -1875,7 +1411,6 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
         {
             goto out;
         }
-#endif /* CACHE_UDP */
         break;
     }
 
@@ -1889,7 +1424,6 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
         __be32 *saddr = BPF_CORE_READ(skp, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
         bpf_probe_read(&data.local_addr6, sizeof(data.local_addr6), saddr);
 
-#ifdef CACHE_UDP
         struct ip6_key ip_key = {};
         ip_key.pid = data.header.pid;
         bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port), &data.remote_port);
@@ -1901,7 +1435,6 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
         if (has_ip6_cache(&ip_key, FLOW_TX)) {
             goto out;
         }
-#endif /* CACHE_UDP */
         break;
     }
 
