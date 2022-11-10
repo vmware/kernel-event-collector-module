@@ -1,17 +1,21 @@
-/* Copyright 2021 VMware Inc.  All rights reserved. */
+/* Copyright 2022 VMware Inc.  All rights reserved. */
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 
 #pragma once
 
 //
-// Contains missing macro defintions and perhaps frequently
-// used inline functions are used.
+// Contains missing macro defintions
 //
 
 #define AF_INET     2       /* internetwork: UDP, TCP, etc. */
 #define AF_INET6    10      /* IPv6 */
 
-// magic
+//
+// TODO:
+// These should be placed within a BPF Map instead of being hardcoded
+//
+
+// static fs magic values
 #define DEBUGFS_MAGIC           0x64626720
 #define SELINUX_MAGIC           0xf97cff8c
 #define SMACK_MAGIC             0x43415d53  /* "SMAC" */
@@ -63,7 +67,9 @@
 
 #define s6_addr32       in6_u.u6_addr32
 
+//
 // Missing inlined functions
+//
 
 static __always_inline u32 new_encode_dev(dev_t dev)
 {

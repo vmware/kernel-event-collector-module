@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 VMware, Inc.
+ * Copyright 2022 VMware, Inc.
  * SPDX-License-Identifier: GPL-2.0
  */
 
@@ -16,11 +16,16 @@
 // linking to newer libbpf like 1.0.0+
 _Bool LINUX_HAS_SYSCALL_WRAPPER = 1;
 
-char LICENSE[] SEC("license") = "Dual BSD/GPL";
-
+char LICENSE[] SEC("license") = "GPL";
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
+// Set to 1 when we want to change events map to be a ring buffer
+volatile const unsigned int USE_RINGBUF = 0;
+
+//
+// Local defintions
+//
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
 
@@ -44,6 +49,12 @@ struct _file_event {
         struct data        _data;
     };
 };
+
+#define DECLARE_FILE_EVENT(DATA) struct _file_event *DATA = __current_blob()
+#define GENERIC_DATA(DATA)  (&((struct _file_event *)(DATA))->_data)
+#define FILE_DATA(DATA)  (&((struct _file_event*)(DATA))->_file_data)
+#define PATH_DATA(DATA)  (&((struct _file_event*)(DATA))->_path_data)
+#define RENAME_DATA(DATA)  (&((struct _file_event*)(DATA))->_rename_data)
 
 struct file_data_cache {
     u64 pid;
@@ -71,14 +82,14 @@ struct ip_entry {
     u8 flow;
 };
 
+//
+// Maps
+//
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
     __uint(key_size, sizeof(u32));
     __uint(value_size, sizeof(u32));
 } events SEC(".maps");
-
-// Set to 1 when we want to change events map to be a ring buffer
-volatile const unsigned int USE_RINGBUF = 0;
 
 // This hash tracks the "observed" file-create events.  This will not be 100% accurate because we will report a
 //  file create for any file the first time it is opened with WRITE|TRUNCATE (even if it already exists).  It
@@ -114,7 +125,7 @@ struct {
     __uint(max_entries, 10240);
 } ip6_cache SEC(".maps");
 
-// TODO: Scale to be per family
+// TODO: Scale to be per AF family
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, u64);
@@ -136,8 +147,7 @@ struct {
     __uint(max_entries, 10240);
 } currsock3 SEC(".maps");
 
-// Declare scratchpad, might be better as a percpu array
-// except that won't work on sleepable prog types.
+// Declare scratchpad, won't work on sleepable prog types.
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __uint(max_entries, 1);
@@ -145,12 +155,10 @@ struct {
     __type(value, struct _file_event);
 } xpad SEC(".maps");
 
-#define DECLARE_FILE_EVENT(DATA) struct _file_event *DATA = __current_blob()
-#define GENERIC_DATA(DATA)  (&((struct _file_event *)(DATA))->_data)
-#define FILE_DATA(DATA)  (&((struct _file_event*)(DATA))->_file_data)
-#define PATH_DATA(DATA)  (&((struct _file_event*)(DATA))->_path_data)
-#define RENAME_DATA(DATA)  (&((struct _file_event*)(DATA))->_rename_data)
 
+//
+// Local helper funcs
+//
 static __always_inline void *__current_blob(void)
 {
     u32 index = 0;
@@ -394,6 +402,10 @@ static __always_inline u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct pa
     send_event(ctx, data, PATH_MSG_SIZE(data));
     return result;
 }
+
+//
+// Beefy helper functions that may be good subprogs
+//
 
 // All arguments will be capped at MAX_FNAME bytes per argument
 // (This is deliberately defined as a separate version of the function to cut down on the number
