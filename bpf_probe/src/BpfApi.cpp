@@ -109,8 +109,8 @@ bool BpfApi::Init_libbpf()
 
     m_ncpu = ebpf::get_online_cpus();
 
-    if (libbpf_probe_bpf_map_type(BPF_MAP_TYPE_RINGBUF, NULL))
-    {
+    // if (libbpf_probe_bpf_map_type(BPF_MAP_TYPE_RINGBUF, NULL))
+    // {
         // max_entries ideally should be perf buffer's size * m_cpu
         // PAGE_SIZE may be larger on aarch64
 
@@ -121,10 +121,12 @@ bool BpfApi::Init_libbpf()
         // bpf_map__set_key_size(m_skel->maps.dummy_events, 0);
         // bpf_map__set_value_size(m_skel->maps.dummy_events, 0);
         // m_skel->rodata->USE_RINGBUF = 1;
-    }
+    // }
 
     if (sensor_bpf__load(m_skel))
     {
+        Reset();
+
         return false;
     }
 
@@ -181,22 +183,30 @@ bool BpfApi::Init_bcc(const std::string & bpf_program)
 bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
 {
     bool result = false;
+    bool try_libbpf = false;
+    int fd = open("/sys/kernel/btf/vmlinux", O_RDONLY);
+
+    if (fd < 0)
+    {
+        try_bcc_first = true;
+        try_libbpf = false;
+    }
+    else
+    {
+        try_libbpf = true;
+
+        close(fd);
+        fd = -1;
+    }
 
     if (try_bcc_first)
     {
         result = Init_bcc(bpf_program);
-        if (!result)
-        {
-            result = Init_libbpf();
-        }
     }
-    else
+
+    if (!result && try_libbpf)
     {
         result = Init_libbpf();
-        if (!result)
-        {
-            result = Init_bcc(bpf_program);
-        }
     }
 
     return result;
