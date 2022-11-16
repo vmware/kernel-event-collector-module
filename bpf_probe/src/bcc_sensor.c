@@ -499,14 +499,50 @@ out:
   #define MAX_DENTRY_PATH_ITER 24
 #endif
 
-static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
-				 struct vfsmount *vfsmnt, struct path_data *data)
+#define MAX_PATH_EDGE_DETECT_ITER 2
+
+static inline int __get_next_parent_dentry(struct dentry **dentry,
+										   struct vfsmount **vfsmnt,
+										   struct mount **real_mount,
+										   struct dentry **mnt_root,
+										   struct dentry **parent_dentry)
+{
+	int retVal = 0;
+	struct mount *mnt_parent = NULL;
+
+	bpf_probe_read(parent_dentry, sizeof(struct dentry *), &(*dentry)->d_parent);
+
+	if (*dentry == *mnt_root || *dentry == *parent_dentry) {
+		bpf_probe_read(&mnt_parent, sizeof(struct mount *), &(*real_mount)->mnt_parent);
+		if (*dentry != *mnt_root) {
+			// We reached root, but not mount root - escaped?
+			retVal = ENOENT;
+		} else if (*real_mount != mnt_parent) {
+			// We reached root, but not global root - continue with mount point path
+			bpf_probe_read(dentry, sizeof(struct dentry *), &(*real_mount)->mnt_mountpoint);
+			bpf_probe_read(real_mount, sizeof(struct mount *), &(*real_mount)->mnt_parent);
+			*vfsmnt = &(*real_mount)->mnt;
+			bpf_probe_read(mnt_root, sizeof(struct dentry *), &(*vfsmnt)->mnt_root);
+			retVal = EAGAIN;
+		} else {
+			// Global root - path fully parsed
+			retVal = ENOENT;
+		}
+	}
+
+	return retVal;
+}
+
+static inline int __do_file_path(struct pt_regs *ctx,
+								 struct dentry *dentry,
+								 struct vfsmount *vfsmnt,
+								 struct path_data *data)
 {
 	struct mount *real_mount = NULL;
-	struct mount *mnt_parent = NULL;
 	struct dentry *mnt_root = NULL;
 	struct dentry *parent_dentry = NULL;
 	struct qstr sp = {};
+	int i = 0;
 
 	bpf_probe_read(&mnt_root, sizeof(struct dentry *), &vfsmnt->mnt_root);
 
@@ -515,26 +551,14 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 
 	data->header.state = PP_PATH_COMPONENT;
 #pragma clang loop unroll(full)
-	for (int i = 1; i < MAX_FULL_PATH_ITER; ++i) {
-		bpf_probe_read(&parent_dentry, sizeof(struct dentry *), &dentry->d_parent);
+	for (i = 0; i < MAX_FULL_PATH_ITER; ++i) {
+		int retVal = __get_next_parent_dentry(&dentry, &vfsmnt, &real_mount, &mnt_root, &parent_dentry);
 
-		if (dentry == mnt_root || dentry == parent_dentry) {
-			bpf_probe_read(&mnt_parent, sizeof(struct mount *), &real_mount->mnt_parent);
-			if (dentry != mnt_root) {
-				// We reached root, but not mount root - escaped?
-				break;
-			}
+		if (retVal == EAGAIN) {
+			continue;
+		}
 
-			if (real_mount != mnt_parent) {
-				// We reached root, but not global root - continue with mount point path
-				bpf_probe_read(&dentry, sizeof(struct dentry *), &real_mount->mnt_mountpoint);
-				bpf_probe_read(&real_mount, sizeof(struct mount *), &real_mount->mnt_parent);
-				vfsmnt = &real_mount->mnt;
-				bpf_probe_read(&mnt_root, sizeof(struct dentry *), &vfsmnt->mnt_root);
-				continue;
-			}
-
-			// Global root - path fully parsed
+		if (retVal == ENOENT) {
 			break;
 		}
 
@@ -544,19 +568,52 @@ static inline int __do_file_path(struct pt_regs *ctx, struct dentry *dentry,
 		send_event(ctx, data, PATH_MSG_SIZE(data));
 	}
 
+	// Best effort to check if path was fully parsed in the last loop iteration.
+	// Could still yield a false result because without unbounded looping we can't know
+	// beyond all doubts that we have reached the global root mount.
+	// We don't add ellipsis if we can't be sure the path is truncated.
+	if (i >= MAX_FULL_PATH_ITER) {
+		bool truncated = false;
+
+#pragma clang loop unroll(full)
+		for (i = 0; i < MAX_PATH_EDGE_DETECT_ITER; ++i) {
+			int retVal = __get_next_parent_dentry(&dentry, &vfsmnt, &real_mount, &mnt_root, &parent_dentry);
+
+			if (retVal == EAGAIN) {
+				continue;
+			}
+
+			if (retVal == ENOENT) {
+				break;
+			}
+
+			// The path is truncated for sure!
+			truncated = true;
+			break;
+		}
+
+		if (truncated) {
+			char ellipsis[] = "...";
+			__write_fname(data, ellipsis);
+			send_event(ctx, data, PATH_MSG_SIZE(data));
+		}
+	}
+
 	data->header.state = PP_FINALIZED;
 	return 0;
 }
 
 static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
-				   struct path_data *data)
+				   struct path_data *data, uint64_t fs_magic)
 {
 	struct dentry *parent_dentry = NULL;
 	struct qstr sp = {};
+	bool truncated = false;
+	int i = 0;
 
 	data->header.state = PP_PATH_COMPONENT;
 #pragma unroll
-	for (int i = 0; i < MAX_DENTRY_PATH_ITER; i++) {
+	for (i = 0; i < MAX_DENTRY_PATH_ITER; ++i) {
 		bpf_probe_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
 
 		if (parent_dentry == dentry || parent_dentry == NULL) {
@@ -574,11 +631,45 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		dentry = parent_dentry;
 	}
 
-	// Trigger the agent to add the mount path
-	data->header.state = PP_NO_EXTRA_DATA;
-	send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+	// Best effort to check if path was fully parsed in the last loop iteration.
+	// Could still yield a false result because without unbounded looping we can't know
+	// beyond all doubts that we have reached the global root mount.
+	// We don't add ellipsis if we can't be sure the path is truncated.
+	if (i >= MAX_DENTRY_PATH_ITER) {
+#pragma unroll
+		for (i = 0; i < MAX_PATH_EDGE_DETECT_ITER; ++i) {
+			bpf_probe_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
 
-out:
+			if (parent_dentry == dentry || parent_dentry == NULL) {
+				break;
+			}
+
+			bpf_probe_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
+
+			// Do we have a valid path entry
+			if (__write_fname(data, sp.name) > 0 && data->size > 1) {
+				// Path is not truncated if we have reached btrfs subvolume root
+				if (fs_magic != BTRFS_SUPER_MAGIC || data->fname[0] != '@') {
+					// The path is truncated for sure!
+					truncated = true;
+					break;
+				}
+			}
+
+			dentry = parent_dentry;
+		}
+	}
+
+	if (truncated) {
+		char ellipsis[] = "...";
+		__write_fname(data, ellipsis);
+		send_event(ctx, data, PATH_MSG_SIZE(data));
+	} else {
+		// Trigger the agent to add the mount path
+		data->header.state = PP_NO_EXTRA_DATA;
+		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+	}
+
 	data->header.state = PP_FINALIZED;
 	return 0;
 }
@@ -859,11 +950,12 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 
 			FILE_DATA(data)->device = __get_device_from_sb(sb);
 			FILE_DATA(data)->inode = __get_inode_from_dentry(dentry);
+			FILE_DATA(data)->fs_magic = sb->s_magic;
 
 			__file_tracking_delete(0, FILE_DATA(data)->device, FILE_DATA(data)->inode);
 
 			send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
-			__do_dentry_path(ctx, dentry, PATH_DATA(data));
+			__do_dentry_path(ctx, dentry, PATH_DATA(data), FILE_DATA(data)->fs_magic);
 			send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 			return true;
 		}
@@ -924,7 +1016,7 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 
     send_event(ctx, RENAME_DATA(data), sizeof(struct rename_data));
 
-    __do_dentry_path(ctx, new_dentry, PATH_DATA(data));
+    __do_dentry_path(ctx, new_dentry, PATH_DATA(data), RENAME_DATA(data)->fs_magic);
     send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
     return 0;

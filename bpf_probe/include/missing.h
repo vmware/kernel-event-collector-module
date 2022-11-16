@@ -26,6 +26,7 @@
 #define SOCKFS_MAGIC            0x534F434B
 #define SYSFS_MAGIC             0x62656572
 #define ANON_INODE_FS_MAGIC     0x09041934
+#define BTRFS_SUPER_MAGIC       0x9123683E
 
 
 #define PROT_EXEC               0x4                /* Page can be executed.  */
