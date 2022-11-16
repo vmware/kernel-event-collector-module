@@ -36,6 +36,7 @@ class DynSec(CbConanFile):
         "KERNEL_RHEL_8_4_VERSION",
         "KERNEL_RHEL_8_5_VERSION",
         "KERNEL_RHEL_8_6_VERSION",
+        "KERNEL_RHEL_8_7_VERSION",
         "KERNEL_RHEL_9_0_VERSION",
     ]
     override_list = "KERNEL_OVERRIDE_LIST"
