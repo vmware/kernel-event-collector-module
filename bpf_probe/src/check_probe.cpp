@@ -13,6 +13,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sstream>
+#include <iostream>
 
 using namespace cb_endpoint::bpf_probe;
 
@@ -20,8 +22,10 @@ static void PrintUsage();
 static void ParseArgs(int argc, char** argv);
 static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
+static void ProbeEventCallback(Data data);
 
 static std::string s_bpf_program;
+static bool read_events = false;
 static bool try_bcc_first = false;
 static unsigned int verbosity = 0;
 
@@ -67,6 +71,25 @@ int main(int argc, char *argv[])
 
     printf("Probe loaded!\n");
 
+    if (read_events)
+    {
+        auto didRegister = bpf_api->RegisterEventCallback(ProbeEventCallback);
+        if (!didRegister)
+        {
+            printf("Failed to register callback\n");
+            return 1;
+        }
+
+        while(true)
+        {
+            auto result = bpf_api->PollEvents();
+            if (result < 0)
+            {
+                printf("Poll data Error: returned %d\n", result);
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -75,6 +98,7 @@ static void PrintUsage()
     printf("Usage: -- [options]\nOptions:\n");
     printf(" -h - this message\n");
     printf(" -p - probe source file to test\n");
+    printf(" -r - read events after loading probe\n");
     printf(" -L - try loading libbpf first\n");
     printf(" -B - try loading BCC first\n");
     printf(" -v - Add verbosity\n");
@@ -86,6 +110,7 @@ static void ParseArgs(int argc, char** argv)
     struct option const long_options[]  = {
         {"help",                no_argument,       nullptr, 'h'},
         {"probe-source",        required_argument, nullptr, 'p'},
+        {"read-events",         no_argument,       nullptr, 'r'},
         {"try-bcc-first",       no_argument,       nullptr, 'B'},
         {"try-libbpf-first",    no_argument,       nullptr, 'L'},
         {"verbose",             no_argument,       nullptr, 'v'},
@@ -93,7 +118,7 @@ static void ParseArgs(int argc, char** argv)
 
     while(true)
     {
-        int opt = getopt_long(argc, argv, "hp:LBv", long_options, &option_index);
+        int opt = getopt_long(argc, argv, "hp:rLBv", long_options, &option_index);
         if(-1 == opt) break;
 
         switch(opt)
@@ -109,6 +134,9 @@ static void ParseArgs(int argc, char** argv)
                 break;
             case 'p':
                 ReadProbeSource(optarg);
+                break;
+            case 'r':
+                read_events = true;
                 break;
             case 'h':
             default:
@@ -149,8 +177,6 @@ static void ReadProbeSource(const std::string &probe_source)
     }
 }
 
-
-
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
 {
     if (bpf_program.empty())
@@ -188,4 +214,27 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
     }
 
     return true;
+}
+
+void ProbeEventCallback(Data data)
+{
+    if (data.data)
+    {
+        std::stringstream output;
+        output << data.data->header.event_time << " "
+               << BpfApi::TypeToString(data.data->header.type) << "::"
+               << BpfApi::StateToString(data.data->header.state) << " "
+               << "tid: " << data.data->header.tid << " "
+               << "ppid: " << data.data->header.ppid;
+
+        if (data.data->header.state == PP_PATH_COMPONENT)
+        {
+            auto pdata = reinterpret_cast<const path_data*>(data.data);
+            output << " [" << pdata->fname << "]";
+        }
+
+        std::cout << output.str() << std::endl;
+
+        delete [] data.data;
+    }
 }
