@@ -733,7 +733,8 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 		goto out;
 	}
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0)
+//AND check added for SLES15SP4 5.14.21
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 21)
 	// This fix is to adjust the flag changes in 5.14 kernel to match the user space pipeline requirement
 	//  - MAP_EXECUTABLE flag is not available for exec mmap function
 	//  - MAP_DENYWRITE flag is "reverted" for ld.so and normal mmap
