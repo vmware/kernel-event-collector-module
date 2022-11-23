@@ -198,3 +198,4 @@ module_exit(dynsec_exit);
 
 MODULE_AUTHOR("VMware, Inc.");
 MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("Application allowlisting to block the APT.");
