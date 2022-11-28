@@ -208,7 +208,7 @@ void *ec_mem_get(void *value, ProcessContext *context)
         {
             value = 0;
             TRACE(DL_ERROR, "Generic MEM cache magic does not match.  Failed to free memory: %p", value);
-            CB_BUG()
+            CB_BUG();
         }
     }
     return value;
