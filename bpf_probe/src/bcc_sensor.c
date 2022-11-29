@@ -130,20 +130,6 @@ struct mount {
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
 
-// THis is a helper struct for the "file like" events.  These follow a pattern where 3+n events are sent.
-//  The first event sends the device/inode.  Each path element is sent as a separate event.  Finally an event is sent
-//  to say the operation is complete.
-// The macros below help to access the correct object in the struct.
-struct _file_event
-{
-    union
-    {
-        struct file_data   _file_data;
-        struct path_data   _path_data;
-        struct rename_data _rename_data;
-        struct data        _data;
-    };
-};
 
 #define DECLARE_FILE_EVENT(DATA) struct _file_event __##DATA = {}; struct _file_event *DATA = &__##DATA
 #define GENERIC_DATA(DATA)  ((struct data*)&((struct _file_event*)(DATA))->_data)
@@ -318,10 +304,22 @@ static inline u64 __get_inode_from_dentry(struct dentry *dentry)
 	return 0;
 }
 
+static inline bool __has_fmode_nonotify(const struct file *file)
+{
+#ifdef FMODE_NONOTIFY
+    return file && (file->f_flags & FMODE_NONOTIFY) &&
+		   ((file->f_flags & (O_WRONLY|O_RDWR)) == 0);
+#else
+    return false;
+#endif
+}
+
 static inline void __init_header_with_task(u8 type, u8 state, struct data_header *header, struct task_struct *task)
 {
 	header->type = type;
 	header->state = state;
+	header->report_flags = REPORT_FLAGS_COMPAT;
+	header->payload = 0;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
 	if (task) {
@@ -782,7 +780,7 @@ static inline void __track_write_entry(
 // Only need this hook for kernels without lru_hash
 int on_security_file_free(struct pt_regs *ctx, struct file *file)
 {
-	if (!file) {
+	if (!file || __has_fmode_nonotify(file)) {
 		return 0;
 	}
 	u64 file_cache_key = (u64)file;
@@ -847,7 +845,7 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	DECLARE_FILE_EVENT(data);
 	if (!data) goto out;
 
-	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
+	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 
 	// event specific data
 	FILE_DATA(data)->device = __get_device_from_file(file);
@@ -877,7 +875,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	struct inode *inode = NULL;
 	int mode;
 
-	if (!file) {
+	if (!file || __has_fmode_nonotify(file)) {
 		goto out;
 	}
 
@@ -1480,6 +1478,7 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 	}
 
 	if (ret <= 0) {
+		// Don't remove from bpf map currsock3
 		currsock2.delete(&id);
 		return 0;
 	}
@@ -1517,6 +1516,7 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
         }
     }
 
+	// Don't remove from bpf map currsock3
 	currsock2.delete(&id);
 	return 0;
 }

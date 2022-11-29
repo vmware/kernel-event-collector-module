@@ -20,6 +20,7 @@ _Bool LINUX_HAS_SYSCALL_WRAPPER = 1;
 
 char LICENSE[] SEC("license") = "Dual BSD/GPL";
 
+static const char ellipsis[] = "...";
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
@@ -39,20 +40,11 @@ extern int LINUX_KERNEL_VERSION __kconfig;
 
 #define MAX_PATH_EDGE_DETECT_ITER 2
 
-// Union for the base data payloads
-struct _file_event {
-    union {
-        struct file_data   _file_data;
-        struct path_data   _path_data;
-        struct rename_data _rename_data;
-        struct data        _data;
-    };
-};
-
 struct file_data_cache {
     u64 pid;
     u64 device;
     u64 inode;
+    // TODO: Store fs_magic
 };
 
 struct ip_key {
@@ -155,23 +147,25 @@ struct {
 #define PATH_DATA(DATA)  (&((struct _file_event*)(DATA))->_path_data)
 #define RENAME_DATA(DATA)  (&((struct _file_event*)(DATA))->_rename_data)
 
+static struct _file_event empty_dummy = {};
+
 static __always_inline void *__current_blob(void)
 {
     u32 index = 0;
+
+    // hack to hopefully reset the data to zero
+    (void)bpf_map_update_elem(&xpad, &index, &empty_dummy, BPF_ANY);
+
     struct _file_event *event_data = bpf_map_lookup_elem(&xpad, &index);
 
     if (event_data)
     {
-        __builtin_memset(event_data, 0, sizeof(*event_data));
+        // reset the static header data just in case
+        __builtin_memset(event_data, 0, sizeof(event_data->_data.header));
     }
 
     return (void *)event_data;
 }
-
-static __always_inline long cb_bpf_probe_read_str(void *dst, u32 size, const void *unsafe_ptr) {
-    return bpf_probe_read_str(dst, size, unsafe_ptr);
-}
-
 
 static __always_inline void send_event(void *ctx, void *data, size_t data_size)
 {
@@ -315,6 +309,17 @@ static __always_inline u64 __get_inode_from_pinode(struct inode *pinode)
     return inode;
 }
 
+static __always_inline umode_t __get_umode_from_inode(const struct inode *inode)
+{
+    umode_t umode = 0;
+
+    if (inode) {
+        bpf_probe_read(&umode, sizeof(umode), &inode->i_mode);
+    }
+
+    return umode;
+}
+
 static __always_inline u64 __get_inode_from_file(struct file *file)
 {
     if (file) {
@@ -339,10 +344,20 @@ static __always_inline u64 __get_inode_from_dentry(struct dentry *dentry)
     return 0;
 }
 
-static __always_inline void __init_header_with_task(u8 type, u8 state, struct data_header *header, struct task_struct *task)
+static __always_inline bool __has_fmode_nonotify(const struct file *file)
+{
+    return !!(BPF_CORE_READ(file, f_flags) & FMODE_NONOTIFY) &&
+           ((BPF_CORE_READ(file, f_flags) & O_ACCMODE) == O_RDONLY);
+}
+
+static __always_inline void __init_header_with_task(u8 type, u8 state, u16 report_flags,
+                                                    struct data_header *header,
+                                                    struct task_struct *task)
 {
     header->type = type;
     header->state = state;
+    header->report_flags = report_flags;
+    header->payload = 0;
 
     if (task) {
         header->tid = BPF_CORE_READ(task, pid);
@@ -360,101 +375,115 @@ static __always_inline void __init_header_with_task(u8 type, u8 state, struct da
 // Assumed current context is what is valid!
 static __always_inline void __init_header(u8 type, u8 state, struct data_header *header)
 {
-    __init_header_with_task(type, state, header, (struct task_struct *)bpf_get_current_task());
+    __init_header_with_task(type, state, REPORT_FLAGS_COMPAT, header,
+                            (struct task_struct *)bpf_get_current_task());
 }
 
-static __always_inline size_t PATH_MSG_SIZE(struct path_data *data) {
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(4, 18, 0)) {
-        return sizeof(struct path_data);
-    } else {
-        return (size_t)(sizeof(struct path_data) - MAX_FNAME + data->size);
-    }
-}
-
-static __always_inline u8 __write_fname(struct path_data *data, const void *ptr)
+static __always_inline void __init_header_dynamic(u8 type, u8 state, struct data_header *header)
 {
-    if (!ptr)
+    __init_header_with_task(type, state, REPORT_FLAGS_DYNAMIC, header,
+                            (struct task_struct *)bpf_get_current_task());
+}
+
+// Be careful with making changes to this function!
+// Can only read in 255 chunks at time, if the current arg pointer's
+// offset is incremented via a non-u8 variable, the verifier
+// goes bananas.
+//
+// Blobifies exec arguments and appends long arguments as well
+//
+static size_t __blobify_str_array(const char *const *argv, char *blob)
+{
+    // Some smarter verifiers allows us to write into a map
+    // with a signed integer to track the offset of the next write.
+#if MAX_ARG_CHUNK_SIZE > MAX_UCHAR_VAL
+    long len;
+#else
+    u8 len;
+#endif
+    size_t total_blob_len = 0;
+    char *argp = NULL;
+    unsigned index = 0;
+
+    if (bpf_probe_read(&argp, sizeof(argp), &argv[index++]) || !argp)
     {
-        data->fname[0] = '\0';
-        data->size = 1;
-        return 0;
+        goto out;
     }
-
-    // Note: On some kernels bpf_probe_read_str does not exist.  In this case it is
-    //  substituted by bpf_probe_read.
-    // The bpf_probe_read_str will return the actual bytes written
-    // The bpf_probe_read case will return MAX_FNAME
-    data->size = cb_bpf_probe_read_str(&data->fname, MAX_FNAME, ptr);
-
-    return data->size;
-}
-
-static __always_inline u8 __submit_arg(struct pt_regs *ctx, void *ptr, struct path_data *data)
-{
-    // Note: On older kernel this may read past the actual arg list into the env.
-    u8 result = __write_fname(data, ptr);
-
-    // Don't copy the buffer which we did not actually write to.
-    send_event(ctx, data, PATH_MSG_SIZE(data));
-    return result;
-}
-
-// All arguments will be capped at MAX_FNAME bytes per argument
-// (This is deliberately defined as a separate version of the function to cut down on the number
-// of instructions needed, as older kernels have stricter limitations on the max count of the probe insns)
-
-// PSCLNX-6764 - Improve EXEC event performance
-//  This logic should be refactored to write the multiple args into a single
-//  event buffer instead of one event per arg.
-static void submit_all_args(struct pt_regs *ctx,
-                            const char *const  *_argv,
-                            struct path_data *data)
-{
-    void *argp = NULL;
-    void *next_argp = NULL;
-    int index = 0;
 
 #pragma unroll
-    for (int i = 0; i < MAXARG; i++) {
-        if (next_argp) {
-            // If there is more data to read in this arg, we tell the collector
-            //  to continue with the previous arg (and not add a ' ').
-            data->header.state = PP_APPEND;
-            argp = next_argp;
-            next_argp = NULL;
-        } else {
-            // This is a new arg
-            data->header.state = PP_ENTRY_POINT;
-            bpf_probe_read(&argp, sizeof(argp), &_argv[index++]);
-        }
-        if (!argp) {
-            // We have reached the last arg so bail out
+    for (int i = 0; i < MAXARG; i++)
+    {
+        len = bpf_probe_read_str(blob, MAX_ARG_CHUNK_SIZE, argp);
+
+        // barrier_var here actually saves an extra insn per iteration
+        barrier_var(len);
+#if MAX_ARG_CHUNK_SIZE > MAX_UCHAR_VAL
+        if (len < 0)
+        {
             goto out;
         }
+#endif
+        if (len == MAX_ARG_CHUNK_SIZE)
+        {
+            len -= 1;
+            blob += len;
+            total_blob_len += len;
 
-        // Read the arg data and send an event.  We expect the result to be the bytes sent
-        //  in the event.  On older kernels, this may be 0 which is OK.  It just means that
-        //  we will always truncate the arg.
-        u8 bytes_written = __submit_arg(ctx, argp, data);
-        next_argp = NULL;
+            // The instruction most sensitive/critical to BPF verifier
+            argp = argp + MAX_ARG_CHUNK_SIZE - 1;
+        }
+        else
+        {
+            blob += len;
+            total_blob_len += len;
 
-        if (bytes_written == MAX_FNAME) {
-            // If we have filled the buffer exactly, it means that there is additional
-            //  data for this arg.
-            // Advance the read pointer by the bytes written (minus the null terminator)
-            next_argp = argp + bytes_written - 1;
+            if (bpf_probe_read(&argp, sizeof(argp), &argv[index++]) ||
+                !argp)
+            {
+                goto out;
+            }
         }
     }
 
-    // handle truncated argument list
-    char ellipsis[] = "...";
-    __submit_arg(ctx, (void *)ellipsis, data);
+    bpf_probe_read(blob, sizeof(ellipsis), ellipsis);
+    total_blob_len += sizeof(ellipsis);
 
 out:
-    data->header.state = PP_FINALIZED;
-    send_event(ctx, (struct data*)data, sizeof(struct data));
 
-    return;
+    return total_blob_len;
+}
+
+//
+// When blob entry has data, set the size and offset
+// of the blob entry/ctx. Then updates the global payload size
+// and global position in the blob space.
+//
+// blob_pos is and address within the xpad BPF map. So max
+// hard max size is not based on the size of the event structs
+// but the max size of the xpad map entry. The verifier will
+// tell us if we ever are close to hitting an map address overflow.
+// This may happen if some of the operations with iterating
+// changes or we use the incorrect type to manage position
+// within the xpad BPF map entry storage space.
+//
+static __always_inline
+char *compute_blob_ctx(u16 blob_size, struct blob_ctx *blob_ctx,
+                       u32 *payload, char *blob_pos)
+{
+    if (blob_ctx && payload) {
+        blob_ctx->size = blob_size;
+        if (blob_size) {
+            blob_ctx->offset = (u16)*payload;
+        } else {
+            blob_ctx->offset = 0;
+        }
+        *payload += blob_size;
+
+        if (blob_pos) {
+            return blob_pos + blob_size;
+        }
+    }
+    return blob_pos;
 }
 
 static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
@@ -466,19 +495,19 @@ static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
     int retVal = 0;
     struct mount *mnt_parent = NULL;
 
-    bpf_probe_read(parent_dentry, sizeof(struct dentry *), &(*dentry)->d_parent);
+    bpf_core_read(parent_dentry, sizeof(struct dentry *), &(*dentry)->d_parent);
 
     if (*dentry == *mnt_root || *dentry == *parent_dentry) {
-        bpf_probe_read(&mnt_parent, sizeof(struct mount *), &(*real_mount)->mnt_parent);
+        bpf_core_read(&mnt_parent, sizeof(struct mount *), &(*real_mount)->mnt_parent);
         if (*dentry != *mnt_root) {
             // We reached root, but not mount root - escaped?
             retVal = ENOENT;
         } else if (*real_mount != mnt_parent) {
             // We reached root, but not global root - continue with mount point path
-            bpf_probe_read(dentry, sizeof(struct dentry *), &(*real_mount)->mnt_mountpoint);
-            bpf_probe_read(real_mount, sizeof(struct mount *), &(*real_mount)->mnt_parent);
+            bpf_core_read(dentry, sizeof(struct dentry *), &(*real_mount)->mnt_mountpoint);
+            bpf_core_read(real_mount, sizeof(struct mount *), &(*real_mount)->mnt_parent);
             *vfsmnt = &(*real_mount)->mnt;
-            bpf_probe_read(mnt_root, sizeof(struct dentry *), &(*vfsmnt)->mnt_root);
+            bpf_core_read(mnt_root, sizeof(struct dentry *), &(*vfsmnt)->mnt_root);
             retVal = EAGAIN;
         } else {
             // Global root - path fully parsed
@@ -489,16 +518,16 @@ static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
     return retVal;
 }
 
-static int __do_file_path(struct pt_regs *ctx,
-                          struct dentry *dentry,
-                          struct vfsmount *vfsmnt,
-                          struct path_data *data)
+
+static size_t __do_file_path_x(struct dentry *dentry,
+                            struct vfsmount *vfsmnt,
+                            char *blob)
 {
+    size_t total_blob_len = 0;
+    size_t len;
     struct mount *real_mount = NULL;
-    struct mount *mnt_parent = NULL;
     struct dentry *mnt_root = NULL;
     struct dentry *parent_dentry = NULL;
-    struct qstr sp = {};
     int i = 0;
 
     bpf_core_read(&mnt_root, sizeof(struct dentry *), &vfsmnt->mnt_root);
@@ -506,128 +535,134 @@ static int __do_file_path(struct pt_regs *ctx,
     // poorman's container_of
     real_mount = ((void *)vfsmnt) - offsetof(struct mount, mnt);
 
-    data->header.state = PP_PATH_COMPONENT;
 #pragma clang loop unroll(full)
     for (i = 0; i < MAX_FULL_PATH_ITER; ++i) {
-        int retVal = __get_next_parent_dentry(&dentry, &vfsmnt, &real_mount, &mnt_root, &parent_dentry);
+        // Helper overhead adds ~250 extra insns
+        int retVal = __get_next_parent_dentry(&dentry, &vfsmnt, &real_mount,
+                                              &mnt_root, &parent_dentry);
 
         if (retVal == EAGAIN) {
             continue;
         }
 
         if (retVal == ENOENT) {
-            break;
+            goto out;
         }
 
-        bpf_core_read(&sp, sizeof(sp), (void *)&(dentry->d_name));
-        __write_fname(data, sp.name);
+        len = bpf_probe_read_str(blob, MAX_PATH_COMPONENT_SIZE,
+                                 BPF_CORE_READ(dentry, d_name.name));
+        barrier_var(len);
+        if (len > MAX_PATH_COMPONENT_SIZE) {
+            goto out;
+        }
+        barrier_var(len);
+        blob += len;
+        total_blob_len += len;
+
         dentry = parent_dentry;
-        send_event(ctx, data, PATH_MSG_SIZE(data));
     }
+
+    // Fall through here to check if we likely truncated
 
     // Best effort to check if path was fully parsed in the last loop iteration.
     // Could still yield a false result because without unbounded looping we can't know
     // beyond all doubts that we have reached the global root mount.
     // We don't add ellipsis if we can't be sure the path is truncated.
-    if (i >= MAX_FULL_PATH_ITER) {
-        bool truncated = false;
-
 #pragma clang loop unroll(full)
-        for (i = 0; i < MAX_PATH_EDGE_DETECT_ITER; ++i) {
-            int retVal = __get_next_parent_dentry(&dentry, &vfsmnt, &real_mount, &mnt_root, &parent_dentry);
+    for (i = 0; i < MAX_PATH_EDGE_DETECT_ITER; ++i) {
+        int retVal = __get_next_parent_dentry(&dentry, &vfsmnt, &real_mount,
+                                              &mnt_root, &parent_dentry);
 
-            if (retVal == EAGAIN) {
-                continue;
-            }
-
-            if (retVal == ENOENT) {
-                break;
-            }
-
-            // The path is truncated for sure!
-            truncated = true;
-            break;
+        // We crossed a mountpoint so we likely truncated
+        if (retVal == EAGAIN) {
+            continue;
+            // Probably could be okay with breaking from loop here
         }
 
-        if (truncated) {
-            char ellipsis[] = "...";
-            __write_fname(data, ellipsis);
-            send_event(ctx, data, PATH_MSG_SIZE(data));
+        if (retVal == ENOENT) {
+            goto out;
         }
+
+        // The path is truncated for sure!
+        break;
     }
 
-    data->header.state = PP_FINALIZED;
-    return 0;
+    bpf_probe_read(blob, sizeof(ellipsis), ellipsis);
+    total_blob_len += sizeof(ellipsis);
+
+out:
+
+    return total_blob_len;
 }
 
-static int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry, struct path_data *data, uint64_t fs_magic)
-{
-    struct dentry *parent_dentry = NULL;
-    struct qstr sp = {};
-    bool truncated = false;
-    int i = 0;
 
-    data->header.state = PP_PATH_COMPONENT;
+static size_t __do_dentry_path_x(struct dentry *dentry, char *blob)
+{
+    size_t total_blob_len = 0;
+    size_t len;
+    struct dentry *parent_dentry = NULL;
+
 #pragma unroll
-    for (i = 0; i < MAX_DENTRY_PATH_ITER; ++i) {
+    for (int i = 0; i < MAX_DENTRY_PATH_ITER; i++)
+    {
         bpf_core_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
 
         if (parent_dentry == dentry || parent_dentry == NULL) {
-            break;
+            goto out;
         }
 
-        bpf_core_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
-
-        // Check that the name is valid
-        //  We sometimes get a dentry of '/', so this logic will skip it
-        if (__write_fname(data, sp.name) > 0 && data->size > 1) {
-            send_event(ctx, data, PATH_MSG_SIZE(data));
+        len = bpf_probe_read_str(blob, MAX_PATH_COMPONENT_SIZE,
+                                 BPF_CORE_READ(dentry, d_name.name));
+        barrier_var(len);
+        if (len > MAX_PATH_COMPONENT_SIZE) {
+            goto out;
         }
+        barrier_var(len);
+        blob += len;
+        total_blob_len += len;
 
         dentry = parent_dentry;
     }
 
-    // Best effort to check if path was fully parsed in the last loop iteration.
-    // Could still yield a false result because without unbounded looping we can't know
-    // beyond all doubts that we have reached the global root mount.
-    // We don't add ellipsis if we can't be sure the path is truncated.
-    if (i >= MAX_DENTRY_PATH_ITER) {
-#pragma unroll
-        for (i = 0; i < MAX_PATH_EDGE_DETECT_ITER; ++i) {
-            bpf_core_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
-
-            if (parent_dentry == dentry || parent_dentry == NULL) {
-                break;
-            }
-
-            bpf_core_read(&sp, sizeof(struct qstr), (void *)&(dentry->d_name));
-
-            // Do we have a valid path entry
-            if (__write_fname(data, sp.name) > 0 && data->size > 1) {
-                // Path is not truncated if we have reached btrfs subvolume root
-                if (fs_magic != BTRFS_SUPER_MAGIC || data->fname[0] != '@') {
-                    // The path is truncated for sure!
-                    truncated = true;
-                    break;
-                }
-            }
-
-            dentry = parent_dentry;
-        }
+    // A dentry path's truncation should be considered
+    // undefined behavior so don't too much worry about it.
+    bpf_core_read(&parent_dentry, sizeof(parent_dentry), &(dentry->d_parent));
+    if (parent_dentry != dentry)
+    {
+        bpf_probe_read(blob, sizeof(ellipsis), ellipsis);
+        total_blob_len += sizeof(ellipsis);
     }
 
-    if (truncated) {
-        char ellipsis[] = "...";
-        __write_fname(data, ellipsis);
-        send_event(ctx, data, PATH_MSG_SIZE(data));
-    } else {
-        // Trigger the agent to add the mount path
-        data->header.state = PP_NO_EXTRA_DATA;
-        send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+out:
+
+    return total_blob_len;
+}
+
+static void submit_exec_arg_event(void *ctx, const char __user *const __user *argv)
+{
+    struct exec_arg_data *exec_arg_data = __current_blob();
+    u32 payload = offsetof(typeof(*exec_arg_data), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
+
+    if (!argv || !exec_arg_data) {
+        return;
     }
 
-    data->header.state = PP_FINALIZED;
-    return 0;
+    blob_pos = exec_arg_data->blob;
+    __init_header_dynamic(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &exec_arg_data->header);
+
+    blob_size = __blobify_str_array(argv, exec_arg_data->blob);
+    blob_pos = compute_blob_ctx(blob_size, &exec_arg_data->exec_arg_blob,
+                                &payload, blob_pos);
+
+    barrier_var(payload);
+    exec_arg_data->header.payload = payload;
+
+    barrier_var(payload);
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, exec_arg_data, payload);
+    }
 }
 
 SEC("kprobe/__x64_sys_execveat")
@@ -636,13 +671,7 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execveat, int fd,
                  const char __user *const __user *argv,
                  const char __user *const __user *envp, int flags)
 {
-    DECLARE_FILE_EVENT(data);
-    if (!data) return 0;
-
-    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
-
-    submit_all_args(ctx, argv, PATH_DATA(data));
-
+    submit_exec_arg_event(ctx, argv);
     return 0;
 }
 
@@ -651,13 +680,7 @@ int BPF_KPROBE_SYSCALL(syscall__on_sys_execve, const char __user *filename,
                const char __user *const __user *argv,
                const char __user *const __user *envp)
 {
-    DECLARE_FILE_EVENT(data);
-    if (!data) return 0;
-
-    __init_header(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
-
-    submit_all_args(ctx, argv, PATH_DATA(data));
-
+    submit_exec_arg_event(ctx, argv);
     return 0;
 }
 
@@ -696,7 +719,7 @@ static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inod
 
 static __always_inline void __track_write_entry(
     struct file      *file,
-    struct file_data *data)
+    struct file_path_data_x *data)
 {
     if (!file || !data) {
         return;
@@ -730,27 +753,50 @@ static __always_inline void __track_write_entry(
 SEC("kprobe/security_file_free")
 int BPF_KPROBE(on_security_file_free, struct file *file)
 {
-    if (!file) {
-        return 0;
-    }
     u64 file_cache_key = (u64)file;
-    DECLARE_FILE_EVENT(data);
-    if (!data) goto out;
+    struct file_data_cache *cachep;
 
-    void *cachep = bpf_map_lookup_elem(&file_write_cache, &file_cache_key);
-    if (cachep) {
-        __init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+    struct file_path_data_x *data_x = NULL;
+    uint32_t payload = offsetof(typeof(*data_x), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
 
-        FILE_DATA(data)->device = ((struct file_data_cache *) cachep)->device;
-        FILE_DATA(data)->inode = ((struct file_data_cache *) cachep)->inode;
-
-        send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
-
-        __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
-        send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+    if (!file || __has_fmode_nonotify(file)) {
+        goto out;
     }
 
+    cachep = bpf_map_lookup_elem(&file_write_cache, &file_cache_key);
+    if (!cachep) {
+        goto out_del;
+    }
+
+    data_x = __current_blob();
+    if (!data_x) {
+        goto out_del;
+    }
+
+    blob_pos = data_x->blob;
+    __init_header_dynamic(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &data_x->header);
+
+    data_x->device = cachep->device;
+    data_x->inode = cachep->inode;
+    data_x->flags = BPF_CORE_READ(file, f_flags);
+    data_x->prot = BPF_CORE_READ(file, f_mode);
+
+    blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
+                                 BPF_CORE_READ(file, f_path.mnt),
+                                 blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
+                                &payload, blob_pos);
+
+    data_x->header.payload = payload;
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, data_x, payload);
+    }
+
+out_del:
     bpf_map_delete_elem(&file_write_cache, &file_cache_key);
+
 out:
 
     return 0;
@@ -761,7 +807,11 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
 {
     unsigned long exec_flags;
     unsigned long file_flags;
-    struct _file_event *data = NULL;
+
+    struct file_path_data_x *data_x = NULL;
+    uint32_t payload = offsetof(typeof(*data_x), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
 
     if (!file) {
         goto out;
@@ -792,25 +842,32 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
         }
     }
 
-    data = __current_blob();
-    if (!data)
-    {
+    data_x = __current_blob();
+    if (!data_x) {
         goto out;
     }
 
-    __init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+    blob_pos = data_x->blob;
+    __init_header_dynamic(EVENT_FILE_MMAP, PP_ENTRY_POINT, &data_x->header);
 
     // event specific data
-    FILE_DATA(data)->device = __get_device_from_file(file);
-    FILE_DATA(data)->inode = __get_inode_from_file(file);
-    FILE_DATA(data)->flags = flags;
-    FILE_DATA(data)->prot = prot;
-    // submit initial event data
-    send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
+    data_x->device = __get_device_from_file(file);
+    data_x->inode = __get_inode_from_file(file);
+    data_x->flags = flags;
+    data_x->prot = prot;
 
     // submit file path event data
-    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
-    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+    blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
+                                 BPF_CORE_READ(file, f_path.mnt),
+                                 blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
+                                &payload, blob_pos);
+
+    data_x->header.payload = payload;
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, data_x, payload);
+    }
+
 out:
 
     return 0;
@@ -821,11 +878,18 @@ out:
 SEC("kprobe/security_file_open")
 int BPF_KPROBE(on_security_file_open, struct file *file)
 {
-    struct _file_event *data = NULL;
     struct super_block *sb = NULL;
     struct inode *inode = NULL;
+    umode_t umode;
+    unsigned long f_flags = 0;
+    fmode_t f_mode = 0;
 
-    if (!file) {
+    struct file_path_data_x *data_x = NULL;
+    uint32_t payload = offsetof(typeof(*data_x), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
+
+    if (!file || __has_fmode_nonotify(file)) {
         goto out;
     }
 
@@ -843,77 +907,99 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
         goto out;
     }
 
+    umode = __get_umode_from_inode(inode);
+    if (!S_ISREG(umode)) {
+        goto out;
+    }
+
+    // Indirect store in case f_flags is ever expanded
+    f_flags = BPF_CORE_READ(file, f_flags);
+    BPF_CORE_READ_INTO(&f_mode, file, f_mode);
+
     u8 type;
-    if (BPF_CORE_READ(file, f_flags) & FMODE_EXEC) {
+    if (f_flags & FMODE_EXEC) {
         type = EVENT_PROCESS_EXEC_PATH;
-    } else if ((BPF_CORE_READ(file, f_mode) & FMODE_CREATED)) {
+    } else if (f_mode & FMODE_CREATED) {
+        // create intent may be grabbed sooner via security_path_mknod
+        // with CONFIG_SECURITY_PATH enabled.
         type = EVENT_FILE_CREATE;
-    } else if (BPF_CORE_READ(file, f_flags) & (O_RDWR | O_WRONLY)) {
+    } else if (f_flags & O_ACCMODE){
         type = EVENT_FILE_WRITE;
     } else {
         type = EVENT_FILE_READ;
     }
 
-    data = __current_blob();
-    if (!data) goto out;
+    data_x = __current_blob();
+    if (!data_x) goto out;
 
-    __init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
-    FILE_DATA(data)->device = __get_device_from_file(file);
-    FILE_DATA(data)->inode = __get_inode_from_file(file);
-    FILE_DATA(data)->flags = BPF_CORE_READ(file, f_flags);
-    FILE_DATA(data)->prot = BPF_CORE_READ(file, f_mode);
-    FILE_DATA(data)->fs_magic = BPF_CORE_READ(sb, s_magic);
+    blob_pos = data_x->blob;
+    __init_header_dynamic(type, PP_ENTRY_POINT, &data_x->header);
+
+    data_x->device = __get_device_from_file(file);
+    data_x->inode = __get_inode_from_file(file);
+    data_x->flags = BPF_CORE_READ(file, f_flags);
+    data_x->prot = BPF_CORE_READ(file, f_mode);
+    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
 
     if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
     {
         // This allows us to send the last-write event on file close
-        __track_write_entry(file, FILE_DATA(data));
+        __track_write_entry(file, data_x);
     }
 
-    send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
+    blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
+                                 BPF_CORE_READ(file, f_path.mnt),
+                                 data_x->blob);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
+                                &payload, blob_pos);
 
-    __do_file_path(ctx, BPF_CORE_READ(file, f_path.dentry), BPF_CORE_READ(file, f_path.mnt), PATH_DATA(data));
-
-    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+    data_x->header.payload = payload;
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, data_x, payload);
+    }
 
 out:
 
     return 0;
 }
 
-static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry *dentry)
-{
-    if (dentry)
-    {
-        struct super_block *sb = _sb_from_dentry(dentry);
-
-        if (sb && !__is_special_filesystem(sb))
-        {
-            __init_header(EVENT_FILE_DELETE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
-
-            FILE_DATA(data)->device = __get_device_from_sb(sb);
-            FILE_DATA(data)->inode = __get_inode_from_dentry(dentry);
-            FILE_DATA(data)->fs_magic = BPF_CORE_READ(sb, s_magic);
-
-            __file_tracking_delete(0, FILE_DATA(data)->device, FILE_DATA(data)->inode);
-
-            send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
-            __do_dentry_path(ctx, dentry, PATH_DATA(data), FILE_DATA(data)->fs_magic);
-            send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
-            return true;
-        }
-    }
-
-    return false;
-}
-
 SEC("kprobe/security_inode_unlink")
 int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentry)
 {
-    if (dentry) {
-        DECLARE_FILE_EVENT(data);
-        if (!data) return 0;
-        __send_dentry_delete(ctx, data, dentry);
+    struct super_block *sb = NULL;
+
+    struct file_path_data_x *data_x = NULL;
+    uint32_t payload = offsetof(typeof(*data_x), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
+
+    sb = _sb_from_dentry(dentry);
+    if (!sb || __is_special_filesystem(sb)) {
+        return 0;
+    }
+
+    data_x = __current_blob();
+    if (!data_x) {
+        return 0;
+    }
+
+    blob_pos = data_x->blob;
+    __init_header_dynamic(EVENT_FILE_DELETE, PP_ENTRY_POINT, &data_x->header);
+    data_x->header.report_flags |= REPORT_FLAGS_DENTRY;
+
+    data_x->device = __get_device_from_sb(sb);
+    data_x->inode = __get_inode_from_dentry(dentry);
+    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+
+    __file_tracking_delete(0, data_x->device, data_x->inode);
+
+    blob_size = __do_dentry_path_x(dentry, data_x->blob);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
+                                &payload, blob_pos);
+
+    data_x->header.payload = payload;
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, data_x, payload);
     }
 
     return 0;
@@ -924,42 +1010,55 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
              struct dentry *old_dentry, struct inode *new_dir,
              struct dentry *new_dentry, unsigned int flags)
 {
-    DECLARE_FILE_EVENT(data);
     struct super_block *sb = NULL;
 
-    if (!data) goto out;
+    struct rename_data_x *data_x = NULL;
+    uint32_t payload = offsetof(typeof(*data_x), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
 
-    // send event for delete of source file
-    if (!__send_dentry_delete(ctx, data, old_dentry)) {
+    sb = _sb_from_dentry(old_dentry);
+    if (!sb || __is_special_filesystem(sb)) {
         goto out;
     }
 
-    __init_header(EVENT_FILE_RENAME, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+    data_x = __current_blob();
+    if (!data_x) {
+        goto out;
+    }
 
-    sb = _sb_from_dentry(old_dentry);
+    blob_pos = data_x->blob;
+    __init_header_dynamic(EVENT_FILE_RENAME, PP_ENTRY_POINT, &data_x->header);
+    data_x->header.report_flags |= REPORT_FLAGS_DENTRY;
 
-    RENAME_DATA(data)->device = __get_device_from_dentry(old_dentry);
-    RENAME_DATA(data)->old_inode = __get_inode_from_dentry(old_dentry);
-    RENAME_DATA(data)->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
+    data_x->device = __get_device_from_dentry(old_dentry);
+    data_x->old_inode = __get_inode_from_dentry(old_dentry);
+    data_x->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
 
-    __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->old_inode);
+    __file_tracking_delete(0, data_x->device, data_x->old_inode);
 
     // If the target destination already exists
-    if (new_dentry)
-    {
-        __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->new_inode);
+    if (new_dentry) {
+        __file_tracking_delete(0, data_x->device, data_x->new_inode);
 
-        RENAME_DATA(data)->new_inode  = __get_inode_from_dentry(new_dentry);
-    }
-    else
-    {
-        RENAME_DATA(data)->new_inode  = 0;
+        data_x->new_inode = __get_inode_from_dentry(new_dentry);
+    } else {
+        data_x->new_inode = 0;
     }
 
-    send_event(ctx, RENAME_DATA(data), sizeof(struct rename_data));
+    blob_size = __do_dentry_path_x(old_dentry, blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->old_blob,
+                                &payload, blob_pos);
 
-    __do_dentry_path(ctx, new_dentry, PATH_DATA(data), RENAME_DATA(data)->fs_magic);
-    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+    blob_size = __do_dentry_path_x(new_dentry, blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->new_blob,
+                                &payload, blob_pos);
+
+    data_x->header.payload = payload;
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, data_x, payload);
+    }
+
 out:
 
     return 0;
@@ -978,7 +1077,8 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         goto out;
     }
 
-    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &file_data->header, task);
+    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA,
+                            REPORT_FLAGS_COMPAT, &file_data->header, task);
 
     file_data->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
 
@@ -1250,12 +1350,20 @@ int BPF_KRETPROBE(trace_skb_recv_udp)
 }
 
 // check for system endianess
+#ifdef __BYTE_ORDER__
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define _is_big_endian() false
+#else
+#define _is_big_endian() true
+#endif
+#else
 static __always_inline bool _is_big_endian()
 {
     unsigned int x = 1;
     char *c = (char*) &x;
     return ((int)*c == 0);
 }
+#endif /* __BYTE_ORDER__ */
 
 static __always_inline uint16_t _htons(uint16_t hostshort)
 {
@@ -1333,7 +1441,6 @@ int BPF_KRETPROBE(trace_udp_recvmsg_return)
 {
     int ret = PT_REGS_RC_CORE(ctx);
     u64 id = bpf_get_current_pid_tgid();
-    // u32 pid = id >> 32;
 
     struct msghdr **msgpp; // for DNS receive probe
 
@@ -1343,44 +1450,75 @@ int BPF_KRETPROBE(trace_udp_recvmsg_return)
     }
 
     if (ret <= 0) {
-        bpf_map_delete_elem(&currsock2, &id);
-        return 0;
+        goto out;
     }
-
-    struct dns_data data = {};
-    __init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_ENTRY_POINT, &data.header);
 
     // Send DNS info if port is DNS
     struct msghdr *msgp = *msgpp;
-
-    const char __user *dns;
-    struct iov_iter msgiter = BPF_CORE_READ(msgp, msg_iter);
-    dns = BPF_CORE_READ(msgiter.iov, iov_base);
-
-    struct sockaddr_in * msgname = (struct sockaddr_in *)BPF_CORE_READ(msgp, msg_name);
+    struct sockaddr_in *msgname = (struct sockaddr_in *)BPF_CORE_READ(msgp, msg_name);
     u16 dport = BPF_CORE_READ(msgname, sin_port);
-    u16 len = ret;
-    data.name_len = ret;
 
-    if (DNS_RESP_PORT_NUM == _ntohs(dport)) {
-#pragma unroll
-        for (int i = 1; i <= (DNS_RESP_MAXSIZE / DNS_SEGMENT_LEN) + 1; ++i) {
-            if (len > 0 && len < DNS_RESP_MAXSIZE) {
-                bpf_probe_read(&data.dns, DNS_SEGMENT_LEN, dns);
-
-                if (i > 1) {
-                    data.header.state = PP_APPEND;
-                }
-
-                send_event(ctx, &data, sizeof(struct dns_data));
-                len = len - DNS_SEGMENT_LEN;
-                dns = dns + DNS_SEGMENT_LEN;
-            } else {
-                break;
-            }
-        }
+    // TODO: Allow this to be configurable
+    if (_ntohs(dport) != DNS_RESP_PORT_NUM) {
+        goto out;
     }
 
+    const char __user *dns = BPF_CORE_READ(msgp, msg_iter.iov, iov_base);
+    if (!dns) {
+        goto out;
+    }
+
+    struct dns_data_x *data_x = __current_blob();
+    u32 payload = offsetof(typeof(*data_x), blob);
+    char *blob_pos = NULL;
+    u16 blob_size;
+
+    if (!data_x) {
+        goto out;
+    }
+
+    blob_pos = data_x->blob;
+    __init_header_dynamic(EVENT_NET_CONNECT_DNS_RESPONSE, PP_ENTRY_POINT, &data_x->header);
+
+    //
+    // barrier_var is still NEEDED below!
+    //
+    // Payload return value has to be re-checked in order
+    // to ensure to the verifier that bpf_probe_read's
+    // requested read size won't cause overflow in the
+    // xpad map's storage space. Careful when modifying this!
+    //
+    barrier_var(ret);
+    if (ret <= 0) {
+        goto out;
+    } else if (ret > MAX_DNS_BLOB_SIZE) {
+        blob_size = MAX_DNS_BLOB_SIZE;
+    } else {
+        barrier_var(ret);
+        blob_size = (u16)ret;
+    }
+
+    barrier_var(blob_size);
+    if (blob_size >= 1 && blob_size <= MAX_DNS_BLOB_SIZE) {
+        if (bpf_probe_read(blob_pos, blob_size, dns)) {
+            // On error of read aka fault don't send event
+            goto out;
+        }
+
+        blob_pos = compute_blob_ctx(blob_size, &data_x->dns_blob,
+                                    &payload, blob_pos);
+    }
+
+    barrier_var(payload);
+    data_x->header.payload = payload;
+
+    barrier_var(payload);
+    if (payload <= sizeof(typeof(*data_x))) {
+        send_event(ctx, data_x, payload);
+    }
+
+out:
+    // Don't remove from bpf map currsock3
     bpf_map_delete_elem(&currsock2, &id);
     return 0;
 }

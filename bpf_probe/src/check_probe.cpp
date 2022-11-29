@@ -224,8 +224,15 @@ void ProbeEventCallback(Data data)
         output << data.data->header.event_time << " "
                << BpfApi::TypeToString(data.data->header.type) << "::"
                << BpfApi::StateToString(data.data->header.state) << " "
-               << "tid: " << data.data->header.tid << " "
-               << "ppid: " << data.data->header.ppid;
+               << "tid:" << data.data->header.tid << " "
+               << "ppid:" << data.data->header.ppid;
+
+        if (data.data->header.report_flags & REPORT_FLAGS_DYNAMIC)
+        {
+            output << " report_flags:0x" << std::hex
+                   << data.data->header.report_flags << std::dec;
+            output << " payload:" << data.data->header.payload;
+        }
 
         if (data.data->header.state == PP_PATH_COMPONENT)
         {
