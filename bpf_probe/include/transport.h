@@ -128,13 +128,14 @@ struct path_data {
 
 #define MAX_FILE_BLOB_SIZE (MAX_PATH_COMPONENT_SIZE * HARD_MAX_PATH_ITER)
 
-#define MAX_FILE_PATH_BLOB_SIZE (MAX_FILE_BLOB_SIZE)
+#define MAX_FILE_PATH_BLOB_SIZE (MAX_FILE_BLOB_SIZE + MAX_CGROUP_BLOB_SIZE)
 
-#define MAX_RENAME_BLOB_SIZE ((MAX_FILE_BLOB_SIZE * 2))
+#define MAX_RENAME_BLOB_SIZE ((MAX_FILE_BLOB_SIZE * 2) + MAX_CGROUP_BLOB_SIZE)
 
 #define MAX_DNS_BLOB_SIZE 4096
 
 // Just let it use the largest blob
+#define BLOB_OFFSET(data, blob_name) (data->blob + data->blob_name.offset)
 
 //
 // This little struct tells us where a blob entry is located
@@ -196,6 +197,7 @@ struct file_path_data_x {
     uint64_t prot;
     uint64_t fs_magic;
 
+    struct blob_ctx cgroup_blob;
     struct blob_ctx file_blob;
     char blob[MAX_FILE_PATH_BLOB_SIZE];
 };
@@ -210,22 +212,22 @@ struct rename_data_x {
 
     struct blob_ctx old_blob;
     struct blob_ctx new_blob;
+    struct blob_ctx cgroup_blob;
     char blob[MAX_RENAME_BLOB_SIZE];
 };
 
-
-
 struct exec_arg_data {
     struct data_header header;
+
     struct blob_ctx exec_arg_blob;
+    struct blob_ctx cgroup_blob; 
     char blob[MAX_EXEC_ARG_BLOB_SIZE];
 };
 
-struct cgroup_path_data {
-    struct data_header header;
-    struct blob_ctx cgroup_blob;
-    char blob[MAX_CGROUP_BLOB_SIZE];
-};
+// struct cgroup_path_data {
+//     struct blob_ctx cgroup_blob;
+//     char blob[MAX_CGROUP_BLOB_SIZE];
+// };
 
 struct dns_data_x {
     struct data_header header;

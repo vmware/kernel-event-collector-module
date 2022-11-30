@@ -486,6 +486,31 @@ char *compute_blob_ctx(u16 blob_size, struct blob_ctx *blob_ctx,
     return blob_pos;
 }
 
+static __always_inline char *blobify_cgroup_path(struct blob_ctx *blob_ctx,
+        char *blob, u32 *payload)
+{
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    struct kernfs_node* cgroup_node = BPF_CORE_READ(task, cgroups, dfl_cgrp, kn);
+    u16 length;
+
+#ifdef UNROLL
+#pragma unroll
+#endif
+    for (int i = 0; i < MAX_CGROUP_PATH_ITER; i++) {
+        length = bpf_probe_read_str(
+                blob, MAX_PATH_COMPONENT_SIZE, BPF_CORE_READ(cgroup_node, name));
+        if (!cgroup_node)
+            break;
+            if (length <= MAX_PATH_COMPONENT_SIZE) {
+            barrier_var(length);
+            blob += length;
+        }
+        cgroup_node = BPF_CORE_READ(cgroup_node, parent);
+    }
+
+    return compute_blob_ctx(length, blob_ctx, payload, blob);
+}
+
 static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
                                                     struct vfsmount **vfsmnt,
                                                     struct mount **real_mount,
@@ -655,6 +680,7 @@ static void submit_exec_arg_event(void *ctx, const char __user *const __user *ar
     blob_size = __blobify_str_array(argv, exec_arg_data->blob);
     blob_pos = compute_blob_ctx(blob_size, &exec_arg_data->exec_arg_blob,
                                 &payload, blob_pos);
+    blob_pos = blobify_cgroup_path(&exec_arg_data->cgroup_blob, blob_pos, &payload);
 
     barrier_var(payload);
     exec_arg_data->header.payload = payload;
@@ -788,6 +814,7 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
                                  blob_pos);
     blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
                                 &payload, blob_pos);
+    blob_pos = blobify_cgroup_path(&data_x->cgroup_blob, blob_pos, &payload);
 
     data_x->header.payload = payload;
     if (payload <= MAX_BLOB_EVENT_SIZE) {
@@ -862,6 +889,7 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
                                  blob_pos);
     blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
                                 &payload, blob_pos);
+    blob_pos = blobify_cgroup_path(&data_x->cgroup_blob, blob_pos, &payload);
 
     data_x->header.payload = payload;
     if (payload <= MAX_BLOB_EVENT_SIZE) {
@@ -952,6 +980,7 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
                                  data_x->blob);
     blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
                                 &payload, blob_pos);
+    blob_pos = blobify_cgroup_path(&data_x->cgroup_blob, blob_pos, &payload);
 
     data_x->header.payload = payload;
     if (payload <= MAX_BLOB_EVENT_SIZE) {
@@ -996,6 +1025,7 @@ int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentr
     blob_size = __do_dentry_path_x(dentry, data_x->blob);
     blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
                                 &payload, blob_pos);
+    blob_pos = blobify_cgroup_path(&data_x->cgroup_blob, blob_pos, &payload);
 
     data_x->header.payload = payload;
     if (payload <= MAX_BLOB_EVENT_SIZE) {
@@ -1053,6 +1083,7 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
     blob_size = __do_dentry_path_x(new_dentry, blob_pos);
     blob_pos = compute_blob_ctx(blob_size, &data_x->new_blob,
                                 &payload, blob_pos);
+    blob_pos = blobify_cgroup_path(&data_x->cgroup_blob, blob_pos, &payload);
 
     data_x->header.payload = payload;
     if (payload <= MAX_BLOB_EVENT_SIZE) {
