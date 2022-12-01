@@ -246,6 +246,7 @@ namespace bpf_probe {
         static void on_perf_submit(void *cb_cookie, void *data, int data_size);
 
         std::unique_ptr<ebpf::BPF>  m_BPF;
+        bool                        m_try_libbpf;
         const std::string           m_kptr_restrict_path;
         bool                        m_bracket_kptr_restrict;
         bool                        m_first_syscall_lookup;
