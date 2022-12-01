@@ -189,6 +189,12 @@ struct rename_data {
     uint64_t fs_magic;
 };
 
+struct data_x {
+    struct data_header header;
+    struct blob_ctx cgroup_blob;
+    char blob[MAX_CGROUP_BLOB_SIZE];
+};
+
 struct file_path_data_x {
     struct data_header header;
     uint64_t inode;
@@ -197,8 +203,8 @@ struct file_path_data_x {
     uint64_t prot;
     uint64_t fs_magic;
 
-    struct blob_ctx cgroup_blob;
     struct blob_ctx file_blob;
+    struct blob_ctx cgroup_blob;
     char blob[MAX_FILE_PATH_BLOB_SIZE];
 };
 
