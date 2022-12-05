@@ -491,25 +491,29 @@ static __always_inline char *blobify_cgroup_path(struct blob_ctx *blob_ctx,
 {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     struct kernfs_node* cgroup_node = BPF_CORE_READ(task, cgroups, dfl_cgrp, kn);
-    u16 length;
+    size_t length;
+    char *blob_pos = blob;
 
 #ifdef UNROLL
 #pragma unroll
 #endif
     for (int i = 0; i < MAX_CGROUP_PATH_ITER; i++) {
         length = bpf_probe_read_str(
-                blob, MAX_PATH_COMPONENT_SIZE, BPF_CORE_READ(cgroup_node, name));
+                blob_pos, MAX_PATH_COMPONENT_SIZE, BPF_CORE_READ(cgroup_node, name));
+        barrier_var(length);
         if (!cgroup_node) {
             break;
         }
         if (length <= MAX_PATH_COMPONENT_SIZE) {
             barrier_var(length);
-            blob += length;
+            barrier_var(blob);
+            blob_pos += length;
         }
+        barrier_var(cgroup_node);
         cgroup_node = BPF_CORE_READ(cgroup_node, parent);
     }
 
-    return compute_blob_ctx(length, blob_ctx, payload, blob);
+    return compute_blob_ctx(blob_pos - blob, blob_ctx, payload, blob);
 }
 
 static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
@@ -675,6 +679,8 @@ static void submit_exec_arg_event(void *ctx, const char __user *const __user *ar
         return;
     }
 
+    barrier_var(blob_pos);
+    barrier_var(blob_size);
     blob_pos = exec_arg_data->blob;
     __init_header_dynamic(EVENT_PROCESS_EXEC_ARG, PP_ENTRY_POINT, &exec_arg_data->header);
 
@@ -683,13 +689,13 @@ static void submit_exec_arg_event(void *ctx, const char __user *const __user *ar
                                 &payload, blob_pos);
     blob_pos = blobify_cgroup_path(&exec_arg_data->cgroup_blob, blob_pos, &payload);
 
+
     barrier_var(payload);
     exec_arg_data->header.payload = payload;
 
     barrier_var(payload);
     if (payload <= MAX_BLOB_EVENT_SIZE) {
         send_event(ctx, exec_arg_data, payload);
-    }
 }
 
 SEC("kprobe/__x64_sys_execveat")
@@ -1111,11 +1117,14 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         goto out;
     }
 
+    barrier_var(file_data_x);
     file_data_x = __current_blob();
     if (!file_data_x) {
         goto out;
     }
 
+    barrier_var(blob_pos);
+    barrier_var(payload);
     blob_pos = file_data_x->blob;
 
     __init_header_dynamic(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &file_data_x->header);
@@ -1203,6 +1212,10 @@ int BPF_KPROBE(on_do_exit, long code)
     struct data_x *data_x = NULL;
     char *blob_pos = NULL;
     uint32_t payload = offsetof(typeof(*data_x), blob);
+
+    barrier_var(data_x);
+    barrier_var(blob_pos);
+    barrier_var(payload);
 
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task) {

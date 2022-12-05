@@ -230,11 +230,6 @@ struct exec_arg_data {
     char blob[MAX_EXEC_ARG_BLOB_SIZE];
 };
 
-// struct cgroup_path_data {
-//     struct blob_ctx cgroup_blob;
-//     char blob[MAX_CGROUP_BLOB_SIZE];
-// };
-
 struct dns_data_x {
     struct data_header header;
     struct blob_ctx dns_blob;
@@ -261,6 +256,7 @@ struct _file_event {
         struct path_data   _path_data;
         struct rename_data _rename_data;
         struct data        _data;
+        struct data_x      _data_x;
     };
 };
 
