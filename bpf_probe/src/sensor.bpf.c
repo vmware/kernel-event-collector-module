@@ -700,6 +700,7 @@ static void submit_exec_arg_event(void *ctx, const char __user *const __user *ar
     barrier_var(payload);
     if (payload <= MAX_BLOB_EVENT_SIZE) {
         send_event(ctx, exec_arg_data, payload);
+    }
 }
 
 SEC("kprobe/__x64_sys_execveat")
