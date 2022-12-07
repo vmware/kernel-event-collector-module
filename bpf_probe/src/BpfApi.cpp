@@ -38,6 +38,7 @@ namespace fs = boost::filesystem;
 
 BpfApi::BpfApi()
     : m_BPF(nullptr)
+    , m_try_libbpf(true)
     , m_kptr_restrict_path("/proc/sys/kernel/kptr_restrict")
     , m_bracket_kptr_restrict(false)
     , m_first_syscall_lookup(true)
@@ -183,30 +184,46 @@ bool BpfApi::Init_bcc(const std::string & bpf_program)
 bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
 {
     bool result = false;
-    bool try_libbpf = false;
-    int fd = open("/sys/kernel/btf/vmlinux", O_RDONLY);
-
-    if (fd < 0)
+#if defined(__aarch64__)
+    // For now override aarch64 to only use BCC until we add
+    // libbpf support explicitly.
+    m_try_libbpf = false;
+#else
+    // For now libbpf support must have BTF.
+    if (m_try_libbpf)
     {
-        try_bcc_first = true;
-        try_libbpf = false;
-    }
-    else
-    {
-        try_libbpf = true;
+        int fd = open("/sys/kernel/btf/vmlinux", O_RDONLY);
 
-        close(fd);
-        fd = -1;
+        if (fd < 0)
+        {
+            m_try_libbpf = false;
+        }
+        else
+        {
+            m_try_libbpf = true;
+            close(fd);
+        }
     }
+#endif /* __aarch64__ */
 
     if (try_bcc_first)
     {
         result = Init_bcc(bpf_program);
     }
 
-    if (!result && try_libbpf)
+    if (!result && m_try_libbpf)
     {
         result = Init_libbpf();
+
+        //
+        // Explicitly tell this instance to never re-retry libbpf
+        //
+        m_try_libbpf = result;
+    }
+
+    if (!result && !try_bcc_first)
+    {
+        result = Init_bcc(bpf_program);
     }
 
     return result;

@@ -24,6 +24,10 @@ static const char ellipsis[] = "...";
 
 extern int LINUX_KERNEL_VERSION __kconfig;
 
+// Detect the presence of SUSE version that requires special handling of mmap flags
+extern int CONFIG_SUSE_VERSION __kconfig __weak;
+
+
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
 
@@ -854,15 +858,12 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
         goto out;
     }
 
-    if (LINUX_KERNEL_VERSION < KERNEL_VERSION(5, 14, 0)) {
-        exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
-        if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
-            goto out;
-        }
-    } else {
-        // This fix is to adjust the flag changes in 5.14 kernel to match the user space pipeline requirement
+    if (LINUX_KERNEL_VERSION >= KERNEL_VERSION(5, 14, 0) && (CONFIG_SUSE_VERSION != 15))
+    {
+        // This fix is to adjust the flag changes in 5.14 kernel (except SUSE 15 SP4) to match the user space pipeline requirement
         //  - MAP_EXECUTABLE flag is not available for exec mmap function
         //  - MAP_DENYWRITE flag is "reverted" for ld.so and normal mmap
+        //  - checking CONFIG_SUSE_VERSION is a temporary fix until SUSE stops using flag MAP_EXECUTABLE
 
         BPF_CORE_READ_INTO(&file_flags, file, f_flags);
         if ((file_flags & FMODE_EXEC) && flags == (MAP_FIXED | MAP_PRIVATE)) {
@@ -873,6 +874,13 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
             flags &= ~MAP_DENYWRITE;
         } else {
             flags |= MAP_DENYWRITE;
+        }
+    }
+    else
+    {
+        exec_flags = flags & (MAP_DENYWRITE | MAP_EXECUTABLE);
+        if (exec_flags == (MAP_DENYWRITE | MAP_EXECUTABLE)) {
+            goto out;
         }
     }
 
