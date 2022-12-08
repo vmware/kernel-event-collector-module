@@ -135,7 +135,7 @@ struct path_data {
 #define MAX_DNS_BLOB_SIZE 4096
 
 // Just let it use the largest blob
-#define BLOB_OFFSET(data, blob_name) (data + data->blob_name.offset)
+#define BLOB_OFFSET(data, blob_name) ((char *)data + data->blob_name.offset)
 
 //
 // This little struct tells us where a blob entry is located
