@@ -26,7 +26,7 @@ ProcessHandle *ec_sorted_tracking_table_get_handle(void *data, ProcessContext *c
 const char *ec_process_tracking_get_proc_name(const char *path);
 
 ExecHandle *ec_process_tracking_get_temp_exec_handle(ProcessHandle *process_handle, ProcessContext *context);
-void ec_process_tracking_disown_exec_identity(ExecIdentity *exec_identity, ProcessContext *context);
+void ec_process_tracking_disown_exec_identity(ProcessHandle *process_handle, ProcessContext *context);
 void ec_process_posix_identity_set_exec_identity(PosixIdentity *posix_identity, ExecIdentity *exec_identity, ProcessContext *context);
 void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, ExecHandle *exec_handle, ProcessContext *context);
 void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecIdentity *exec_identity, ProcessContext *context);
