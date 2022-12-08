@@ -166,8 +166,15 @@ void ec_process_tracking_set_exec_identity(ProcessHandle *process_handle, ExecId
     }
 }
 
-void ec_process_tracking_disown_exec_identity(ExecIdentity *exec_identity, ProcessContext *context)
+void ec_process_tracking_disown_exec_identity(ProcessHandle *process_handle, ProcessContext *context)
 {
+    ExecIdentity *exec_identity = ec_process_exec_identity(process_handle);
+
+    CANCEL_VOID(exec_identity);
+
+    // Safely set posix_identity's exec_identity to NULL before we, potentially, free it
+    ec_process_tracking_set_exec_identity(process_handle, NULL, context);
+
     // We want to disown the exec_identity. This will ensure it is deleted when the last reference count is dropped.
     ec_mem_cache_disown(exec_identity, context);
 }
@@ -248,16 +255,15 @@ ExecHandle *ec_process_tracking_get_temp_exec_handle(ProcessHandle *process_hand
     return process_handle ? &ec_process_posix_identity(process_handle)->temp_exec_handle : NULL;
 }
 
-void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, ExecHandle *exec_handle, ProcessContext *context)//PosixIdentity *posix_identity, ExecIdentity *exec_identity
+void ec_process_tracking_set_temp_exec_handle(ProcessHandle *process_handle, ExecHandle *exec_handle, ProcessContext *context)
 {
     CANCEL_VOID(process_handle);
 
-    if (g_process_tracking_ref_debug && MAY_TRACE_LEVEL(DL_PROC_TRACKING))
-    {
-        TRACE(DL_PROC_TRACKING, "    %s temp_exec_identity", (exec_handle ? "set" : "clear"));
-    }
-
+    ec_hashtbl_write_lock(&g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
+    // This call dereferences the existing temp_exec_handle and replaces it. We need to atomically dref the old handle's
+    // elements and replace them, otherwise the exec_identity and it's parts can be dereferenced more than once.
     ec_process_exec_handle_clone(exec_handle, &ec_process_posix_identity(process_handle)->temp_exec_handle, context);
+    ec_hashtbl_write_unlock(&g_process_tracking_data.table, &ec_process_posix_identity(process_handle)->pt_key, context);
 }
 
 void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context)
@@ -303,7 +309,7 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
         // For process start events we hold a reference to the parent process
         //  (This forces an exit of the parent to be sent after the start of a child)
-        // For process exit events we hold a reference to the child preocess
+        // For process exit events we hold a reference to the child process
         //  (This forces the child's exit to be sent after the parent's exit)
         ec_event_set_process_data(
             event,

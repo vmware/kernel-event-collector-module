@@ -42,6 +42,7 @@ bool     g_enable_hook_tracking __read_mostly;
 bool     g_enable_mem_cache_tracking __read_mostly;
 bool     g_process_tracking_ref_debug __read_mostly;
 bool     g_path_cache_ref_debug __read_mostly;
+bool     g_panic_on_error __read_mostly;
 
 CB_DRIVER_CONFIG g_driver_config  __read_mostly = {
     .processes =            ALL_FORKS_AND_EXITS,
@@ -59,6 +60,8 @@ module_param_named(enable_hook_tracking, g_enable_hook_tracking, bool, S_IRUSR |
 module_param_named(enable_mem_cache_tracking, g_enable_mem_cache_tracking, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(process_tracking_ref_debug, g_process_tracking_ref_debug, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 module_param_named(path_cache_ref_debug, g_path_cache_ref_debug, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+module_param_named(panic_on_error, g_panic_on_error, bool, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
 // Store string param to later on convert to unsigned long long
 module_param_string(enableHooks, enableHooksStr, HOOK_MASK_LEN,
                     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
