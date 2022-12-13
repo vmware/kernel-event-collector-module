@@ -448,15 +448,56 @@ void ec_fops_comm_wake_up_reader(ProcessContext *context)
 ssize_t ec_device_read(struct file *f,  char __user *ubuf, size_t count, loff_t *offset)
 {
     ssize_t xcode = -ENOMEM;
-
+    u32 total_copied = 0;
+    size_t total_bytes_copied = 0;
     DECLARE_NON_ATOMIC_CONTEXT(context, ec_getpid(current));
 
     TRACE(DL_COMMS, "%s: start read", __func__);
 
     BEGIN_MODULE_DISABLE_CHECK_IF_DISABLED_GOTO(&context, CATCH_DEFAULT);
 
-    // When userspace is ready to handle multiple events throw this into a loop
+    // Perform once copy to user outside loop first to more easily
+    // propagate correct errno value.
     xcode = __ec_copy_cbevent_to_user(ubuf, count, &context);
+
+    // Multi-copy logic begins here.
+    TRY(xcode > 0);
+    count -= xcode;
+    ubuf += xcode;
+    total_copied += 1;
+    total_bytes_copied += xcode;
+
+    while (total_copied < MAX_BULK_COPY_EVENTS)
+    {
+        // Prevent running on CPU for too long and
+        // soft lockups.
+        cond_resched();
+
+        // Stop copying if we have an incoming signal
+        if (signal_pending(current))
+        {
+            break;
+        }
+
+        // Check if reader still connected
+        if (!ec_is_reader_connected())
+        {
+            break;
+        }
+
+        // should account for room available in buffer
+        xcode = __ec_copy_cbevent_to_user(ubuf, count, &context);
+        if (xcode <= 0)
+        {
+            // Add detailed logging here for unit tests
+            break;
+        }
+        count -= xcode;
+        ubuf += xcode;
+        total_copied += 1;
+        total_bytes_copied += xcode;
+    }
+    xcode = total_bytes_copied;
 
 CATCH_DEFAULT:
     FINISH_MODULE_DISABLE_CHECK(&context);
@@ -467,10 +508,11 @@ CATCH_DEFAULT:
 int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessContext *context)
 {
     CB_EVENT_NODE *eventNode = NULL;
-    int xcode = -ENOMEM;
+    int xcode = -EFAULT;
 
-    TRY_STEP_MSG(UNLOCKED, count >= sizeof(struct CB_EVENT_UM),
-            DL_ERROR, "%s count too small: %zu, %zu", __func__, count, sizeof(struct CB_EVENT_UM));
+    // Handle the case we are near the end of the buffer
+    // after copying multiple events to userspace.
+    TRY_STEP(UNLOCKED, count >= sizeof(struct CB_EVENT_UM));
 
     // We need to lock here to protect access between the event reader thread and user action to clear the queue
     //  1) Events are inserted into the a lockless list, so they are not affected by this lock.
@@ -488,13 +530,10 @@ int ec_obtain_next_cbevent(struct CB_EVENT **cb_event, size_t count, ProcessCont
         // when we know for sure we can send this event
         *cb_event = &eventNode->data;
         xcode = eventNode->payload;
-    } else if (eventNode)
-    {
-        TRACE(DL_ERROR, "Invalid payload size: %d", eventNode->payload);
-    }
 
-    list_del_init(&eventNode->listEntry);
-    percpu_counter_dec(&tx_ready);
+        list_del_init(&eventNode->listEntry);
+        percpu_counter_dec(&tx_ready);
+    }
 
 CATCH_DEFAULT:
     ec_write_unlock(&s_fops_data.lock, context);
