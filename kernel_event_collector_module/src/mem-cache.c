@@ -192,6 +192,8 @@ void *ec_mem_cache_alloc(CB_MEM_CACHE *cache, ProcessContext *context)
             }
 
             value = __ec_get_valuep(cache_buffer);
+        } else {
+            TRACE(DL_ERROR, "kmem_cache_alloc failed, mode %s, pid: %d", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL", context->pid);
         }
     }
 
@@ -210,8 +212,8 @@ void ec_mem_cache_disown(void *value, ProcessContext *context)
             ec_mem_cache_put(value, context);
         } else
         {
-            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to disown memory: %p", value);
-            dump_stack();
+            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to disown memory: %p %x", value, cache_buffer->magic);
+            CB_BUG();
         }
     }
 }
@@ -262,8 +264,8 @@ void __ec_mem_cache_release(cache_buffer_t *cache_buffer, ProcessContext *contex
             percpu_counter_dec(&cache->allocated_count);
         } else
         {
-            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to free memory: %p", cache_buffer);
-            dump_stack();
+            TRACE(DL_ERROR, "Cache entry magic does not match.  Failed to free memory: %p %x", cache_buffer, cache_buffer->magic);
+            CB_BUG();
         }
     }
 }
@@ -279,8 +281,8 @@ void ec_mem_cache_get(void *value, ProcessContext *context)
             atomic64_inc(&cache_buffer->refcnt);
         } else
         {
-            TRACE(DL_ERROR, "%s: Cache entry magic does not match.  Failed to free memory: %p", __func__, value);
-            dump_stack();
+            TRACE(DL_ERROR, "%s: Cache entry magic does not match.  Failed to get memory: %p %x", __func__, value, cache_buffer->magic);
+            CB_BUG();
         }
     }
 }
@@ -298,8 +300,8 @@ void ec_mem_cache_put(void *value, ProcessContext *context)
             });
         } else
         {
-            TRACE(DL_ERROR, "%s: Cache entry magic does not match.  Failed to free memory: %p", __func__, value);
-            dump_stack();
+            TRACE(DL_ERROR, "%s: Cache entry magic does not match.  Failed to put memory: %p %x", __func__, value, cache_buffer->magic);
+            CB_BUG();
         }
     }
 }

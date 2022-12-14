@@ -61,7 +61,7 @@ extern bool     g_path_cache_ref_debug;
 #define MSG_QUEUE_SIZE  8192
 #define DEFAULT_QUEUE_SIZE  (MSG_QUEUE_SIZE * 3)
 
-
+#define MAX_BULK_COPY_EVENTS 64
 
 //-------------------------------------------------
 

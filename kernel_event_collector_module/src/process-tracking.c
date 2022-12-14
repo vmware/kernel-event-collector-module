@@ -356,7 +356,7 @@ ProcessHandle *ec_process_tracking_update_process(
         was_last_active_process = true;
 
         // Since the last active process is exiting we want to disown the exec identity.
-        ec_process_tracking_disown_exec_identity(ec_exec_identity(&parent_exec_handle), context);
+        ec_process_tracking_disown_exec_identity(process_handle, context);
     });
 
     // Allocate a shared data_object for the new process
@@ -507,7 +507,7 @@ bool ec_process_tracking_report_exit(pid_t pid, ProcessContext *context)
         was_last_active_process = true;
 
         // Since the last active process is exiting we want to disown the exec identity.
-        ec_process_tracking_disown_exec_identity(ec_process_exec_identity(process_handle), context);
+        ec_process_tracking_disown_exec_identity(process_handle, context);
     });
 
     ec_event_send_exit(process_handle, was_last_active_process, context);
@@ -641,7 +641,9 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
                 // Process Tracking is shutting down, so we need to decrement the active_process_count and disown the
                 //  exec_identity when this is the last process.
                 IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->active_process_count, {
-                    ec_process_tracking_disown_exec_identity(exec_identity, context);
+                    // We're being called with the hashtbl locked
+                    ec_mem_cache_disown(exec_identity, context);
+                    posix_identity->exec_identity = NULL;
                 });
             }
 
