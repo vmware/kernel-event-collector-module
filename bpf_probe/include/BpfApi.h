@@ -65,6 +65,7 @@ namespace bpf_probe {
         using EventCallbackFn = std::function<void(bpf_probe::Data data)>;
 
         static const uint64_t POLL_TIMEOUT_MS = 300;
+        static constexpr int  MAX_PERCPU_BUFFER_SIZE = (1024 * 4096);
 
         enum class ProbeType
         {
