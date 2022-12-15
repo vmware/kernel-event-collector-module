@@ -403,6 +403,10 @@ bool BpfApi::AutoAttach()
 
 bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 {
+    // Convert per CPU buffer bytes to approprite number of pages.
+    // This is to correctly handle aarch64. https://docs.kernel.org/arm64/memory.html
+    int perCPUPageCount = MAX_PERCPU_BUFFER_SIZE / getpagesize();
+
     if (m_skel)
     {
         // Get events map
@@ -421,30 +425,6 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
             return false;
         }
 
-        // {
-        //     int key = -1;
-        //     int err = bpf_get_first_key(map_fd, &key, sizeof(key));
-        //     if (err < 0)
-        //     {
-        //         err = -errno;
-        //         fprintf(stderr, "bpf_get_first_key(%d) = %d", map_fd, errno);
-        //     }
-        //     else
-        //     {
-        //         while (err >= 0)
-        //         {
-        //             fprintf(stderr, "map_fd:%d key:%d\n", map_fd, key);
-
-        //             int next_key = -1;
-        //             err = bpf_get_next_key(map_fd, &key, &next_key);
-        //             if (err >= 0)
-        //             {
-        //                 key = next_key;
-        //             }
-        //         }
-        //     }
-        // }
-
         for (auto cpu : m_ncpu)
         {
             // perf_reader is opaque
@@ -455,7 +435,7 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
                 static_cast<void*>(this),
                 -1,
                 cpu,
-                1024
+                perCPUPageCount
             ));
 
             if (perf_reader)
@@ -505,10 +485,12 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 
     m_eventCallbackFn = std::move(callback);
 
-    // Trying 1024 pages so we don't drop so many events, no dropped
-    // even callback for now.
-    auto result = m_BPF->open_perf_buffer(
-            "events", on_perf_submit, on_perf_peek, nullptr, static_cast<void*>(this), 1024);
+    auto result = m_BPF->open_perf_buffer("events",
+                                          on_perf_submit,
+                                          on_perf_peek,
+                                          nullptr,
+                                          static_cast<void*>(this),
+                                          perCPUPageCount);
 
     if (!result.ok())
     {
