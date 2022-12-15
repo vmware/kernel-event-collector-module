@@ -30,6 +30,7 @@
 #include <uapi/linux/ptrace.h>
 #include <uapi/linux/stat.h>
 #include <uapi/linux/udp.h>
+#include <uapi/linux/magic.h>
 
 #include <linux/binfmts.h>
 #include <linux/dcache.h>
