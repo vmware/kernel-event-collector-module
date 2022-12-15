@@ -518,6 +518,7 @@ static __always_inline size_t blobify_cgroup_path(char *blob)
         barrier_var(length);
         total_len += length;
         blob += length;
+
         cgroup_node = BPF_CORE_READ(cgroup_node, parent);
         if (!cgroup_node) {
             goto out;
@@ -1127,10 +1128,8 @@ out:
 SEC("kprobe/wake_up_new_task")
 int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
 {
-    struct file_path_data_x *file_data_x = NULL;
-    char *blob_pos = NULL;
-    uint32_t payload = offsetof(typeof(*file_data_x), blob);
-
+    struct file_data data = {};
+    struct file_data *file_data = &data;
     if (!task) {
         goto out;
     }
@@ -1139,29 +1138,17 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         goto out;
     }
 
-    barrier_var(file_data_x);
-    file_data_x = __current_blob();
-    if (!file_data_x) {
-        goto out;
-    }
+    __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA,
+                            REPORT_FLAGS_COMPAT, &file_data->header, task);
 
-    barrier_var(blob_pos);
-    barrier_var(payload);
-    blob_pos = file_data_x->blob;
-
-    __init_header_dynamic(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &file_data_x->header);
-    file_data_x->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
-
+    file_data->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
     if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm) && BPF_CORE_READ(task, mm, exe_file)) {
-        file_data_x->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
-        file_data_x->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
+        file_data->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
+        file_data->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
     }
-    //blob_pos = blobify_cgroup_path(&file_data_x->cgroup_blob, blob_pos, &payload);
 
-    file_data_x->header.payload = payload;
-    if (payload <= MAX_BLOB_EVENT_SIZE) {
-        send_event(ctx, file_data_x, payload);
-    }
+    send_event(ctx, file_data, sizeof(*file_data));
+
 out:
     return 0;
 }
@@ -1234,10 +1221,8 @@ int BPF_KPROBE(on_do_exit, long code)
     struct data_x *data_x = NULL;
     char *blob_pos = NULL;
     uint32_t payload = offsetof(typeof(*data_x), blob);
+    size_t blob_size;
 
-    barrier_var(data_x);
-    barrier_var(blob_pos);
-    barrier_var(payload);
 
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task) {
@@ -1255,7 +1240,8 @@ int BPF_KPROBE(on_do_exit, long code)
     blob_pos = data_x->blob;
 
     __init_header_dynamic(EVENT_PROCESS_EXIT, PP_NO_EXTRA_DATA, &data_x->header);
-    //blob_pos = blobify_cgroup_path(&data_x->cgroup_blob, blob_pos, &payload);
+    blob_size = blobify_cgroup_path(blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->cgroup_blob, &payload, blob_pos);
     data_x->header.payload = payload;
 
     if (payload <= MAX_BLOB_EVENT_SIZE) {
