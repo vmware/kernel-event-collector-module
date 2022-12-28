@@ -1062,7 +1062,7 @@ out:
 int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 {
 	struct inode *pinode = NULL;
-	struct file_data data = {};
+	struct file_data_w_cgroup data = {};
 	if (!task) {
 		goto out;
 	}
@@ -1071,7 +1071,7 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		goto out;
 	}
 
-	__init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA, &data.header, task);
+	__init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA_W_CGROUP, &data.header, task);
 
 	data.header.uid = __kuid_val(task->real_parent->cred->uid); // override
 
@@ -1092,7 +1092,13 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
 
-	send_event(ctx, &data, sizeof(struct file_data));
+    u8 cgroup_length = __set_cgroup_id(data.cgroup);
+    if (cgroup_length > 0) {
+        send_event(ctx, &data, sizeof(struct file_data_w_cgroup));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct file_data));
+    }
 
 out:
 	return 0;

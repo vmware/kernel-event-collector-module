@@ -253,8 +253,13 @@ void ProbeEventCallback(Data data)
 
         if (data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP)
         {
-            auto pdata = reinterpret_cast<const data_w_cgroup*>(data.data);
-            output << " >>>>> [" << pdata->cgroup << "]";
+            if (data.data->header.type == EVENT_PROCESS_CLONE){
+                auto pdata = reinterpret_cast<const file_data_w_cgroup*>(data.data);
+                output << " >>>>> [" << pdata->cgroup << "]";
+            } else {
+                auto pdata = reinterpret_cast<const data_w_cgroup*>(data.data);
+                output << " >>>>> [" << pdata->cgroup << "]";
+            }
         }
 
         if (data.data->header.state == PP_FINALIZED || data.data->header.state == PP_NO_EXTRA_DATA || data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP) {

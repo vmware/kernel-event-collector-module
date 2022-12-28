@@ -95,7 +95,17 @@ struct file_data {
     uint64_t fs_magic;
 };
 
+struct file_data_w_cgroup {
+    struct data_header header;
 
+    uint64_t inode;
+    uint32_t device;
+    uint64_t flags; // MMAP only
+    uint64_t prot;  // MMAP only
+    uint64_t fs_magic;
+
+    char cgroup[MAX_FNAME];
+};
 struct container_data {
     struct data_header header;
 
