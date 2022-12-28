@@ -360,6 +360,37 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 #define PATH_MSG_SIZE(DATA) (size_t)(sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
 #endif
 
+
+static inline u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task) {
+        return 0;
+    }
+    struct kernfs_node* cgroup_node = (struct kernfs_node *)(task->cgroups->subsys[cpuset_cgrp_id]->cgroup->kn);
+    if (!cgroup_node) {
+        return 0;
+    }
+
+    size_t length = cb_bpf_probe_read_str(cgroup_id, MAX_FNAME, cgroup_node->name);
+    if (length == 0) {
+        return 0;
+    }
+    return length;
+}
+
+static bool maybe_send_cgroup(struct pt_regs *ctx, struct path_data *data) {
+    u8 cgroup_length = __set_cgroup_id(data->fname);
+    if (cgroup_length > 0) {
+        data->header.state = PP_CGROUP;
+        data->size = cgroup_length;
+        send_event(ctx, data, PATH_MSG_SIZE(data));
+        return true;
+    } else {
+        return false;
+    }
+}
+
+
 static u8 __write_fname(struct path_data *data, const void *ptr)
 {
 	if (!ptr)
@@ -422,6 +453,8 @@ static void submit_all_args(struct pt_regs *ctx,
     __submit_arg(ctx, (void *)ellipsis, data);
 
 out:
+    maybe_send_cgroup(ctx, data);
+
     data->header.state = PP_FINALIZED;
     send_event(ctx, (struct data*)data, sizeof(struct data));
 
@@ -478,6 +511,8 @@ static void submit_all_args(struct pt_regs *ctx,
 	__submit_arg(ctx, (void *)ellipsis, data);
 
 out:
+    maybe_send_cgroup(ctx, data);
+
 	data->header.state = PP_FINALIZED;
 	send_event(ctx, (struct data*)data, sizeof(struct data));
 
@@ -597,6 +632,8 @@ static inline int __do_file_path(struct pt_regs *ctx,
 		}
 	}
 
+    maybe_send_cgroup(ctx, data);
+
 	data->header.state = PP_FINALIZED;
 	return 0;
 }
@@ -667,6 +704,8 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		data->header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
+
+    maybe_send_cgroup(ctx, data);
 
 	data->header.state = PP_FINALIZED;
 	return 0;

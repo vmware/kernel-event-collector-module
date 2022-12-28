@@ -22,6 +22,7 @@ enum PP
     PP_FINALIZED,
     PP_APPEND,
     PP_DEBUG,
+    PP_CGROUP,
 };
 
 enum event_type
