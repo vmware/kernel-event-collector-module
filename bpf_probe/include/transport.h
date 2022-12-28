@@ -85,6 +85,14 @@ struct exec_data
     int retval;
 };
 
+struct exec_data_w_cgroup
+{
+    struct data_header header;
+
+    int retval;
+    char cgroup[MAX_FNAME];
+};
+
 struct file_data {
     struct data_header header;
 

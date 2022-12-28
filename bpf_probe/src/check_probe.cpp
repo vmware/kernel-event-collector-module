@@ -256,6 +256,9 @@ void ProbeEventCallback(Data data)
             if (data.data->header.type == EVENT_PROCESS_CLONE){
                 auto pdata = reinterpret_cast<const file_data_w_cgroup*>(data.data);
                 output << " >>>>> [" << pdata->cgroup << "]";
+            } else if (data.data->header.type == EVENT_PROCESS_EXEC_RESULT) {
+                auto pdata = reinterpret_cast<const exec_data_w_cgroup*>(data.data);
+                output << " >>>>> [" << pdata->cgroup << "]";
             } else {
                 auto pdata = reinterpret_cast<const data_w_cgroup*>(data.data);
                 output << " >>>>> [" << pdata->cgroup << "]";

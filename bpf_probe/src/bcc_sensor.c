@@ -742,10 +742,18 @@ int syscall__on_sys_execve(struct pt_regs *ctx, const char __user *filename,
 //Note that this can be called more than one from the same pid
 int after_sys_execve(struct pt_regs *ctx)
 {
-	struct exec_data data = {};
+	struct exec_data_w_cgroup data = {};
 
-	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
+	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
 	data.retval = PT_REGS_RC(ctx);
+
+    u8 cgroup_length = __set_cgroup_id(data.cgroup);
+    if (cgroup_length > 0) {
+        send_event(ctx, &data, sizeof(struct exec_data_w_cgroup));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct exec_data));
+    }
 
 	send_event(ctx, &data, sizeof(struct exec_data));
 
