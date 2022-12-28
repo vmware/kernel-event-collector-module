@@ -169,6 +169,7 @@ namespace bpf_probe {
             case PP_APPEND: str = "APPEND"; break;
             case PP_DEBUG: str = "DEBUG"; break;
             case PP_CGROUP: str = "CGROUP"; break;
+            case PP_NO_EXTRA_DATA_W_CGROUP: str = "NO_EXTRA_DATA_W_CGROUP"; break;
             default: break;
             }// LCOV_EXCL_END
             return str;

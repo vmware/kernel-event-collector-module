@@ -361,7 +361,7 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 #endif
 
 
-static inline u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
+static u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task) {
         return 0;
@@ -1231,7 +1231,7 @@ static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 
 int on_do_exit(struct pt_regs *ctx, long code)
 {
-	struct data data = {};
+	struct data_w_cgroup data = {};
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 
 	if (!task) {
@@ -1241,9 +1241,14 @@ int on_do_exit(struct pt_regs *ctx, long code)
 		goto out;
 	}
 
-	__init_header(EVENT_PROCESS_EXIT, PP_NO_EXTRA_DATA, &data.header);
-
-	send_event(ctx, &data, sizeof(struct data));
+	__init_header(EVENT_PROCESS_EXIT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
+    u8 cgroup_length = __set_cgroup_id(data.cgroup);
+    if (cgroup_length > 0) {
+        send_event(ctx, &data, sizeof(struct data_w_cgroup));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct data));
+    }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 	last_parent.delete(&data.header.pid);

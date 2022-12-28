@@ -23,6 +23,7 @@ enum PP
     PP_APPEND,
     PP_DEBUG,
     PP_CGROUP,
+    PP_NO_EXTRA_DATA_W_CGROUP,
 };
 
 enum event_type
@@ -72,6 +73,11 @@ struct data {
     struct data_header header;
 };
 
+struct data_w_cgroup {
+    struct data_header header;
+    char cgroup[MAX_FNAME];
+};
+
 struct exec_data
 {
     struct data_header header;
@@ -88,6 +94,7 @@ struct file_data {
     uint64_t prot;  // MMAP only
     uint64_t fs_magic;
 };
+
 
 struct container_data {
     struct data_header header;
