@@ -223,7 +223,9 @@ void ProbeEventCallback(Data data)
     {
         std::stringstream output;
 
-        if (data.data->header.state == PP_ENTRY_POINT || data.data->header.state == PP_NO_EXTRA_DATA || data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP) {
+        bool isSingleMessageEvent = (data.data->header.state == PP_NO_EXTRA_DATA || data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP);
+
+        if (data.data->header.state == PP_ENTRY_POINT || isSingleMessageEvent) {
             output << "\n+++++++++++++++++++++ " << BpfApi::TypeToString(data.data->header.type) << " ++++++++++++++++++++++\n";
         }
         output << data.data->header.event_time << " "
@@ -259,13 +261,16 @@ void ProbeEventCallback(Data data)
             } else if (data.data->header.type == EVENT_PROCESS_EXEC_RESULT) {
                 auto pdata = reinterpret_cast<const exec_data_w_cgroup*>(data.data);
                 output << " >>>>> [" << pdata->cgroup << "]";
-            } else {
+            } else if(data.data->header.type == EVENT_NET_CONNECT_ACCEPT || data.data->header.type == EVENT_NET_CONNECT_PRE) {
+                auto pdata = reinterpret_cast<const net_data_w_cgroup*>(data.data);
+                output << " >>>>> [" << pdata->cgroup << "]";
+            }else {
                 auto pdata = reinterpret_cast<const data_w_cgroup*>(data.data);
                 output << " >>>>> [" << pdata->cgroup << "]";
             }
         }
 
-        if (data.data->header.state == PP_FINALIZED || data.data->header.state == PP_NO_EXTRA_DATA || data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP) {
+        if (data.data->header.state == PP_FINALIZED || isSingleMessageEvent) {
             output << "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
         }
 

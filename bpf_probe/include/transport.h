@@ -193,6 +193,25 @@ struct net_data {
     uint16_t remote_port;
 };
 
+struct net_data_w_cgroup {
+    struct data_header header;
+
+    uint16_t ipver;
+    uint16_t protocol;
+    union {
+        uint32_t local_addr;
+        uint32_t local_addr6[4];
+    };
+    uint16_t local_port;
+    union {
+        uint32_t remote_addr;
+        uint32_t remote_addr6[4];
+    };
+    uint16_t remote_port;
+
+    char cgroup[MAX_FNAME];
+};
+
 #ifdef __cplusplus
 static const int DNS_SEGMENT_LEN = 40;
 #else

@@ -1319,11 +1319,11 @@ static int trace_connect_return(struct pt_regs *ctx)
 		return 0;
 	}
 
-	struct net_data data = {};
+	struct net_data_w_cgroup data = {};
 	struct sock *skp = *skpp;
 	u16 dport = skp->__sk_common.skc_dport;
 
-	__init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA, &data.header);
+	__init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
 	data.protocol = IPPROTO_TCP;
 	data.remote_port = dport;
 
@@ -1337,7 +1337,6 @@ static int trace_connect_return(struct pt_regs *ctx)
 		data.remote_addr =
 			skp->__sk_common.skc_daddr;
 
-		send_event(ctx, &data, sizeof(data));
 	} else if (check_family(skp, AF_INET6)) {
 		data.ipver = AF_INET6;
 		bpf_probe_read(
@@ -1347,8 +1346,14 @@ static int trace_connect_return(struct pt_regs *ctx)
 				   sizeof(data.remote_addr6),
 				   skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
-		send_event(ctx, &data, sizeof(data));
 	}
+    u8 cgroup_length = __set_cgroup_id(data.cgroup);
+    if (cgroup_length > 0) {
+        send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct net_data));
+    }
 
 	currsock.delete(&id);
 	return 0;
@@ -1472,9 +1477,9 @@ int trace_accept_return(struct pt_regs *ctx)
 		return 0;
 	}
 
-	struct net_data data = {};
+	struct net_data_w_cgroup data = {};
 
-	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_NO_EXTRA_DATA, &data.header);
+	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
 	data.protocol = IPPROTO_TCP;
 
 	data.ipver = newsk->__sk_common.skc_family;
@@ -1492,7 +1497,13 @@ int trace_accept_return(struct pt_regs *ctx)
 
 		if (data.local_addr != 0 && data.remote_addr != 0 &&
 			data.local_port != 0 && data.remote_port != 0) {
-			send_event(ctx, &data, sizeof(data));
+            u8 cgroup_length = __set_cgroup_id(data.cgroup);
+            if (cgroup_length > 0) {
+                send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+            } else {
+                data.header.type = PP_NO_EXTRA_DATA;
+                send_event(ctx, &data, sizeof(struct net_data));
+            }
 		}
 	} else if (check_family(newsk, AF_INET6)) {
 		bpf_probe_read(
@@ -1502,7 +1513,13 @@ int trace_accept_return(struct pt_regs *ctx)
 				   sizeof(data.remote_addr6),
 				   newsk->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
-		send_event(ctx, &data, sizeof(data));
+        u8 cgroup_length = __set_cgroup_id(data.cgroup);
+        if (cgroup_length > 0) {
+            send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+        } else {
+            data.header.type = PP_NO_EXTRA_DATA;
+            send_event(ctx, &data, sizeof(struct net_data));
+        }
 	}
 	return 0;
 }
