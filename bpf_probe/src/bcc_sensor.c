@@ -1634,8 +1634,8 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         return 0;
     }
 
-    struct net_data data = {};
-    __init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA, &data.header);
+    struct net_data_w_cgroup data = {};
+    __init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
     data.protocol = IPPROTO_UDP;
     // The remote addr could be in the msghdr::msg_name or on the sock
     bool addr_in_msghr = false;
@@ -1646,25 +1646,27 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 
     if (msgpp)
     {
-        struct msghdr msghdr;
+        void * 	msg_name;
+        int 	msg_namelen;
 
-        bpf_probe_read(&msghdr, sizeof(msghdr), *msgpp);
+        bpf_probe_read(&msg_name, sizeof(void *), &(*msgpp)->msg_name);
+        bpf_probe_read(&msg_namelen, sizeof(int), &(*msgpp)->msg_namelen);
 
-        if (msghdr.msg_name && msghdr.msg_namelen > 0)
+        if (msg_name && msg_namelen > 0)
         {
-            if (check_family(skp, AF_INET) && msghdr.msg_namelen >= sizeof(struct sockaddr_in))
+            if (check_family(skp, AF_INET) && msg_namelen >= sizeof(struct sockaddr_in))
             {
                 struct sockaddr_in addr_in;
-                bpf_probe_read(&addr_in, sizeof(addr_in), msghdr.msg_name);
+                bpf_probe_read(&addr_in, sizeof(addr_in), msg_name);
                 data.remote_port = addr_in.sin_port;
                 data.remote_addr = addr_in.sin_addr.s_addr;
 
                 addr_in_msghr = true;
             }
-            else if (check_family(skp, AF_INET6) && msghdr.msg_namelen >= sizeof(struct sockaddr_in6))
+            else if (check_family(skp, AF_INET6) && msg_namelen >= sizeof(struct sockaddr_in6))
             {
                 struct sockaddr_in6 addr_in;
-                bpf_probe_read(&addr_in, sizeof(addr_in), msghdr.msg_name);
+                bpf_probe_read(&addr_in, sizeof(addr_in), msg_name);
                 data.remote_port = addr_in.sin6_port;
                 bpf_probe_read(
                     &data.remote_addr6, sizeof(data.remote_addr6),
@@ -1749,7 +1751,13 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         }
 #endif /* CACHE_UDP */
     }
-    send_event(ctx, &data, sizeof(data));
+    u8 cgroup_length = __set_cgroup_id(data.cgroup);
+    if (cgroup_length > 0) {
+        send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct net_data));
+    }
 
 out:
     currsock3.delete(&id);
