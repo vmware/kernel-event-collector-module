@@ -1594,6 +1594,13 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
                 break;
             }
         }
+
+        dns_data_w_cgroup cgroup_data = {};
+        __init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_CGROUP, &cgroup_data.header);
+        maybe_send_cgroup(ctx, &cgroup_data);
+
+        data.header.state = PP_FINALIZED;
+        send_event(ctx, &data, sizeof(struct dns_data));
     }
 
 	// Don't remove from bpf map currsock3

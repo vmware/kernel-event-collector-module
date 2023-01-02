@@ -224,6 +224,10 @@ struct dns_data {
     uint32_t name_len;
 };
 
+// same as path_data
+// separate name for clarity
+typedef struct path_data dns_data_w_cgroup;
+
 struct rename_data {
     struct data_header header;
 
