@@ -361,7 +361,7 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 #endif
 
 
-static u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
+static inline u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task) {
         return 0;
@@ -378,7 +378,7 @@ static u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
     return length;
 }
 
-static bool maybe_send_cgroup(struct pt_regs *ctx, struct path_data *data) {
+static inline bool maybe_send_cgroup(struct pt_regs *ctx, struct path_data *data) {
     u8 cgroup_length = __set_cgroup_id(data->fname);
     if (cgroup_length > 0) {
         data->header.state = PP_CGROUP;
@@ -1397,9 +1397,9 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 	void *hdr = (struct iphdr *)(skb->head + skb->network_header);
 	u32 hdr_len = skb->transport_header - skb->network_header;
 
-	struct net_data data = {};
+	struct net_data_w_cgroup data = {};
 
-	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_NO_EXTRA_DATA, &data.header);
+	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
 
 	data.protocol = IPPROTO_UDP;
 
@@ -1461,8 +1461,13 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 	} else {
 		return 0;
 	}
-
-	send_event(ctx, &data, sizeof(data));
+    u8 cgroup_length = __set_cgroup_id(data.cgroup);
+    if (cgroup_length > 0) {
+        send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct net_data));
+    }
 
 	return 0;
 }
