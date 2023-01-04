@@ -511,7 +511,7 @@ static void submit_all_args(struct pt_regs *ctx,
 	__submit_arg(ctx, (void *)ellipsis, data);
 
 out:
-    maybe_send_cgroup(ctx, data);
+	maybe_send_cgroup(ctx, data);
 
 	data->header.state = PP_FINALIZED;
 	send_event(ctx, (struct data*)data, sizeof(struct data));
@@ -632,7 +632,7 @@ static inline int __do_file_path(struct pt_regs *ctx,
 		}
 	}
 
-    maybe_send_cgroup(ctx, data);
+	maybe_send_cgroup(ctx, data);
 
 	data->header.state = PP_FINALIZED;
 	return 0;
@@ -747,13 +747,13 @@ int after_sys_execve(struct pt_regs *ctx)
 	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
 	data.retval = PT_REGS_RC(ctx);
 
-    u8 cgroup_length = __set_cgroup_id(data.cgroup);
-    if (cgroup_length > 0) {
-        send_event(ctx, &data, sizeof(struct exec_data_w_cgroup));
-    } else {
-        data.header.type = PP_NO_EXTRA_DATA;
-        send_event(ctx, &data, sizeof(struct exec_data));
-    }
+	u8 cgroup_length = __set_cgroup_id(data.cgroup);
+	if (cgroup_length > 0) {
+		send_event(ctx, &data, sizeof(struct exec_data_w_cgroup));
+	} else {
+		data.header.type = PP_NO_EXTRA_DATA;
+		send_event(ctx, &data, sizeof(struct exec_data));
+	}
 
 	send_event(ctx, &data, sizeof(struct exec_data));
 
@@ -1100,13 +1100,13 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
 
-    u8 cgroup_length = __set_cgroup_id(data.cgroup);
-    if (cgroup_length > 0) {
-        send_event(ctx, &data, sizeof(struct file_data_w_cgroup));
-    } else {
-        data.header.type = PP_NO_EXTRA_DATA;
-        send_event(ctx, &data, sizeof(struct file_data));
-    }
+	u8 cgroup_length = __set_cgroup_id(data.cgroup);
+	if (cgroup_length > 0) {
+		send_event(ctx, &data, sizeof(struct file_data_w_cgroup));
+	} else {
+		data.header.type = PP_NO_EXTRA_DATA;
+		send_event(ctx, &data, sizeof(struct file_data));
+	}
 
 out:
 	return 0;
@@ -1256,13 +1256,13 @@ int on_do_exit(struct pt_regs *ctx, long code)
 	}
 
 	__init_header(EVENT_PROCESS_EXIT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
-    u8 cgroup_length = __set_cgroup_id(data.cgroup);
-    if (cgroup_length > 0) {
-        send_event(ctx, &data, sizeof(struct data_w_cgroup));
-    } else {
-        data.header.type = PP_NO_EXTRA_DATA;
-        send_event(ctx, &data, sizeof(struct data));
-    }
+	u8 cgroup_length = __set_cgroup_id(data.cgroup);
+	if (cgroup_length > 0) {
+		send_event(ctx, &data, sizeof(struct data_w_cgroup));
+	} else {
+		data.header.type = PP_NO_EXTRA_DATA;
+		send_event(ctx, &data, sizeof(struct data));
+	}
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 	last_parent.delete(&data.header.pid);
@@ -1347,13 +1347,13 @@ static int trace_connect_return(struct pt_regs *ctx)
 				   skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
 	}
-    u8 cgroup_length = __set_cgroup_id(data.cgroup);
-    if (cgroup_length > 0) {
-        send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-    } else {
-        data.header.type = PP_NO_EXTRA_DATA;
-        send_event(ctx, &data, sizeof(struct net_data));
-    }
+	u8 cgroup_length = __set_cgroup_id(data.cgroup);
+	if (cgroup_length > 0) {
+		send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+	} else {
+		data.header.type = PP_NO_EXTRA_DATA;
+		send_event(ctx, &data, sizeof(struct net_data));
+	}
 
 	currsock.delete(&id);
 	return 0;
@@ -1461,13 +1461,13 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 	} else {
 		return 0;
 	}
-    u8 cgroup_length = __set_cgroup_id(data.cgroup);
-    if (cgroup_length > 0) {
-        send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-    } else {
-        data.header.type = PP_NO_EXTRA_DATA;
-        send_event(ctx, &data, sizeof(struct net_data));
-    }
+	u8 cgroup_length = __set_cgroup_id(data.cgroup);
+	if (cgroup_length > 0) {
+		send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+	} else {
+		data.header.type = PP_NO_EXTRA_DATA;
+		send_event(ctx, &data, sizeof(struct net_data));
+	}
 
 	return 0;
 }
@@ -1502,13 +1502,13 @@ int trace_accept_return(struct pt_regs *ctx)
 
 		if (data.local_addr != 0 && data.remote_addr != 0 &&
 			data.local_port != 0 && data.remote_port != 0) {
-            u8 cgroup_length = __set_cgroup_id(data.cgroup);
-            if (cgroup_length > 0) {
-                send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-            } else {
-                data.header.type = PP_NO_EXTRA_DATA;
-                send_event(ctx, &data, sizeof(struct net_data));
-            }
+			u8 cgroup_length = __set_cgroup_id(data.cgroup);
+			if (cgroup_length > 0) {
+				send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+			} else {
+				data.header.type = PP_NO_EXTRA_DATA;
+				send_event(ctx, &data, sizeof(struct net_data));
+			}
 		}
 	} else if (check_family(newsk, AF_INET6)) {
 		bpf_probe_read(
@@ -1518,13 +1518,13 @@ int trace_accept_return(struct pt_regs *ctx)
 				   sizeof(data.remote_addr6),
 				   newsk->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
-        u8 cgroup_length = __set_cgroup_id(data.cgroup);
-        if (cgroup_length > 0) {
-            send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-        } else {
-            data.header.type = PP_NO_EXTRA_DATA;
-            send_event(ctx, &data, sizeof(struct net_data));
-        }
+		u8 cgroup_length = __set_cgroup_id(data.cgroup);
+		if (cgroup_length > 0) {
+			send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+		} else {
+			data.header.type = PP_NO_EXTRA_DATA;
+			send_event(ctx, &data, sizeof(struct net_data));
+		}
 	}
 	return 0;
 }
