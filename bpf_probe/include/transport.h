@@ -131,7 +131,8 @@ struct path_data {
 #define MAX_FILE_PATH_BLOB_SIZE (MAX_FILE_BLOB_SIZE + MAX_CGROUP_BLOB_SIZE)
 #define MAX_RENAME_BLOB_SIZE ((MAX_FILE_BLOB_SIZE * 2) + MAX_CGROUP_BLOB_SIZE)
 
-#define MAX_DNS_BLOB_SIZE 4096
+#define _MAX_DNS_BLOB_SIZE 4096
+#define MAX_DNS_BLOB_SIZE (_MAX_DNS_BLOB_SIZE + MAX_CGROUP_BLOB_SIZE)
 
 // Just let it use the largest blob
 #define BLOB_OFFSET(data, blob_name) ((char *)data + data->blob_name.offset)
@@ -232,7 +233,14 @@ struct exec_arg_data {
 struct dns_data_x {
     struct data_header header;
     struct blob_ctx dns_blob;
+    struct blob_ctx cgroup_blob;
     char blob[MAX_DNS_BLOB_SIZE];
+};
+
+struct net_data_x {
+    struct net_data net_data;
+    struct blob_ctx cgroup_blob;
+    char blob[MAX_CGROUP_BLOB_SIZE];
 };
 
 // Union for the base data payloads
@@ -256,6 +264,8 @@ struct _file_event {
         struct rename_data _rename_data;
         struct data        _data;
         struct data_x      _data_x;
+        struct dns_data_x  _dns_data_x;
+        struct net_data_x  _net_data_x;
     };
 };
 
