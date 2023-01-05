@@ -712,51 +712,56 @@ static void submit_exec_arg_event(void *ctx, const char __user *const __user *ar
     }
 }
 
-SEC("kprobe/__x64_sys_execveat")
-int BPF_KPROBE_SYSCALL(syscall__on_sys_execveat, int fd,
-                 const char __user *filename,
-                 const char __user *const __user *argv,
-                 const char __user *const __user *envp, int flags)
+// Tracepoint of exec entry
+SEC("tracepoint/syscalls/sys_enter_execve")
+int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter* ctx)
 {
+    // ctx is trace_event struct
+    // /sys/kernel/debug/tracing/events/syscalls/sys_enter_execve/format
+    const char **argv = (const char **)(ctx->args[1]);
     submit_exec_arg_event(ctx, argv);
     return 0;
 }
 
-SEC("kprobe/__x64_sys_execve")
-int BPF_KPROBE_SYSCALL(syscall__on_sys_execve, const char __user *filename,
-               const char __user *const __user *argv,
-               const char __user *const __user *envp)
-{
-    submit_exec_arg_event(ctx, argv);
-    return 0;
-}
-
-//Note that this can be called more than one from the same pid
-SEC("kretprobe/__x64_sys_execve")
-int BPF_KPROBE(after_sys_execve)
+// Tracepoint of exec exit
+SEC("tracepoint/syscalls/sys_exit_execve")
+int tracepoint__syscalls__sys_exit_execve(struct trace_event_raw_sys_exit* ctx)
 {
     struct exec_data data = {};
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
-    data.retval = PT_REGS_RC_CORE(ctx);
+    data.retval = ctx->ret;
 
     send_event(ctx, &data, sizeof(struct exec_data));
 
     return 0;
 }
 
-SEC("kretprobe/__x64_sys_execveat")
-int BPF_KPROBE(after_sys_execveat)
+// Tracepoint of execveat entry
+SEC("tracepoint/syscalls/sys_enter_execveat")
+int tracepoint__syscalls__sys_enter_execveat(struct trace_event_raw_sys_enter* ctx)
+{
+    // ctx is trace_event struct
+    // /sys/kernel/debug/tracing/events/syscalls/sys_enter_execveat/format
+    const char **argv = (const char **)(ctx->args[2]);
+    submit_exec_arg_event(ctx, argv);
+    return 0;
+}
+
+// Tracepoint of execveat exit
+SEC("tracepoint/syscalls/sys_exit_execveat")
+int tracepoint__syscalls__sys_exit_execveat(struct trace_event_raw_sys_exit* ctx)
 {
     struct exec_data data = {};
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
-    data.retval = PT_REGS_RC_CORE(ctx);
+    data.retval = ctx->ret;
 
     send_event(ctx, &data, sizeof(struct exec_data));
 
     return 0;
 }
+
 
 static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inode)
 {
