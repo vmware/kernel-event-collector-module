@@ -1133,8 +1133,13 @@ out:
 SEC("kprobe/wake_up_new_task")
 int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
 {
-    struct file_data data = {};
-    struct file_data *file_data = &data;
+    struct file_path_data_x *data_x = __current_blob();
+    if (!data_x) {
+        goto out;
+    }
+    uint32_t payload = offsetof(typeof(*data_x), blob);
+    u16 blob_size;
+    char *blob_pos = data_x->blob;
     if (!task) {
         goto out;
     }
@@ -1144,15 +1149,21 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
     }
 
     __init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA,
-                            REPORT_FLAGS_COMPAT, &file_data->header, task);
+                            REPORT_FLAGS_DYNAMIC, &data_x->header, task);
 
-    file_data->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
+    data_x->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
     if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm) && BPF_CORE_READ(task, mm, exe_file)) {
-        file_data->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
-        file_data->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
+        data_x->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
+        data_x->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
     }
 
-    send_event(ctx, file_data, sizeof(*file_data));
+    blob_size = blobify_cgroup_path(blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->cgroup_blob, &payload, blob_pos);
+
+    data_x->header.payload = payload;
+    if (payload <= MAX_BLOB_EVENT_SIZE) {
+        send_event(ctx, data_x, payload);
+    }
 
 out:
     return 0;
@@ -1227,7 +1238,6 @@ int BPF_KPROBE(on_do_exit, long code)
     char *blob_pos = NULL;
     uint32_t payload = offsetof(typeof(*data_x), blob);
     size_t blob_size;
-
 
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task) {
