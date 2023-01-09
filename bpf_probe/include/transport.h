@@ -22,8 +22,7 @@ enum PP
     PP_FINALIZED,
     PP_APPEND,
     PP_DEBUG,
-    PP_CGROUP,
-    PP_NO_EXTRA_DATA_W_CGROUP,
+    PP_CGROUP_AND_FINALIZED,
 };
 
 enum event_type
@@ -73,24 +72,11 @@ struct data {
     struct data_header header;
 };
 
-struct data_w_cgroup {
-    struct data_header header;
-    char cgroup[MAX_FNAME];
-};
-
 struct exec_data
 {
     struct data_header header;
 
     int retval;
-};
-
-struct exec_data_w_cgroup
-{
-    struct data_header header;
-
-    int retval;
-    char cgroup[MAX_FNAME];
 };
 
 struct file_data {
@@ -103,17 +89,6 @@ struct file_data {
     uint64_t fs_magic;
 };
 
-struct file_data_w_cgroup {
-    struct data_header header;
-
-    uint64_t inode;
-    uint32_t device;
-    uint64_t flags; // MMAP only
-    uint64_t prot;  // MMAP only
-    uint64_t fs_magic;
-
-    char cgroup[MAX_FNAME];
-};
 struct container_data {
     struct data_header header;
 
@@ -130,6 +105,10 @@ struct path_data {
     char fname[MAX_FNAME];
 #endif
 };
+
+// same as path_data
+// separate name for clarity
+typedef struct path_data cgroup_data;
 
 #define MAXARG 30
 #define MAX_UCHAR_VAL 255
@@ -193,25 +172,6 @@ struct net_data {
     uint16_t remote_port;
 };
 
-struct net_data_w_cgroup {
-    struct data_header header;
-
-    uint16_t ipver;
-    uint16_t protocol;
-    union {
-        uint32_t local_addr;
-        uint32_t local_addr6[4];
-    };
-    uint16_t local_port;
-    union {
-        uint32_t remote_addr;
-        uint32_t remote_addr6[4];
-    };
-    uint16_t remote_port;
-
-    char cgroup[MAX_FNAME];
-};
-
 #ifdef __cplusplus
 static const int DNS_SEGMENT_LEN = 40;
 #else
@@ -224,9 +184,6 @@ struct dns_data {
     uint32_t name_len;
 };
 
-// same as path_data
-// separate name for clarity
-typedef struct path_data dns_data_w_cgroup;
 
 struct rename_data {
     struct data_header header;

@@ -223,11 +223,19 @@ void ProbeEventCallback(Data data)
     {
         std::stringstream output;
 
-        bool isSingleMessageEvent = (data.data->header.state == PP_NO_EXTRA_DATA || data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP);
+        bool isStartingMessage = (data.data->header.state == PP_ENTRY_POINT) || (data.data->header.state == PP_NO_EXTRA_DATA);
+        bool isEndingMessage = (data.data->header.state == PP_FINALIZED) ||
+                (data.data->header.state == PP_CGROUP_AND_FINALIZED) ||
+                (data.data->header.state == PP_NO_EXTRA_DATA);
+        bool hasPathData = (data.data->header.state == PP_PATH_COMPONENT) ||
+                (data.data->header.state == PP_ENTRY_POINT) ||
+                (data.data->header.state == PP_APPEND) ||
+                (data.data->header.state == PP_CGROUP_AND_FINALIZED);
 
-        if (data.data->header.state == PP_ENTRY_POINT || isSingleMessageEvent) {
+        if (isStartingMessage) {
             output << "\n+++++++++++++++++++++ " << BpfApi::TypeToString(data.data->header.type) << " ++++++++++++++++++++++\n";
         }
+
         output << data.data->header.event_time << " "
                << BpfApi::TypeToString(data.data->header.type) << "::"
                << BpfApi::StateToString(data.data->header.state) << " "
@@ -241,36 +249,13 @@ void ProbeEventCallback(Data data)
             output << " payload:" << data.data->header.payload;
         }
 
-        if (data.data->header.state == PP_PATH_COMPONENT || data.data->header.state == PP_ENTRY_POINT || data.data->header.state == PP_APPEND)
+        if (hasPathData)
         {
             auto pdata = reinterpret_cast<const path_data*>(data.data);
             output << " [" << pdata->fname << "]";
         }
 
-        if (data.data->header.state == PP_CGROUP)
-        {
-            auto pdata = reinterpret_cast<const path_data*>(data.data);
-            output << " >>>>> [" << pdata->fname << "]";
-        }
-
-        if (data.data->header.state == PP_NO_EXTRA_DATA_W_CGROUP)
-        {
-            if (data.data->header.type == EVENT_PROCESS_CLONE){
-                auto pdata = reinterpret_cast<const file_data_w_cgroup*>(data.data);
-                output << " >>>>> [" << pdata->cgroup << "]";
-            } else if (data.data->header.type == EVENT_PROCESS_EXEC_RESULT) {
-                auto pdata = reinterpret_cast<const exec_data_w_cgroup*>(data.data);
-                output << " >>>>> [" << pdata->cgroup << "]";
-            } else if(data.data->header.type == EVENT_NET_CONNECT_ACCEPT || data.data->header.type == EVENT_NET_CONNECT_PRE) {
-                auto pdata = reinterpret_cast<const net_data_w_cgroup*>(data.data);
-                output << " >>>>> [" << pdata->cgroup << "]";
-            }else {
-                auto pdata = reinterpret_cast<const data_w_cgroup*>(data.data);
-                output << " >>>>> [" << pdata->cgroup << "]";
-            }
-        }
-
-        if (data.data->header.state == PP_FINALIZED || isSingleMessageEvent) {
+        if (isEndingMessage) {
             output << "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
         }
 

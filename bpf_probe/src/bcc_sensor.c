@@ -378,11 +378,19 @@ static inline u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
     return length;
 }
 
-static inline bool maybe_send_cgroup(struct pt_regs *ctx, struct path_data *data) {
+static inline bool maybe_get_cgroup_data(cgroup_data *data) {
     u8 cgroup_length = __set_cgroup_id(data->fname);
     if (cgroup_length > 0) {
-        data->header.state = PP_CGROUP;
+        data->header.state = PP_CGROUP_AND_FINALIZED;
         data->size = cgroup_length;
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static inline bool maybe_send_cgroup(struct pt_regs *ctx, cgroup_data *data) {
+    if (maybe_get_cgroup_data(data)) {
         send_event(ctx, data, PATH_MSG_SIZE(data));
         return true;
     } else {
@@ -453,10 +461,10 @@ static void submit_all_args(struct pt_regs *ctx,
     __submit_arg(ctx, (void *)ellipsis, data);
 
 out:
-    maybe_send_cgroup(ctx, data);
-
-    data->header.state = PP_FINALIZED;
-    send_event(ctx, (struct data*)data, sizeof(struct data));
+    if (!maybe_send_cgroup(ctx, data)) {
+        data->header.state = PP_FINALIZED;
+        send_event(ctx, (struct data*)data, sizeof(struct data));
+    }
 
     return;
 }
@@ -511,10 +519,10 @@ static void submit_all_args(struct pt_regs *ctx,
 	__submit_arg(ctx, (void *)ellipsis, data);
 
 out:
-	maybe_send_cgroup(ctx, data);
-
-	data->header.state = PP_FINALIZED;
-	send_event(ctx, (struct data*)data, sizeof(struct data));
+    if (!maybe_send_cgroup(ctx, data)) {
+        data->header.state = PP_FINALIZED;
+        send_event(ctx, (struct data*)data, sizeof(struct data));
+    }
 
 	return;
 }
@@ -632,9 +640,11 @@ static inline int __do_file_path(struct pt_regs *ctx,
 		}
 	}
 
-	maybe_send_cgroup(ctx, data);
-
-	data->header.state = PP_FINALIZED;
+	bool sent_cgroup_and_finalized = maybe_send_cgroup(ctx, data);
+    if (!sent_cgroup_and_finalized) {
+        data->header.state = PP_FINALIZED;
+        send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+    }
 	return 0;
 }
 
@@ -705,9 +715,11 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
 
-    maybe_send_cgroup(ctx, data);
-
-	data->header.state = PP_FINALIZED;
+    bool sent_cgroup_and_finalized = maybe_send_cgroup(ctx, data);
+    if(!sent_cgroup_and_finalized) {
+        data->header.state = PP_FINALIZED;
+        send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+    }
 	return 0;
 }
 
@@ -742,14 +754,17 @@ int syscall__on_sys_execve(struct pt_regs *ctx, const char __user *filename,
 //Note that this can be called more than one from the same pid
 int after_sys_execve(struct pt_regs *ctx)
 {
-	struct exec_data_w_cgroup data = {};
+	struct exec_data data = {};
 
-	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
+	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_ENTRY_POINT, &data.header);
 	data.retval = PT_REGS_RC(ctx);
 
-	u8 cgroup_length = __set_cgroup_id(data.cgroup);
-	if (cgroup_length > 0) {
-		send_event(ctx, &data, sizeof(struct exec_data_w_cgroup));
+    cgroup_data cgroup_data = {};
+    bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+	if (has_cgroup_data) {
+		send_event(ctx, &data, sizeof(struct exec_data));
+        cgroup_data.header.type = data.header.type;
+        send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
 		data.header.type = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct exec_data));
@@ -850,7 +865,6 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 		send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
 		__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
-		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
 
 	file_write_cache.delete(&file_cache_key);
@@ -904,7 +918,6 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 
 	// submit file path event data
 	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
-	send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
 	return 0;
 }
@@ -977,8 +990,6 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 
 	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
 
-	send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
-
 out:
 	return 0;
 }
@@ -1001,7 +1012,6 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 
 			send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 			__do_dentry_path(ctx, dentry, PATH_DATA(data), FILE_DATA(data)->fs_magic);
-			send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 			return true;
 		}
 	}
@@ -1062,7 +1072,6 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
     send_event(ctx, RENAME_DATA(data), sizeof(struct rename_data));
 
     __do_dentry_path(ctx, new_dentry, PATH_DATA(data), RENAME_DATA(data)->fs_magic);
-    send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 out:
     return 0;
 }
@@ -1070,7 +1079,7 @@ out:
 int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 {
 	struct inode *pinode = NULL;
-	struct file_data_w_cgroup data = {};
+	struct file_data data = {};
 	if (!task) {
 		goto out;
 	}
@@ -1079,7 +1088,7 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		goto out;
 	}
 
-	__init_header_with_task(EVENT_PROCESS_CLONE, PP_NO_EXTRA_DATA_W_CGROUP, &data.header, task);
+	__init_header_with_task(EVENT_PROCESS_CLONE, PP_ENTRY_POINT, &data.header, task);
 
 	data.header.uid = __kuid_val(task->real_parent->cred->uid); // override
 
@@ -1100,13 +1109,16 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
 
-	u8 cgroup_length = __set_cgroup_id(data.cgroup);
-	if (cgroup_length > 0) {
-		send_event(ctx, &data, sizeof(struct file_data_w_cgroup));
-	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct file_data));
-	}
+    cgroup_data cgroup_data = {};
+    bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+    if (has_cgroup_data) {
+        send_event(ctx, &data, sizeof(struct file_data));
+        cgroup_data.header.type = data.header.type;;
+        send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct file_data));
+    }
 
 out:
 	return 0;
@@ -1187,10 +1199,43 @@ static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
 	return false;
 }
 
-static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
+static inline bool has_ip6_cache_by_flow(struct ip6_key *ip6_key, u8 flow)
 {
+	struct ip_entry *ip_entry = NULL;
+    u16 saved_port;
+
+	if (flow == FLOW_RX)
+	{
+        saved_port = ip6_key->remote_port;
+		ip6_key->remote_port = 0;
+	} else {
+        saved_port = ip6_key->local_port;
+		ip6_key->local_port = 0;
+	}
+
+	ip_entry = ip6_cache.lookup(ip6_key);
+	if (!ip_entry) {
+		struct ip_entry new_entry = {};
+		new_entry.flow = flow;
+		ip6_cache.insert(ip6_key, &new_entry);
+	}
+
+    if (flow == FLOW_RX)
+    {
+        ip6_key->remote_port = saved_port;
+    } else {
+        ip6_key->local_port = saved_port;
+    }
+
+    if (ip_entry) {
+        return true;
+    }
+	return false;
+}
+
+static inline bool has_ip6_cache(struct ip6_key *ip6_key) {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
-	struct ip6_key *ip_entry = ip6_cache.lookup(&ip6_key->pid);
+    struct ip6_key *ip_entry = ip6_cache.lookup(&ip6_key->pid);
 	if (ip_entry) {
 		if (ip_entry->remote_port == ip6_key->remote_port &&
 		    ip_entry->local_port == ip6_key->local_port &&
@@ -1210,42 +1255,16 @@ static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 	} else {
 		ip6_cache.insert(&ip6_key->pid, ip6_key);
 	}
+    return false;
 #else
-	struct ip6_key ip6_key_alternate = *ip6_key;
-	struct ip_entry *ip_entry = NULL;
-
-	if (flow == FLOW_RX)
-	{
-		ip6_key->remote_port = 0;
-		ip6_key_alternate.local_port = 0;
-	} else {
-		ip6_key->local_port = 0;
-		ip6_key_alternate.remote_port = 0;
-	}
-
-	ip_entry = ip6_cache.lookup(ip6_key);
-	if (!ip_entry) {
-		struct ip_entry new_entry = {};
-		new_entry.flow = flow;
-		ip6_cache.insert(ip6_key, &new_entry);
-
-		ip_entry = ip6_cache.lookup(&ip6_key_alternate);
-		if (!ip_entry) {
-			ip6_cache.insert(&ip6_key_alternate, &new_entry);
-		} else {
-			return true;
-		}
-	} else {
-		return true;
-	}
+    return has_ip6_cache_by_flow(ip6_key, FLOW_RX) || has_ip6_cache_by_flow(ip6_key, FLOW_TX);
 #endif
-	return false;
 }
 #endif /* CACHE_UDP */
 
 int on_do_exit(struct pt_regs *ctx, long code)
 {
-	struct data_w_cgroup data = {};
+	struct data data = {};
 	struct task_struct *task = (struct task_struct *)bpf_get_current_task();
 
 	if (!task) {
@@ -1255,14 +1274,17 @@ int on_do_exit(struct pt_regs *ctx, long code)
 		goto out;
 	}
 
-	__init_header(EVENT_PROCESS_EXIT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
-	u8 cgroup_length = __set_cgroup_id(data.cgroup);
-	if (cgroup_length > 0) {
-		send_event(ctx, &data, sizeof(struct data_w_cgroup));
-	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct data));
-	}
+	__init_header(EVENT_PROCESS_EXIT, PP_ENTRY_POINT, &data.header);
+    cgroup_data cgroup_data = {};
+    bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+    if (has_cgroup_data) {
+        send_event(ctx, &data, sizeof(struct data));
+        cgroup_data.header.type = data.header.type;
+        send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct data));
+    }
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 	last_parent.delete(&data.header.pid);
@@ -1319,11 +1341,11 @@ static int trace_connect_return(struct pt_regs *ctx)
 		return 0;
 	}
 
-	struct net_data_w_cgroup data = {};
+	struct net_data data = {};
 	struct sock *skp = *skpp;
 	u16 dport = skp->__sk_common.skc_dport;
 
-	__init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
+	__init_header(EVENT_NET_CONNECT_PRE, PP_ENTRY_POINT, &data.header);
 	data.protocol = IPPROTO_TCP;
 	data.remote_port = dport;
 
@@ -1347,13 +1369,17 @@ static int trace_connect_return(struct pt_regs *ctx)
 				   skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
 	}
-	u8 cgroup_length = __set_cgroup_id(data.cgroup);
-	if (cgroup_length > 0) {
-		send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct net_data));
-	}
+
+    cgroup_data cgroup_data = {};
+    bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+    if (has_cgroup_data) {
+        send_event(ctx, &data, sizeof(struct net_data));
+        cgroup_data.header.type = data.header.type;
+        send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct net_data));
+    }
 
 	currsock.delete(&id);
 	return 0;
@@ -1397,9 +1423,9 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 	void *hdr = (struct iphdr *)(skb->head + skb->network_header);
 	u32 hdr_len = skb->transport_header - skb->network_header;
 
-	struct net_data_w_cgroup data = {};
+	struct net_data data = {};
 
-	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
+	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_ENTRY_POINT, &data.header);
 
 	data.protocol = IPPROTO_UDP;
 
@@ -1454,20 +1480,24 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 				   &ipv6hdr->daddr.s6_addr32);
 		bpf_probe_read(ip_key.local_addr6, sizeof(data.local_addr6),
 				   &ipv6hdr->saddr.s6_addr32);
-		if (has_ip6_cache(&ip_key, FLOW_RX)) {
+		if (has_ip6_cache(&ip_key)) {
 			return 0;
 		}
 #endif /* CACHE_UDP */
 	} else {
 		return 0;
 	}
-	u8 cgroup_length = __set_cgroup_id(data.cgroup);
-	if (cgroup_length > 0) {
-		send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct net_data));
-	}
+
+    cgroup_data cgroup_data = {};
+    bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+    if (has_cgroup_data) {
+        send_event(ctx, &data, sizeof(struct net_data));
+        cgroup_data.header.type = data.header.type;
+        send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+    } else {
+        data.header.type = PP_NO_EXTRA_DATA;
+        send_event(ctx, &data, sizeof(struct net_data));
+    }
 
 	return 0;
 }
@@ -1482,9 +1512,10 @@ int trace_accept_return(struct pt_regs *ctx)
 		return 0;
 	}
 
-	struct net_data_w_cgroup data = {};
+	struct net_data data = {};
+    cgroup_data cgroup_data = {};
 
-	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
+	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_ENTRY_POINT, &data.header);
 	data.protocol = IPPROTO_TCP;
 
 	data.ipver = newsk->__sk_common.skc_family;
@@ -1502,13 +1533,17 @@ int trace_accept_return(struct pt_regs *ctx)
 
 		if (data.local_addr != 0 && data.remote_addr != 0 &&
 			data.local_port != 0 && data.remote_port != 0) {
-			u8 cgroup_length = __set_cgroup_id(data.cgroup);
-			if (cgroup_length > 0) {
-				send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-			} else {
-				data.header.type = PP_NO_EXTRA_DATA;
-				send_event(ctx, &data, sizeof(struct net_data));
-			}
+
+            bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+            if (has_cgroup_data) {
+                send_event(ctx, &data, sizeof(struct net_data));
+                cgroup_data.header.type = data.header.type;
+                send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+            } else {
+                data.header.type = PP_NO_EXTRA_DATA;
+                send_event(ctx, &data, sizeof(struct net_data));
+            }
+
 		}
 	} else if (check_family(newsk, AF_INET6)) {
 		bpf_probe_read(
@@ -1518,13 +1553,16 @@ int trace_accept_return(struct pt_regs *ctx)
 				   sizeof(data.remote_addr6),
 				   newsk->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
-		u8 cgroup_length = __set_cgroup_id(data.cgroup);
-		if (cgroup_length > 0) {
-			send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
-		} else {
-			data.header.type = PP_NO_EXTRA_DATA;
-			send_event(ctx, &data, sizeof(struct net_data));
-		}
+        bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
+        if (has_cgroup_data) {
+            send_event(ctx, &data, sizeof(struct net_data));
+            cgroup_data.header.type = data.header.type;
+            send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+        } else {
+            data.header.type = PP_NO_EXTRA_DATA;
+            send_event(ctx, &data, sizeof(struct net_data));
+        }
+
 	}
 	return 0;
 }
@@ -1595,12 +1633,14 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
             }
         }
 
-        dns_data_w_cgroup cgroup_data = {};
-        __init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_CGROUP, &cgroup_data.header);
-        maybe_send_cgroup(ctx, &cgroup_data);
+        cgroup_data cgroup_data = {};
+        __init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
+        bool sent_cgroup_and_finalized = maybe_send_cgroup(ctx, &cgroup_data);
+        if (!sent_cgroup_and_finalized) {
+            data.header.state = PP_FINALIZED;
+            send_event(ctx, &data, sizeof(struct dns_data));
+        }
 
-        data.header.state = PP_FINALIZED;
-        send_event(ctx, &data, sizeof(struct dns_data));
     }
 
 	// Don't remove from bpf map currsock3
@@ -1641,8 +1681,8 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         return 0;
     }
 
-    struct net_data_w_cgroup data = {};
-    __init_header(EVENT_NET_CONNECT_PRE, PP_NO_EXTRA_DATA_W_CGROUP, &data.header);
+    struct net_data data = {};
+    __init_header(EVENT_NET_CONNECT_PRE, PP_ENTRY_POINT, &data.header);
     data.protocol = IPPROTO_UDP;
     // The remote addr could be in the msghdr::msg_name or on the sock
     bool addr_in_msghr = false;
@@ -1752,15 +1792,18 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         bpf_probe_read(
             ip_key.local_addr6, sizeof(data.local_addr6),
             &data.local_addr6);
-        if (has_ip6_cache(&ip_key, FLOW_TX))
+        if (has_ip6_cache(&ip_key))
         {
             goto out;
         }
 #endif /* CACHE_UDP */
     }
-    u8 cgroup_length = __set_cgroup_id(data.cgroup);
-    if (cgroup_length > 0) {
-        send_event(ctx, &data, sizeof(struct net_data_w_cgroup));
+
+    cgroup_data cgroup_data = {};
+    if (maybe_get_cgroup_data(&cgroup_data)) {
+        send_event(ctx, &data, sizeof(struct net_data));
+        cgroup_data.header.type = data.header.type;
+        send_event(ctx, &cgroup_data, sizeof(cgroup_data));
     } else {
         data.header.type = PP_NO_EXTRA_DATA;
         send_event(ctx, &data, sizeof(struct net_data));
