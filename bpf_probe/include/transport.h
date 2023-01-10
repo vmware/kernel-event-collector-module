@@ -136,6 +136,7 @@ struct path_data {
 
 // Just let it use the largest blob
 #define BLOB_OFFSET(data, blob_name) ((char *)data + data->blob_name.offset)
+#define IPV6_COMPARE_TO_0(ipv6) (((ipv6[0] == 0) && (ipv6[1] == 0) && (ipv6[2] == 0) && (ipv6[3] == 0)))
 
 //
 // This little struct tells us where a blob entry is located

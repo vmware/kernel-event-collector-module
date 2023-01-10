@@ -1525,7 +1525,7 @@ int BPF_KRETPROBE(trace_accept_return)
     } else if (check_family(newsk, AF_INET6)) {
         bpf_probe_read(&data->net_data.local_addr6, sizeof(data->net_data.local_addr6), BPF_CORE_READ(newsk, __sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32));
         bpf_probe_read(&data->net_data.remote_addr6, sizeof(data->net_data.remote_addr6), BPF_CORE_READ(newsk, __sk_common.skc_v6_daddr.in6_u.u6_addr32));
-        if (data->net_data.local_addr6 == 0 || data->net_data.remote_addr6 == 0) {
+        if ((IPV6_COMPARE_TO_0(data->net_data.local_addr6)) || (IPV6_COMPARE_TO_0(data->net_data.remote_addr6))) {
                 return 0;
         }
     }
