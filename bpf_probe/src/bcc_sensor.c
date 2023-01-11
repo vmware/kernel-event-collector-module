@@ -372,9 +372,6 @@ static inline u8 __set_cgroup_id(char cgroup_id[MAX_FNAME]) {
     }
 
     size_t length = cb_bpf_probe_read_str(cgroup_id, MAX_FNAME, cgroup_node->name);
-    if (length == 0) {
-        return 0;
-    }
     return length;
 }
 
@@ -640,8 +637,7 @@ static inline int __do_file_path(struct pt_regs *ctx,
 		}
 	}
 
-	bool sent_cgroup_and_finalized = maybe_send_cgroup_and_finalized(ctx, data);
-	if (!sent_cgroup_and_finalized) {
+	if (!maybe_send_cgroup_and_finalized(ctx, data)) {
 		data->header.state = PP_FINALIZED;
 		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
@@ -715,8 +711,7 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
 
-	bool sent_cgroup_and_finalized = maybe_send_cgroup_and_finalized(ctx, data);
-	if(!sent_cgroup_and_finalized) {
+	if(!maybe_send_cgroup_and_finalized(ctx, data)) {
 		data->header.state = PP_FINALIZED;
 		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
 	}
