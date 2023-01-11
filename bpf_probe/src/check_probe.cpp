@@ -86,6 +86,7 @@ int main(int argc, char *argv[])
             if (result < 0)
             {
                 printf("Poll data Error: returned %d\n", result);
+                return 1;
             }
         }
     }
@@ -221,6 +222,20 @@ void ProbeEventCallback(Data data)
     if (data.data)
     {
         std::stringstream output;
+
+        bool isStartingMessage = (data.data->header.state == PP_ENTRY_POINT) || (data.data->header.state == PP_NO_EXTRA_DATA);
+        bool isEndingMessage = (data.data->header.state == PP_FINALIZED) ||
+                (data.data->header.state == PP_CGROUP_AND_FINALIZED) ||
+                (data.data->header.state == PP_NO_EXTRA_DATA);
+        bool hasPathData = (data.data->header.state == PP_PATH_COMPONENT) ||
+                (data.data->header.state == PP_ENTRY_POINT) ||
+                (data.data->header.state == PP_APPEND) ||
+                (data.data->header.state == PP_CGROUP_AND_FINALIZED);
+
+        if (isStartingMessage) {
+            output << "\n+++++++++++++++++++++ " << BpfApi::TypeToString(data.data->header.type) << " ++++++++++++++++++++++\n";
+        }
+
         output << data.data->header.event_time << " "
                << BpfApi::TypeToString(data.data->header.type) << "::"
                << BpfApi::StateToString(data.data->header.state) << " "
@@ -234,10 +249,14 @@ void ProbeEventCallback(Data data)
             output << " payload:" << data.data->header.payload;
         }
 
-        if (data.data->header.state == PP_PATH_COMPONENT)
+        if (hasPathData)
         {
             auto pdata = reinterpret_cast<const path_data*>(data.data);
             output << " [" << pdata->fname << "]";
+        }
+
+        if (isEndingMessage) {
+            output << "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
         }
 
         std::cout << output.str() << std::endl;
