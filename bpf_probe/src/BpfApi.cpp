@@ -184,11 +184,6 @@ bool BpfApi::Init_bcc(const std::string & bpf_program)
 bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
 {
     bool result = false;
-#if defined(__aarch64__)
-    // For now override aarch64 to only use BCC until we add
-    // libbpf support explicitly.
-    m_try_libbpf = false;
-#else
     // For now libbpf support must have BTF.
     if (m_try_libbpf)
     {
@@ -204,7 +199,6 @@ bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
             close(fd);
         }
     }
-#endif /* __aarch64__ */
 
     if (try_bcc_first)
     {
