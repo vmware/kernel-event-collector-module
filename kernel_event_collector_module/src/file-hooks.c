@@ -239,7 +239,7 @@ void __ec_do_file_event(ProcessContext *context, struct file *file, CB_EVENT_TYP
                 context);
         } else
         {
-            TRACE(DL_FILE, "invalid full path %s event %d", fileProcess->path_data->path, eventType);
+            TRACE(DL_FILE, "invalid full path %s event %d", path_data->path, eventType);
         }
         ec_process_tracking_put_handle(process_handle, context);
     }
