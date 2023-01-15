@@ -363,6 +363,46 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 #define PATH_MSG_SIZE(DATA) (size_t)(sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
 #endif
 
+static inline u8 __set_cgroup_id_from_task(char cgroup_id[MAX_FNAME], struct task_struct* task) {
+
+    struct kernfs_node* cgroup_node = (struct kernfs_node *)(task->cgroups->subsys[cpuset_cgrp_id]->cgroup->kn);
+    if (!cgroup_node) {
+        return 0;
+    }
+
+    size_t length = cb_bpf_probe_read_str(cgroup_id, MAX_FNAME, cgroup_node->name);
+    return length;
+}
+
+static inline bool maybe_get_cgroup_data_from_task(cgroup_data *data, struct task_struct* task) {
+    u8 cgroup_length = __set_cgroup_id_from_task(data->fname, task);
+    if (cgroup_length > 0) {
+        data->header.state = PP_CGROUP_AND_FINALIZED;
+        data->size = cgroup_length;
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static inline bool maybe_get_cgroup_data(cgroup_data *data) {
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (!task) {
+        return false;
+    }
+    return maybe_get_cgroup_data_from_task(data, task);
+}
+
+
+static inline bool maybe_send_cgroup_and_finalized(struct pt_regs *ctx, cgroup_data *data) {
+    if (maybe_get_cgroup_data(data)) {
+        send_event(ctx, data, PATH_MSG_SIZE(data));
+        return true;
+    } else {
+        return false;
+    }
+}
+
 static u8 __write_fname(struct path_data *data, const void *ptr)
 {
 	if (!ptr)
@@ -1055,8 +1095,17 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		data.device = __get_device_from_file(task->mm->exe_file);
 		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
-
-	send_event(ctx, &data, sizeof(struct file_data));
+    
+	cgroup_data cgroup_data = {};
+	bool has_cgroup_data = maybe_get_cgroup_data_from_task(&cgroup_data, task);
+	if (has_cgroup_data) {
+		send_event(ctx, &data, sizeof(struct file_data));
+        __init_header_with_task(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header, task);
+		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
+	} else {
+		data.header.type = PP_NO_EXTRA_DATA;
+		send_event(ctx, &data, sizeof(struct file_data));
+	}
 
 out:
 	return 0;
