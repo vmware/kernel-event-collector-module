@@ -1287,9 +1287,25 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
             enabled_chown_common = true;
             preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
         } else {
-            pr_err("Unable to hook kretprobe: %d %s\n", ret,
-                    kret_dynsec_chown_common.kp.symbol_name);
-            success = false;
+            /* chown_common hook symbol change for RHEL 8 */
+            kret_dynsec_chown_common.kp.symbol_name = "chown_common.isra.14";
+            ret = register_kretprobe(&kret_dynsec_chown_common);
+            if (ret >= 0) {
+                enabled_chown_common = true;
+                preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
+            } else {
+                /* one more try */
+                kret_dynsec_chown_common.kp.symbol_name = "chown_common.isra.16";
+                ret = register_kretprobe(&kret_dynsec_chown_common);
+                if (ret >= 0) {
+                    enabled_chown_common = true;
+                    preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
+                } else {
+                    pr_err("Unable to hook kretprobe: %d %s\n", ret,
+                            kret_dynsec_chown_common.kp.symbol_name);
+                    success = false;
+                }
+            }
         }
     }
 #endif
