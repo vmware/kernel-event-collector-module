@@ -23,6 +23,7 @@ static void ParseArgs(int argc, char** argv);
 static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 static void ProbeEventCallback(Data data);
+static std::string EventToBlobStrings(const data *event);
 
 static std::string s_bpf_program;
 static bool read_events = false;
@@ -221,6 +222,10 @@ void ProbeEventCallback(Data data)
     if (data.data)
     {
         std::stringstream output;
+
+        bool hasPathData = (data.data->header.state == PP_PATH_COMPONENT) ||
+                (data.data->header.state == PP_APPEND);
+
         output << data.data->header.event_time << " "
                << BpfApi::TypeToString(data.data->header.type) << "::"
                << BpfApi::StateToString(data.data->header.state) << " "
@@ -232,9 +237,10 @@ void ProbeEventCallback(Data data)
             output << " report_flags:0x" << std::hex
                    << data.data->header.report_flags << std::dec;
             output << " payload:" << data.data->header.payload;
-        }
 
-        if (data.data->header.state == PP_PATH_COMPONENT)
+            output << " [" << EventToBlobStrings(data.data) << "]";
+        }
+        else if (hasPathData)
         {
             auto pdata = reinterpret_cast<const path_data*>(data.data);
             output << " [" << pdata->fname << "]";
@@ -244,4 +250,157 @@ void ProbeEventCallback(Data data)
 
         delete [] data.data;
     }
+}
+
+static std::string BlobToArgs(const data *event,
+                              const struct blob_ctx &blob_entry)
+{
+    std::string raw_args;
+
+    if (event && blob_entry.size && blob_entry.offset)
+    {
+        auto blob = reinterpret_cast<const char *>(event) + blob_entry.offset;
+
+        for (size_t i = 0; i < blob_entry.size; i++)
+        {
+            std::string exec_arg;
+
+            while (blob[i] && i < blob_entry.size)
+            {
+                exec_arg.append(1, blob[i]);
+                i++;
+            }
+
+            if (!exec_arg.empty())
+            {
+                if (!raw_args.empty())
+                {
+                    raw_args.append(1, ' ');
+                }
+                raw_args += exec_arg;
+            }
+        }
+    }
+
+    return raw_args;
+}
+
+static std::string BlobToPath(const data *event,
+                              const blob_ctx &blob_entry)
+{
+    if (event && blob_entry.size && blob_entry.offset)
+    {
+        std::stringstream ss;
+        std::list<std::string> comps;
+        auto blob = reinterpret_cast<const char *>(event) + blob_entry.offset;
+
+        ss << " size:" << blob_entry.size;
+        ss << " offset:" << blob_entry.offset;
+        ss << " ";
+
+        for (size_t i = 0; i < blob_entry.size; i++)
+        {
+            std::string path_component;
+
+            while (blob[i] && i < blob_entry.size)
+            {
+                path_component.append(1, blob[i]);
+                i++;
+            }
+
+            if (!path_component.empty())
+            {
+                comps.emplace_front(path_component);
+            }
+        }
+
+        for (const auto &comp : comps)
+        {
+            ss << "/" << comp;
+        }
+        return ss.str();
+    }
+    return "";
+}
+
+static std::string EventToBlobStrings(const data *event)
+{
+    if (!(event->header.report_flags & REPORT_FLAGS_DYNAMIC))
+    {
+        return "";
+    }
+
+    std::stringstream ss;
+
+    switch (event->header.type)
+    {
+    case EVENT_PROCESS_EXEC_ARG: {
+        auto exec_arg = reinterpret_cast<const exec_arg_data *>(event);
+
+        ss << BlobToArgs(event, exec_arg->exec_arg_blob);
+        ss << " CgroupBlob:";
+        ss << BlobToPath(event, exec_arg->cgroup_blob);
+        return ss.str();
+    }
+
+    case EVENT_PROCESS_EXIT:
+    case EVENT_PROCESS_CLONE: {
+        auto data = reinterpret_cast<const struct data_x *>(event);
+
+        return BlobToPath(event, data->cgroup_blob);
+    }
+
+    case EVENT_PROCESS_EXEC_PATH:
+    case EVENT_FILE_READ:
+    case EVENT_FILE_WRITE:
+    case EVENT_FILE_CREATE:
+    case EVENT_FILE_PATH:
+    case EVENT_FILE_DELETE:
+    case EVENT_FILE_CLOSE:
+    case EVENT_FILE_MMAP: {
+        auto data_x = reinterpret_cast<const file_path_data_x *>(event);
+
+        ss << " FilePathBlob:" << BlobToPath(event, data_x->file_blob);
+        ss << " CgroupBlob:" << BlobToPath(event, data_x->cgroup_blob);
+        return ss.str();
+    }
+
+    //struct net_data_x
+    case EVENT_NET_CONNECT_PRE:
+    case EVENT_NET_CONNECT_ACCEPT: {
+        auto data_x = reinterpret_cast<const net_data_x *>(event);
+
+        return BlobToPath(event, data_x->cgroup_blob);
+    }
+
+    case EVENT_NET_CONNECT_DNS_RESPONSE: {
+        auto data_x = reinterpret_cast<const dns_data_x *>(event);
+
+        return BlobToPath(event, data_x->cgroup_blob);
+    }
+
+    case EVENT_FILE_RENAME: {
+        auto data_x = reinterpret_cast<const rename_data_x *>(event);
+
+        ss << " OldFileBlob:" << BlobToPath(event, data_x->old_blob);
+        ss << " NewFileBlob:" << BlobToPath(event, data_x->new_blob);
+        ss << " CgroupBlob:" << BlobToPath(event, data_x->cgroup_blob);
+        return ss.str();
+    }
+
+    // Does not return blob data
+    case EVENT_PROCESS_EXEC_RESULT: {
+        return "Not sure how to access blob data";
+    }
+
+    // Unused for the most part
+    case EVENT_NET_CONNECT_WEB_PROXY:
+    case EVENT_FILE_TEST:
+    case EVENT_CONTAINER_CREATE:
+    case EVENT_CGROUP_PATH:
+    default:
+        break;
+    }
+
+    return "Blob data unused here";
 }
