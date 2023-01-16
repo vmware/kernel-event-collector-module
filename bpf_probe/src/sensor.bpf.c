@@ -27,6 +27,8 @@ extern int LINUX_KERNEL_VERSION __kconfig;
 // Detect the presence of SUSE version that requires special handling of mmap flags
 extern int CONFIG_SUSE_VERSION __kconfig __weak;
 
+// Determine if running kernel has pid cgroup subsys
+extern bool CONFIG_CGROUP_PIDS __kconfig __weak;
 
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
@@ -389,6 +391,39 @@ static __always_inline void __init_header_dynamic(u8 type, u8 state, struct data
                             (struct task_struct *)bpf_get_current_task());
 }
 
+static __always_inline
+struct kernfs_node *find_cgroup_node(const struct task_struct *task)
+{
+    enum cgroup_subsys_id___local {
+        pids_cgrp_id___local = 123, /* value doesn't matter */
+    };
+
+    struct kernfs_node *cgroup_node = NULL;
+
+    // We could at load time, control how we get the cgroup path.
+
+    // pids_cgrp_id value can vary between kernels
+    if (CONFIG_CGROUP_PIDS) {
+        // Ask target kernel what the value is for cgroup_subsys_id.pids_cgroup_id
+        int cgrp_id = bpf_core_enum_value(enum cgroup_subsys_id___local,
+                                          pids_cgrp_id___local);
+        if (cgrp_id == pids_cgrp_id) {
+            BPF_CORE_READ_INTO(&cgroup_node, task, cgroups,
+                               subsys[pids_cgrp_id], cgroup, kn);
+        } else if (cgrp_id >= 0 && cgrp_id < CGROUP_SUBSYS_COUNT) {
+            BPF_CORE_READ_INTO(&cgroup_node, task, cgroups,
+                               subsys[cgrp_id], cgroup, kn);
+        }
+    }
+
+    // The default cgroup kernfs node
+    if (!cgroup_node) {
+        BPF_CORE_READ_INTO(&cgroup_node, task, cgroups, dfl_cgrp, kn);
+    }
+
+    return cgroup_node;
+}
+
 // Be careful with making changes to this function!
 // Can only read in 255 chunks at time, if the current arg pointer's
 // offset is incremented via a non-u8 variable, the verifier
@@ -491,35 +526,34 @@ char *compute_blob_ctx(u16 blob_size, struct blob_ctx *blob_ctx,
 }
 
 /* Will add the cgroup path on the blob in reversed order.
-   Should be arragned in the userspace */
-static __always_inline size_t blobify_cgroup_path(char *blob)
+   Should be arranged in the userspace */
+static size_t __blobify_cgroup_path(const struct task_struct *task, char *blob)
 {
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    struct kernfs_node* cgroup_node = (struct kernfs_node *)BPF_CORE_READ(
-            task, cgroups, subsys[cpuset_cgrp_id], cgroup, kn);
+    struct kernfs_node *cgroup_node = NULL;
     size_t total_len = 0;
     size_t length = 0;
 
-    if (!task || !cgroup_node) {
+    if (!task) {
+        return 0;
+    }
+
+    cgroup_node = find_cgroup_node(task);
+    if (!cgroup_node) {
         return 0;
     }
 
 #pragma clang loop unroll(full)
-
     for (int i = 0; i < MAX_CGROUP_PATH_ITER; i++) {
-        barrier_var(cgroup_node);
-        barrier_var(blob);
         length = bpf_probe_read_str(blob, MAX_PATH_COMPONENT_SIZE, BPF_CORE_READ(cgroup_node, name));
         barrier_var(length);
         if (length > MAX_PATH_COMPONENT_SIZE) {
             goto out;
         }
-        barrier_var(total_len);
         barrier_var(length);
         total_len += length;
         blob += length;
 
-        cgroup_node = BPF_CORE_READ(cgroup_node, parent);
+        BPF_CORE_READ_INTO(&cgroup_node, cgroup_node, parent);
         if (!cgroup_node) {
             goto out;
         }
@@ -528,6 +562,10 @@ static __always_inline size_t blobify_cgroup_path(char *blob)
 out:
     return total_len;
 }
+
+// Helper to __blobify_cgroup_path
+#define blobify_cgroup_path(blob) \
+    __blobify_cgroup_path((const struct task_struct *)bpf_get_current_task(), blob)
 
 static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
                                                     struct vfsmount **vfsmnt,
@@ -1130,6 +1168,8 @@ out:
     return 0;
 }
 
+// Ensure helper functions do not call bpf_get_current_task()
+// for this probe.
 SEC("kprobe/wake_up_new_task")
 int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
 {
@@ -1157,7 +1197,7 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         data_x->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
     }
 
-    blob_size = blobify_cgroup_path(blob_pos);
+    blob_size = __blobify_cgroup_path(task, blob_pos);
     blob_pos = compute_blob_ctx(blob_size, &data_x->cgroup_blob, &payload, blob_pos);
 
     data_x->header.payload = payload;

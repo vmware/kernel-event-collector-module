@@ -1020,6 +1020,8 @@ out:
     return 0;
 }
 
+// Ensure helper functions do not call bpf_get_current_task()
+// for this probe.
 int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 {
 	struct inode *pinode = NULL;

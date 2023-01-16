@@ -228,9 +228,10 @@ void ProbeEventCallback(Data data)
 
         output << data.data->header.event_time << " "
                << BpfApi::TypeToString(data.data->header.type) << "::"
-               << BpfApi::StateToString(data.data->header.state) << " "
-               << "tid:" << data.data->header.tid << " "
-               << "ppid:" << data.data->header.ppid;
+               << BpfApi::StateToString(data.data->header.state)
+               << " tid:" << data.data->header.tid
+               << " ppid:" << data.data->header.ppid
+               << " mnt_ns:" << data.data->header.mnt_ns;
 
         if (data.data->header.report_flags & REPORT_FLAGS_DYNAMIC)
         {
@@ -337,19 +338,20 @@ static std::string EventToBlobStrings(const data *event)
     case EVENT_PROCESS_EXEC_ARG: {
         auto exec_arg = reinterpret_cast<const exec_arg_data *>(event);
 
+        ss << " ExecArgBlob: ";
         ss << BlobToArgs(event, exec_arg->exec_arg_blob);
         ss << " CgroupBlob:";
         ss << BlobToPath(event, exec_arg->cgroup_blob);
         return ss.str();
     }
 
-    case EVENT_PROCESS_EXIT:
-    case EVENT_PROCESS_CLONE: {
+    case EVENT_PROCESS_EXIT: {
         auto data = reinterpret_cast<const struct data_x *>(event);
 
         return BlobToPath(event, data->cgroup_blob);
     }
 
+    case EVENT_PROCESS_CLONE:
     case EVENT_PROCESS_EXEC_PATH:
     case EVENT_FILE_READ:
     case EVENT_FILE_WRITE:
