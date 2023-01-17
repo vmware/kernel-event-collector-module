@@ -149,6 +149,7 @@ int dynsec_module_name(unsigned long addr, char *modname, size_t size)
     return ret;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 /* isra appended symbol lookup from kallsyms */
 static int isra_symbol_lookup(void *data, const char* sym, struct module* mod,
                               unsigned long addr)
@@ -167,3 +168,4 @@ int dynsec_kallsyms_on_each_symbol(char *lookup_sym)
     }
     return 0;
 }
+#endif

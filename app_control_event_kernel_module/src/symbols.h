@@ -8,7 +8,9 @@ extern bool dynsec_sym_init(void);
 
 extern int dynsec_lookup_symbol_name(unsigned long addr, char *symname);
 extern int dynsec_module_name(unsigned long addr, char *modname, size_t size);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 extern int dynsec_kallsyms_on_each_symbol(char *lookup_sym);
+#endif
 
 #define OUR_DECL(t, a) t a = (__force typeof(a))
 #ifdef CONFIG_X86_64
