@@ -1266,7 +1266,9 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
 
 static bool register_kprobe_hooks(uint64_t lsm_hooks)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
     char chown_symbol[MAX_KERN_FUNC_LEN] = "chown_common";
+#endif
     bool success = true;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
