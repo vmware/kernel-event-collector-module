@@ -1266,6 +1266,9 @@ static int syscall_changed(const struct syscall_hooks *old_hooks,
 
 static bool register_kprobe_hooks(uint64_t lsm_hooks)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+    char chown_symbol[MAX_KERN_FUNC_LEN] = "chown_common";
+#endif
     bool success = true;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
@@ -1287,9 +1290,22 @@ static bool register_kprobe_hooks(uint64_t lsm_hooks)
             enabled_chown_common = true;
             preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
         } else {
-            pr_err("Unable to hook kretprobe: %d %s\n", ret,
-                    kret_dynsec_chown_common.kp.symbol_name);
-            success = false;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+            dynsec_kallsyms_on_each_symbol(chown_symbol);
+            kret_dynsec_chown_common.kp.symbol_name = chown_symbol;
+            ret = register_kretprobe(&kret_dynsec_chown_common);
+            if (ret >= 0) {
+                enabled_chown_common = true;
+                preaction_hooks_enabled |= DYNSEC_HOOK_TYPE_SETATTR;
+                pr_info("chown hook probed: %s\n", chown_symbol);
+            } else {
+#endif
+                pr_err("Unable to hook kretprobe: %d %s\n", ret,
+                        kret_dynsec_chown_common.kp.symbol_name);
+                success = false;
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+            }
+#endif
         }
     }
 #endif
