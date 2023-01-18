@@ -1,7 +1,7 @@
 # Check Probe
 check_probe is a program that helps testing the BPF program of the event collector
 
-# Build
+## Build
 In order to build the BPF program and check probe run:
 ```
 ./build-util/build.py build bpf_probe/
@@ -16,7 +16,7 @@ workspace/bpf_probe/build/gcc73-relwithdebinfo.0/bin/check_probe
 workspace/bpf_probe/build/gcc-arm-8_2-relwithdebinfo.1/bin/check_probe
 ```
 
-# Run
+## Run
 * Use libbpf
 ```
 sudo ./check_probe -L -vvv -r
@@ -27,11 +27,21 @@ sudo ./check_probe -B -vvv -r
 ```
 
 # Docker
+## Build
 * x86
 ```
 docker build -f bpf_probe/check_probe/Dockerfile -t octarinesec/cndr:check-probe-$USER . --platform linux/amd64 &&  docker push octarinesec/cndr:check-probe-$USER
 ```
 * ARM
 ```
-docker build -f bpf_probe/check_probe/Dockerfile.arm -t octarinesec/cndr:check-probe-$USER . --platform linux/aarch64 && docker push octarinesec/cndr:check-probe-$USER
+docker build -f bpf_probe/check_probe/Dockerfile.arm -t octarinesec/cndr:check-probe-arm-$USER . --platform linux/aarch64 && docker push octarinesec/cndr:check-probe-arm-$USER
+```
+## Run
+* x86
+```
+docker run -it --privileged -v /boot:/boot octarinesec/cndr:check-probe-$USER
+```
+* ARM
+```
+docker run -it --privileged -v /boot:/boot octarinesec/cndr:check-probe-arm-$USER
 ```
