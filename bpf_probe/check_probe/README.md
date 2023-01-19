@@ -1,5 +1,5 @@
 # Check Probe
-check_probe is a program that helps testing the BPF program of the event collector
+`check_probe` is a program that helps testing the BPF program of the event collector
 
 ## Build
 In order to build the BPF program and check probe run:
@@ -27,10 +27,10 @@ sudo ./check_probe -B -vvv -r
 ```
 
 # Docker
-## Build
+## Build & Push
 * x86
 ```
-docker build -f bpf_probe/check_probe/Dockerfile -t octarinesec/cndr:check-probe-$USER . --platform linux/amd64 &&  docker push octarinesec/cndr:check-probe-$USER
+docker build -f bpf_probe/check_probe/Dockerfile -t octarinesec/cndr:check-probe-$USER . --platform linux/amd64 && docker push octarinesec/cndr:check-probe-$USER
 ```
 * ARM
 ```
@@ -44,4 +44,15 @@ docker run -it --privileged -v /boot:/boot octarinesec/cndr:check-probe-$USER
 * ARM
 ```
 docker run -it --privileged -v /boot:/boot octarinesec/cndr:check-probe-arm-$USER
+```
+
+# Kubernetes
+## Run DaemonSet
+A daemonset is a method of kubernetes deployment that would deploy a single pod on each node.
+Thus deploying the following daemonset would deploy a single instance of `check_probe` on each node.
+```
+# Add you username to the image tag, if your'e following this convention:
+sed -i "s/\:check-probe/\:check_probe-$USER/" bpf_probe/check_probe/daemonset.yaml
+# Apply the daemonset to the cluster:
+kubectl apply -f bpf_probe/check_probe/daemonset.yaml
 ```
