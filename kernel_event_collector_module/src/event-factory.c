@@ -110,7 +110,7 @@ void ec_event_send_exit(
     bool            was_last_active_process,
     ProcessContext *context)
 {
-    // We need to know if this is the last running proccess when we allocate
+    // We need to know if this is the last running process when we allocate
     //  the event because we may not be sending exits for all forks
     char      *status_msg           = "";
     PCB_EVENT  event                = ec_factory_alloc_event(
@@ -123,7 +123,7 @@ void ec_event_send_exit(
 
     if (event)
     {
-        if (!was_last_active_process)
+        if (true)
         {
             // This is a fork exit, so send it now
             //  Note: This exit event may be collected by the agent before events
@@ -131,7 +131,7 @@ void ec_event_send_exit(
             // Coverity thinks that we leak the event because we use containerof to get the list node
             // coverity[leaked_storage]
             ec_send_event(event, context);
-            status_msg = "<SEND> ";
+            status_msg = was_last_active_process ? "was HOLD-LAST" : "<SEND> ";
         } else
         {
             ec_process_tracking_store_exit_event(ec_process_posix_identity(process_handle), event, context);
