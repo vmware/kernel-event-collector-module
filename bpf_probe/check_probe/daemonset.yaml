@@ -14,7 +14,7 @@ spec:
       hostPID: true
       containers:
       - name: check-probe
-        image: octarinesec/cndr:check_probe-tshefler
+        image: octarinesec/cndr:check-probe
         securityContext:
           privileged: true
         volumeMounts:
