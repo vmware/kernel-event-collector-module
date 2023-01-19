@@ -110,7 +110,7 @@ add_custom_command(
 )
 add_custom_target(bpf_skel ALL DEPENDS ${BPF_ELF_FILE} ${BPF_SKEL_FILE})
 
-add_executable(check_probe ../check_probe/check_probe.cpp)
+add_executable(check_probe ../check_probe/src/check_probe.cpp)
 target_link_libraries(check_probe
         bpf-probe
         z rt dl pthread m
