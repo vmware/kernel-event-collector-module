@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: check-probe
+spec:
+  selector:
+    matchLabels:
+      app: check-probe
+  template:
+    metadata:
+      labels:
+        app: check-probe
+    spec:
+      hostPID: true
+      containers:
+      - name: check-probe
+        image: octarinesec/cndr:check-probe
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: boot
+          mountPath: /boot
+      volumes:
+      - name: boot
+        hostPath:
+          path: /boot
