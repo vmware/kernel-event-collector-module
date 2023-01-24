@@ -230,7 +230,8 @@ void ProbeEventCallback(Data data)
                << BpfApi::TypeToString(data.data->header.type) << "::"
                << BpfApi::StateToString(data.data->header.state) << " "
                << "tid:" << data.data->header.tid << " "
-               << "ppid:" << data.data->header.ppid;
+               << "ppid:" << data.data->header.ppid << " "
+               << "mnt_ns:" << data.data->header.mnt_ns;
 
         if (data.data->header.report_flags & REPORT_FLAGS_DYNAMIC)
         {
@@ -288,14 +289,16 @@ static std::string BlobToArgs(const data *event,
 static std::string BlobToPath(const data *event,
                               const blob_ctx &blob_entry)
 {
+    std::stringstream ss;
+
+    ss << " size:" << blob_entry.size;
+    ss << " offset:" << blob_entry.offset;
+
     if (event && blob_entry.size && blob_entry.offset)
     {
-        std::stringstream ss;
         std::list<std::string> comps;
         auto blob = reinterpret_cast<const char *>(event) + blob_entry.offset;
 
-        ss << " size:" << blob_entry.size;
-        ss << " offset:" << blob_entry.offset;
         ss << " ";
 
         for (size_t i = 0; i < blob_entry.size; i++)
@@ -318,9 +321,9 @@ static std::string BlobToPath(const data *event,
         {
             ss << "/" << comp;
         }
-        return ss.str();
     }
-    return "";
+
+    return ss.str();
 }
 
 static std::string EventToBlobStrings(const data *event)
@@ -337,19 +340,20 @@ static std::string EventToBlobStrings(const data *event)
     case EVENT_PROCESS_EXEC_ARG: {
         auto exec_arg = reinterpret_cast<const exec_arg_data *>(event);
 
+        ss << " ExecArgBlob: ";
         ss << BlobToArgs(event, exec_arg->exec_arg_blob);
         ss << " CgroupBlob:";
         ss << BlobToPath(event, exec_arg->cgroup_blob);
         return ss.str();
     }
 
-    case EVENT_PROCESS_EXIT:
-    case EVENT_PROCESS_CLONE: {
+    case EVENT_PROCESS_EXIT: {
         auto data = reinterpret_cast<const struct data_x *>(event);
 
         return BlobToPath(event, data->cgroup_blob);
     }
 
+    case EVENT_PROCESS_CLONE:
     case EVENT_PROCESS_EXEC_PATH:
     case EVENT_FILE_READ:
     case EVENT_FILE_WRITE:
@@ -362,6 +366,8 @@ static std::string EventToBlobStrings(const data *event)
 
         ss << " FilePathBlob:" << BlobToPath(event, data_x->file_blob);
         ss << " CgroupBlob:" << BlobToPath(event, data_x->cgroup_blob);
+        ss << std::hex << " fsmagic:0x" << data_x->fs_magic << std::dec;
+
         return ss.str();
     }
 
