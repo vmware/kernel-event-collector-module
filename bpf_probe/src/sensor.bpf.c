@@ -265,6 +265,7 @@ static __always_inline bool __is_special_filesystem(struct super_block *sb)
 #ifdef BPF_FS_MAGIC
     case BPF_FS_MAGIC:
 #endif /* BPF_FS_MAGIC */
+    case NSFS_MAGIC:
 
         return true;
 
@@ -918,6 +919,9 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
                                  BPF_CORE_READ(file, f_path.mnt),
                                  blob_pos);
+    if (!blob_size) {
+        goto out;
+    }
     blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
                                 &payload, blob_pos);
     blob_size = blobify_cgroup_path(blob_pos);
@@ -1010,6 +1014,9 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
     blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
                                  BPF_CORE_READ(file, f_path.mnt),
                                  blob_pos);
+    if (!blob_size) {
+        goto out;
+    }
     blob_pos = compute_blob_ctx(blob_size, &data_x->file_blob,
                                 &payload, blob_pos);
     blob_size = blobify_cgroup_path(blob_pos);

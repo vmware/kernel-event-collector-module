@@ -230,6 +230,9 @@ static inline bool __is_special_filesystem(struct super_block *sb)
 #ifdef BPF_FS_MAGIC
 	case BPF_FS_MAGIC:
 #endif /* BPF_FS_MAGIC */
+#ifdef NSFS_MAGIC
+	case NSFS_MAGIC:
+#endif /* NSFS_MAGIC */
 
 		return true;
 
