@@ -36,20 +36,37 @@ extern asmlinkage long ec_sys_delete_module(const char __user *name_user, unsign
 
 static unsigned long page_rw_set;
 
+
+#if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
+# define CB_RH_GT_70(x) x
+#else
+# define CB_RH_GT_70(x)
+#endif
+
+// function-like macro to ensure we always process all hooks
+// takes an argument that decides how each hook symbol is processed
+// checkpatch-ignore: COMPLEX_MACRO
+#define CB_ALL_HOOKS(XX) \
+    XX(delete_module) \
+    XX(creat)         \
+    XX(open)          \
+    XX(openat)        \
+    XX(unlink)        \
+    XX(unlinkat)      \
+    XX(rename)        \
+    XX(renameat)      \
+    CB_RH_GT_70(XX(renameat2))
+// checkpatch-no-ignore: COMPLEX_MACRO
+
 void __ec_save_old_hooks(p_sys_call_table syscall_table)
 {
-    ec_orig_sys_delete_module = syscall_table[__NR_delete_module];
-    ec_orig_sys_creat         = syscall_table[__NR_creat];
-    ec_orig_sys_open          = syscall_table[__NR_open];
-    ec_orig_sys_openat        = syscall_table[__NR_openat];
-    ec_orig_sys_unlink        = syscall_table[__NR_unlink];
-    ec_orig_sys_unlinkat      = syscall_table[__NR_unlinkat];
-    ec_orig_sys_rename        = syscall_table[__NR_rename];
-    ec_orig_sys_renameat      = syscall_table[__NR_renameat];
-    #if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
-    ec_orig_sys_renameat2     = syscall_table[__NR_renameat2];
-    #endif
+// checkpatch-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE
+#   define XX(a) ec_orig_sys_ ## a = syscall_table[__NR_ ## a];
+    CB_ALL_HOOKS(XX)
+#   undef XX
+// checkpatch-no-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE
 }
+
 
 bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 {
@@ -61,17 +78,11 @@ bool __ec_set_new_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 
     if (ec_set_page_state_rw(syscall_table, &page_rw_set))
     {
-        if (enableHooks & CB__NR_delete_module) syscall_table[__NR_delete_module] = ec_sys_delete_module;
-        if (enableHooks & CB__NR_creat) syscall_table[__NR_creat]    = ec_sys_creat;
-        if (enableHooks & CB__NR_open) syscall_table[__NR_open]      = ec_sys_open;
-        if (enableHooks & CB__NR_openat) syscall_table[__NR_openat]    = ec_sys_openat;
-        if (enableHooks & CB__NR_unlink) syscall_table[__NR_unlink]    = ec_sys_unlink;
-        if (enableHooks & CB__NR_unlinkat) syscall_table[__NR_unlinkat]  = ec_sys_unlinkat;
-        if (enableHooks & CB__NR_rename) syscall_table[__NR_rename]    = ec_sys_rename;
-        if (enableHooks & CB__NR_renameat) syscall_table[__NR_renameat]    = ec_sys_renameat;
-        #if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
-        if (enableHooks & CB__NR_renameat2) syscall_table[__NR_renameat2]    = ec_sys_renameat2;
-        #endif
+// checkpatch-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE
+#       define XX(a) if (enableHooks & CB__NR_ ## a) syscall_table[__NR_ ## a] = ec_sys_ ## a;
+        CB_ALL_HOOKS(XX)
+#       undef XX
+// checkpatch-no-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE
 
         ec_restore_page_state(syscall_table, page_rw_set);
         rval = true;
@@ -118,17 +129,11 @@ void __ec_restore_hooks(p_sys_call_table syscall_table, uint64_t enableHooks)
 
     if (ec_set_page_state_rw(syscall_table, &page_rw_set))
     {
-        if (enableHooks & CB__NR_delete_module) syscall_table[__NR_delete_module] = ec_orig_sys_delete_module;
-        if (enableHooks & CB__NR_creat) syscall_table[__NR_creat]     = ec_orig_sys_creat;
-        if (enableHooks & CB__NR_open) syscall_table[__NR_open]      = ec_orig_sys_open;
-        if (enableHooks & CB__NR_openat) syscall_table[__NR_openat]    = ec_orig_sys_openat;
-        if (enableHooks & CB__NR_unlink) syscall_table[__NR_unlink]    = ec_orig_sys_unlink;
-        if (enableHooks & CB__NR_unlinkat) syscall_table[__NR_unlinkat]  = ec_orig_sys_unlinkat;
-        if (enableHooks & CB__NR_rename) syscall_table[__NR_rename]    = ec_orig_sys_rename;
-        if (enableHooks & CB__NR_renameat) syscall_table[__NR_renameat]    = ec_orig_sys_renameat;
-        #if RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7, 0)
-        if (enableHooks & CB__NR_renameat2) syscall_table[__NR_renameat2]    = ec_orig_sys_renameat2;
-        #endif
+// checkpatch-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE
+#       define XX(a) if (enableHooks & CB__NR_ ## a) syscall_table[__NR_ ## a] = ec_orig_sys_ ## a;
+        CB_ALL_HOOKS(XX)
+#       undef XX
+// checkpatch-no-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE
         ec_restore_page_state(syscall_table, page_rw_set);
     } else {
         TRACE(DL_ERROR, "Failed to make 64-bit call table RW!!\n");
@@ -201,15 +206,19 @@ CATCH_DEFAULT:
 
 bool ec_do_sys_hooks_changed(ProcessContext *context)
 {
-    bool changed = false;
     p_sys_call_table syscall_table;
 
     TRY_CB_RESOLVED(sys_call_table);
     syscall_table = CB_RESOLVED(sys_call_table);
 
-    if (g_enableHooks & CB__NR_delete_module) changed |= syscall_table[__NR_delete_module] != ec_sys_delete_module;
+// checkpatch-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE, SPACING
+#   define XX(a) if ((g_enableHooks & CB__NR_ ## a) && syscall_table[__NR_ ## a] != ec_sys_ ## a) return true;
+    CB_ALL_HOOKS(XX)
+#   undef XX
+
 CATCH_DEFAULT:
-    return changed;
+    return false;
+// checkpatch-no-ignore: TRAILING_SEMICOLON, MULTISTATEMENT_MACRO_USE_DO_WHILE, SPACING
 }
 
 
@@ -292,9 +301,4 @@ int ec_get_sys_rename(struct seq_file *m, void *v) { return getSyscall(CB__NR_re
 int ec_get_sys_renameat(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat, m); }
 int ec_get_sys_renameat2(struct seq_file *m, void *v) { return getSyscall(CB__NR_renameat2, m); }
 
-ssize_t ec_set_sys_delete_module(struct file *file, const char *buf, size_t size, loff_t *ppos)
-{
-    setSyscall(buf, "delete_module", CB__NR_delete_module,   __NR_delete_module, ec_sys_delete_module, ec_orig_sys_delete_module, CB_RESOLVED(sys_call_table));
-    return size;
-}
 #endif  //}
