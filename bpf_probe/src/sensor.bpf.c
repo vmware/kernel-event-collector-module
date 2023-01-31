@@ -27,6 +27,8 @@ extern int LINUX_KERNEL_VERSION __kconfig;
 // Detect the presence of SUSE version that requires special handling of mmap flags
 extern int CONFIG_SUSE_VERSION __kconfig __weak;
 
+// Determine if running kernel has pid cgroup subsys
+extern bool CONFIG_CGROUP_PIDS __kconfig __weak;
 
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
@@ -244,13 +246,9 @@ static __always_inline bool __is_special_filesystem(struct super_block *sb)
     switch (BPF_CORE_READ(sb, s_magic)) {
     // Special Kernel File Systems
     case CGROUP_SUPER_MAGIC:
-#ifdef CGROUP2_SUPER_MAGIC
     case CGROUP2_SUPER_MAGIC:
-#endif /* CGROUP2_SUPER_MAGIC */
     case SELINUX_MAGIC:
-#ifdef SMACK_MAGIC
     case SMACK_MAGIC:
-#endif /* SMACK_MAGIC */
     case SYSFS_MAGIC:
     case PROC_SUPER_MAGIC:
     case SOCKFS_MAGIC:
@@ -259,14 +257,9 @@ static __always_inline bool __is_special_filesystem(struct super_block *sb)
     case ANON_INODE_FS_MAGIC:
     case DEBUGFS_MAGIC:
     case TRACEFS_MAGIC:
-#ifdef BINDERFS_SUPER_MAGIC
     case BINDERFS_SUPER_MAGIC:
-#endif /* BINDERFS_SUPER_MAGIC */
-#ifdef BPF_FS_MAGIC
     case BPF_FS_MAGIC:
-#endif /* BPF_FS_MAGIC */
     case NSFS_MAGIC:
-
         return true;
 
     default:
@@ -390,6 +383,49 @@ static __always_inline void __init_header_dynamic(u8 type, u8 state, struct data
                             (struct task_struct *)bpf_get_current_task());
 }
 
+
+static __always_inline
+struct kernfs_node *find_cgroup_node(const struct task_struct *task)
+{
+    enum cgroup_subsys_id___local {
+        pids_cgrp_id___local = 123,
+    };
+    int cgrp_id = 0;
+    struct css_set *css_set = NULL;
+    struct kernfs_node *cgroup_node = NULL;
+
+    // Eventually add option to control how we get the cgroup path.
+
+    // Preload the task's rcu protected struct css_set
+    BPF_CORE_READ_INTO(&css_set, task, cgroups);
+    if (!css_set) {
+        return NULL;
+    }
+
+    // pids_cgrp_id value can vary between kernels
+    if (CONFIG_CGROUP_PIDS) {
+        // Ask target kernel what the value is for cgroup_subsys_id.pids_cgroup_id
+        cgrp_id = bpf_core_enum_value(enum cgroup_subsys_id___local,
+                                          pids_cgrp_id___local);
+        // Adjust pids_cgrp_id range before read
+        if (cgrp_id < 0 || cgrp_id >= CGROUP_SUBSYS_COUNT) {
+            cgrp_id = 0;
+        }
+    }
+    // If we have issues with this index selection approach we still
+    // have other options to make this more reliable.
+    BPF_CORE_READ_INTO(&cgroup_node, css_set,
+                       subsys[cgrp_id], cgroup, kn);
+
+    // The default cgroup kernfs node
+    if (!cgroup_node) {
+        BPF_CORE_READ_INTO(&cgroup_node, css_set, dfl_cgrp, kn);
+    }
+
+    return cgroup_node;
+}
+
+
 // Be careful with making changes to this function!
 // Can only read in 255 chunks at time, if the current arg pointer's
 // offset is incremented via a non-u8 variable, the verifier
@@ -492,35 +528,34 @@ char *compute_blob_ctx(u16 blob_size, struct blob_ctx *blob_ctx,
 }
 
 /* Will add the cgroup path on the blob in reversed order.
-   Should be arragned in the userspace */
-static __always_inline size_t blobify_cgroup_path(char *blob)
+   Should be arranged in the userspace */
+static size_t __blobify_cgroup_path(struct task_struct *task, char *blob)
 {
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    struct kernfs_node* cgroup_node = (struct kernfs_node *)BPF_CORE_READ(
-            task, cgroups, subsys[cpuset_cgrp_id], cgroup, kn);
+    struct kernfs_node *cgroup_node = NULL;
     size_t total_len = 0;
     size_t length = 0;
 
-    if (!task || !cgroup_node) {
+    if (!task) {
+        return 0;
+    }
+
+    cgroup_node = find_cgroup_node(task);
+    if (!cgroup_node) {
         return 0;
     }
 
 #pragma clang loop unroll(full)
-
     for (int i = 0; i < MAX_CGROUP_PATH_ITER; i++) {
-        barrier_var(cgroup_node);
-        barrier_var(blob);
         length = bpf_probe_read_str(blob, MAX_PATH_COMPONENT_SIZE, BPF_CORE_READ(cgroup_node, name));
         barrier_var(length);
         if (length > MAX_PATH_COMPONENT_SIZE) {
             goto out;
         }
-        barrier_var(total_len);
         barrier_var(length);
         total_len += length;
         blob += length;
 
-        cgroup_node = BPF_CORE_READ(cgroup_node, parent);
+        BPF_CORE_READ_INTO(&cgroup_node, cgroup_node, parent);
         if (!cgroup_node) {
             goto out;
         }
@@ -529,6 +564,11 @@ static __always_inline size_t blobify_cgroup_path(char *blob)
 out:
     return total_len;
 }
+
+// Helper to __blobify_cgroup_path
+#define blobify_cgroup_path(blob) \
+    __blobify_cgroup_path((struct task_struct *)bpf_get_current_task(), blob)
+
 
 static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
                                                     struct vfsmount **vfsmnt,
@@ -1164,7 +1204,7 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
         data_x->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
     }
 
-    blob_size = blobify_cgroup_path(blob_pos);
+    blob_size = __blobify_cgroup_path(task, blob_pos);
     blob_pos = compute_blob_ctx(blob_size, &data_x->cgroup_blob, &payload, blob_pos);
 
     data_x->header.payload = payload;
@@ -1850,57 +1890,6 @@ int BPF_KRETPROBE(kretpobe_udpv6_sendmsg)
     return trace_udp_sendmsg_return(ctx);
 }
 
-// Hook should have never been added
-//int on_cgroup_attach_task(struct pt_regs *ctx, struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup)
-//{
-//    struct kernfs_node *node = NULL;
-//
-//    bpf_probe_read(&node, sizeof(node), &(dst_cgrp->kn));
-//    if (node == NULL)
-//        return 0;
-//
-//    const char * cgroup_dirname = NULL;
-//    bpf_probe_read(&cgroup_dirname, sizeof(cgroup_dirname), &(node->name));
-//
-//    struct container_data data = {};
-//    __init_header(EVENT_CONTAINER_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-//
-//
-//    // Check for common container prefixes, and then try to read the full-length CONTAINER_ID
-//    unsigned int offset = 0;
-//    if (cb_bpf_probe_read_str(&data->net_data.container_id, 8, cgroup_dirname) == 8)
-//    {
-//
-//        if (data.container_id[0] == 'd' &&
-//            data.container_id[1] == 'o' &&
-//            data.container_id[2] == 'c' &&
-//            data.container_id[3] == 'k' &&
-//            data.container_id[4] == 'e' &&
-//            data.container_id[5] == 'r' &&
-//            data.container_id[6] == '-')
-//        {
-//            offset = 7;
-//        }
-//
-//        if (data.container_id[0] == 'l' &&
-//            data.container_id[1] == 'i' &&
-//            data.container_id[2] == 'b' &&
-//            data.container_id[3] == 'p' &&
-//            data.container_id[4] == 'o' &&
-//            data.container_id[5] == 'd' &&
-//            data.container_id[6] == '-')
-//        {
-//            offset = 7;
-//        }
-//    }
-//
-//    if (cb_bpf_probe_read_str(&data.container_id, CONTAINER_ID_LEN + 1, cgroup_dirname + offset) == CONTAINER_ID_LEN + 1)
-//    {
-//        send_event(ctx, &data, sizeof(data));
-//    }
-//
-//    return 0;
-//}
 
     // TODO: The collector is not currently handling the proxy event, so dont't bother sending it
     //        this needs to be reworked to send multiple events (similar to the file events)
