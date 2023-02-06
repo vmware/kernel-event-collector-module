@@ -60,7 +60,9 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
-        void setup_RegisterEventCallback(BpfApi::EventCallbackFn callback, bool result)
+        void setup_RegisterEventCallback(BpfApi::EventCallbackFn callback,
+                                         BpfApi::DroppedCallbackFn dropCallback,
+                                         bool result)
         {
             ::mock(BPF_API_SCOPE)
                     .expectOneCall(__MOCKED_FUNCTION__)
@@ -109,7 +111,8 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
 
-        bool RegisterEventCallback(EventCallbackFn callback) override
+        bool RegisterEventCallback(EventCallbackFn callback,
+                                   DroppedCallbackFn dropCallback) override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);

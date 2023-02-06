@@ -18,7 +18,7 @@
 // linking to newer libbpf like 1.0.0+
 _Bool LINUX_HAS_SYSCALL_WRAPPER = 1;
 
-char LICENSE[] SEC("license") = "Dual BSD/GPL";
+char LICENSE[] SEC("license") = "GPL";
 
 static const char ellipsis[] = "...";
 
