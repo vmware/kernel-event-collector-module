@@ -395,7 +395,8 @@ bool BpfApi::AutoAttach()
     return false;
 }
 
-bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
+bool BpfApi::RegisterEventCallback(EventCallbackFn callback,
+                                   DroppedCallbackFn dropCallback)
 {
     // Convert per CPU buffer bytes to approprite number of pages.
     // This is to correctly handle aarch64. https://docs.kernel.org/arm64/memory.html
@@ -425,7 +426,7 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
             struct perf_reader *perf_reader = static_cast<struct perf_reader *>(bpf_open_perf_buffer(
                 on_perf_submit,
                 on_perf_peek,
-                nullptr,
+                on_perf_dropped,
                 static_cast<void*>(this),
                 -1,
                 cpu,
@@ -468,6 +469,7 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
 
         m_epoll_data.reset(new epoll_event[m_perf_reader.size()]);
         m_eventCallbackFn = std::move(callback);
+        m_DroppedCallbackFn = std::move(dropCallback);
 
         return true;
     }
@@ -478,11 +480,12 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
     }
 
     m_eventCallbackFn = std::move(callback);
+    m_DroppedCallbackFn = std::move(dropCallback);
 
     auto result = m_BPF->open_perf_buffer("events",
                                           on_perf_submit,
                                           on_perf_peek,
-                                          nullptr,
+                                          on_perf_dropped,
                                           static_cast<void*>(this),
                                           perCPUPageCount);
 
@@ -726,6 +729,14 @@ void BpfApi::OnEvent(bpf_probe::Data data)
     m_event_list.emplace_back(std::move(data));
 }
 
+void BpfApi::OnDropped(uint64_t drop_count)
+{
+    if (m_DroppedCallbackFn)
+    {
+        m_DroppedCallbackFn(drop_count);
+    }
+}
+
 bool BpfApi::on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size)
 {
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
@@ -747,6 +758,16 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
         } 
         memcpy(data, orig_data, data_size);
         bpfApi->OnEvent(static_cast<bpf_probe::data *>(data));
+    }
+}
+
+void BpfApi::on_perf_dropped(void *cb_cookie, uint64_t drop_count)
+{
+    auto bpfApi = static_cast<BpfApi *>(cb_cookie);
+
+    if (bpfApi)
+    {
+        bpfApi->OnDropped(drop_count);
     }
 }
 

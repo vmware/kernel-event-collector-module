@@ -23,6 +23,7 @@ static void ParseArgs(int argc, char** argv);
 static void ReadProbeSource(const std::string &probe_source);
 static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 static void ProbeEventCallback(Data data);
+static void DroppedCallback(uint64_t drop_count);
 static std::string EventToBlobStrings(const data *event);
 
 static std::string s_bpf_program;
@@ -74,7 +75,8 @@ int main(int argc, char *argv[])
 
     if (read_events)
     {
-        auto didRegister = bpf_api->RegisterEventCallback(ProbeEventCallback);
+        auto didRegister = bpf_api->RegisterEventCallback(ProbeEventCallback,
+                                                          DroppedCallback);
         if (!didRegister)
         {
             printf("Failed to register callback\n");
@@ -215,6 +217,11 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
     }
 
     return true;
+}
+
+static void DroppedCallback(uint64_t drop_count)
+{
+    std::cout << "DROPPED EVENTS:" << drop_count << std::endl;
 }
 
 void ProbeEventCallback(Data data)

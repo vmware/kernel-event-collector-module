@@ -63,6 +63,7 @@ namespace bpf_probe {
     public:
         using UPtr = std::unique_ptr<IBpfApi>;
         using EventCallbackFn = std::function<void(bpf_probe::Data data)>;
+        using DroppedCallbackFn = std::function<void(uint64_t drop_count)>;
 
         static const uint64_t POLL_TIMEOUT_MS = 300;
         static constexpr int  MAX_PERCPU_BUFFER_SIZE = (1024 * 4096);
@@ -99,7 +100,8 @@ namespace bpf_probe {
 
         virtual bool AutoAttach() = 0;
 
-        virtual bool RegisterEventCallback(EventCallbackFn callback) = 0;
+        virtual bool RegisterEventCallback(EventCallbackFn callback,
+                                           DroppedCallbackFn dropCallback) = 0;
 
         virtual int PollEvents() = 0;
 
@@ -176,6 +178,7 @@ namespace bpf_probe {
     protected:
         std::string                 m_ErrorMessage;
         EventCallbackFn             m_eventCallbackFn;
+        DroppedCallbackFn           m_DroppedCallbackFn;
         ProgInstanceType            m_ProgInstanceType;
     };
 
@@ -202,7 +205,8 @@ namespace bpf_probe {
 
         bool AutoAttach() override;
 
-        bool RegisterEventCallback(EventCallbackFn callback) override;
+        bool RegisterEventCallback(EventCallbackFn callback,
+                                   DroppedCallbackFn dropCallback) override;
 
         int PollEvents() override;
 
@@ -242,9 +246,11 @@ namespace bpf_probe {
 
         bool OnPeek(const bpf_probe::Data data);
         void OnEvent(bpf_probe::Data data);
+        void OnDropped(uint64_t drop_count);
 
         static bool on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size);
         static void on_perf_submit(void *cb_cookie, void *data, int data_size);
+        static void on_perf_dropped(void *cb_cookie, uint64_t drop_count);
 
         std::unique_ptr<ebpf::BPF>  m_BPF;
         bool                        m_try_libbpf;
