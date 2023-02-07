@@ -305,6 +305,9 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
     {
     case CB_EVENT_TYPE_PROCESS_EXIT:
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
+        // For exit events don't store exec identity, which otherwise can create
+        // long chains of last_event -> exec_identity -> last_event ... links
+        break;
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
     case CB_EVENT_TYPE_PROCESS_BLOCKED:
         // For process start events we hold a reference to the parent process
