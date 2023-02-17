@@ -237,7 +237,10 @@ void ProbeEventCallback(Data data)
                << BpfApi::TypeToString(data.data->header.type) << "::"
                << BpfApi::StateToString(data.data->header.state) << " "
                << "tid:" << data.data->header.tid << " "
+               << "pid:" << data.data->header.pid << " "
+               << "pid_ns_vnr:" << data.data->header.pid_ns_vnr << " "
                << "ppid:" << data.data->header.ppid << " "
+               << "pid_ns:" << data.data->header.pid_ns << " "
                << "mnt_ns:" << data.data->header.mnt_ns;
 
         if (data.data->header.report_flags & REPORT_FLAGS_DYNAMIC)

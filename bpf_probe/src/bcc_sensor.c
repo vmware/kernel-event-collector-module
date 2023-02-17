@@ -317,6 +317,44 @@ static inline bool __has_fmode_nonotify(const struct file *file)
 #endif
 }
 
+static inline struct pid *select_task_pid(struct task_struct *task)
+{
+    struct pid *pid = NULL;
+
+#if defined(RHEL_MAJOR) && defined(RHEL_MINOR) && RHEL_MAJOR == 8 && RHEL_MINOR > 0
+    bpf_probe_read(&pid, sizeof(pid), &task->thread_pid);
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+    bpf_probe_read(&pid, sizeof(pid), &task->pids[PIDTYPE_PID].pid);
+#else
+    bpf_probe_read(&pid, sizeof(pid), &task->thread_pid);
+#endif
+    return pid;
+}
+
+static __always_inline void set_pid_ns_data(struct data_header *hdr,
+                                            struct task_struct *task)
+{
+    struct task_struct *group_leader = NULL;
+    struct pid *pid = NULL;
+
+    // Assumes group_leader is in the same pid_ns current task is in.
+    bpf_probe_read(&group_leader, sizeof(group_leader), &task->group_leader);
+    pid = select_task_pid(group_leader);
+    if (pid) {
+        struct pid_namespace *pid_ns = NULL;
+        unsigned int level = 0;
+
+        bpf_probe_read(&level, sizeof(level), &pid->level);
+        bpf_probe_read(&pid_ns, sizeof(pid_ns), &pid->numbers[level].ns);
+
+        // Set both at the when pid_ns is available
+        if (pid_ns) {
+            bpf_probe_read(&hdr->pid_ns, sizeof(hdr->pid_ns), &pid_ns->ns.inum);
+            bpf_probe_read(&hdr->pid_ns_vnr, sizeof(hdr->pid_ns_vnr), &pid->numbers[level].nr);
+        }
+    }
+}
+
 static inline void __init_header_with_task(u8 type, u8 state, struct data_header *header, struct task_struct *task)
 {
 	header->type = type;
@@ -335,6 +373,7 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
 			header->ppid = task->real_parent->tgid;
 		}
 		header->mnt_ns = __get_mnt_ns_id(task);
+		set_pid_ns_data(header, task);
 	}
 #else
 	u64 id = bpf_get_current_pid_tgid();

@@ -77,3 +77,14 @@ static __always_inline u32 new_encode_dev(dev_t dev)
 
     return (minor & 0xff) | (major << 8) | ((minor & ~0xff) << 12);
 }
+
+// Custom structs
+
+// Handle pid_link before migration pid_thread in task_struct. Roughly
+// targets 4.19.x kernels.
+struct task_struct___pdlink {
+    struct pid_link {
+        struct hlist_node node;
+        struct pid *pid;
+    } pids[PIDTYPE_MAX];
+};

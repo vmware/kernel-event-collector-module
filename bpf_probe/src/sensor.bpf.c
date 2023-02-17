@@ -348,6 +348,52 @@ static __always_inline bool __has_fmode_nonotify(const struct file *file)
            ((BPF_CORE_READ(file, f_flags) & O_ACCMODE) == O_RDONLY);
 }
 
+
+static __always_inline struct pid *select_task_pid(struct task_struct *task)
+{
+    struct pid *pid = NULL;
+
+    // Not likely but just in case we have a strange older BTF enabled kernel
+    // or use generated BTF info for something like RHEL8.0.
+    if (bpf_core_type_exists(struct pid_link)) {
+        struct task_struct___pdlink *task_pdlink = (typeof(task_pdlink))task;
+
+        BPF_CORE_READ_INTO(&pid, task_pdlink, pids[PIDTYPE_PID].pid);
+    } else {
+        BPF_CORE_READ_INTO(&pid, task, thread_pid);
+    }
+
+    return pid;
+}
+
+//
+// Currently provides the pid ns's id that also was used to obtain
+// the thread group leader's value. Since we really don't care about
+// a thread's virtual pid value aka if a thread is running in a
+// different pid ns, we can ignore providing that information.
+//
+static __always_inline void set_pid_ns_data(struct data_header *hdr,
+                                            struct task_struct *task)
+{
+    struct task_struct *group_leader = NULL;
+    struct pid *pid = NULL;
+
+    // Assumes group_leader is in the same pid_ns target task is in.
+    BPF_CORE_READ_INTO(&group_leader, task, group_leader);
+    pid = select_task_pid(group_leader);
+    if (pid) {
+        struct pid_namespace *pid_ns = NULL;
+        unsigned int level = 0;
+
+        BPF_CORE_READ_INTO(&level, pid, level);
+        BPF_CORE_READ_INTO(&pid_ns, pid, numbers[level].ns);
+        if (pid_ns) {
+            BPF_CORE_READ_INTO(&hdr->pid_ns, pid_ns, ns.inum);
+            BPF_CORE_READ_INTO(&hdr->pid_ns_vnr, pid, numbers[level].nr);
+        }
+    }
+}
+
 static __always_inline void __init_header_with_task(u8 type, u8 state, u16 report_flags,
                                                     struct data_header *header,
                                                     struct task_struct *task)
@@ -358,15 +404,13 @@ static __always_inline void __init_header_with_task(u8 type, u8 state, u16 repor
     header->payload = 0;
 
     if (task) {
-        header->tid = BPF_CORE_READ(task, pid);
-        header->pid = BPF_CORE_READ(task, tgid);
-        if (BPF_CORE_READ(task, cred)) { // TODO: use bpf_core_field_exists()?
-            header->uid = BPF_CORE_READ(task, cred, uid.val);
-        }
-        if (BPF_CORE_READ(task, real_parent)) {
-            header->ppid = BPF_CORE_READ(task, real_parent, tgid);
-        }
+        BPF_CORE_READ_INTO(&header->tid, task, pid);
+        BPF_CORE_READ_INTO(&header->pid, task, tgid);
+        BPF_CORE_READ_INTO(&header->uid, task, cred, uid.val);
+        BPF_CORE_READ_INTO(&header->ppid, task, real_parent, tgid);
         header->mnt_ns = __get_mnt_ns_id(task);
+
+        set_pid_ns_data(header, task);
     }
 }
 
