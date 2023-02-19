@@ -22,6 +22,7 @@ enum PP
     PP_FINALIZED,
     PP_APPEND,
     PP_DEBUG,
+    PP_CGROUP_AND_FINALIZED,
 };
 
 enum event_type
@@ -105,6 +106,10 @@ struct path_data {
 #endif
 };
 
+// same as path_data
+// separate name for clarity
+typedef struct path_data cgroup_data;
+
 #define MAXARG 30
 #define MAX_UCHAR_VAL 255
 // So for now use the safe chunk read/write size.
@@ -180,6 +185,7 @@ struct dns_data {
     char dns[DNS_SEGMENT_LEN];
     uint32_t name_len;
 };
+
 
 struct rename_data {
     struct data_header header;
