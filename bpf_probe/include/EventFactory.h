@@ -32,9 +32,11 @@ namespace bpf_probe {
 
             header.tid = pid;
             header.pid = pid;
+            header.pid_ns_vnr = 0;
             header.ppid = parent_pid;
             header.uid = 0;
             header.mnt_ns = 0;
+            header.pid_ns = 0;
         }
 
         static Event Data(

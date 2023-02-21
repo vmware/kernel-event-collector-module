@@ -946,6 +946,7 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
 {
     unsigned long exec_flags;
     unsigned long file_flags;
+    struct super_block *sb = NULL;
 
     struct file_path_data_x *data_x = NULL;
     uint32_t payload = offsetof(typeof(*data_x), blob);
@@ -985,6 +986,8 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
         }
     }
 
+    sb = _sb_from_file(file);
+
     data_x = __current_blob();
     if (!data_x) {
         goto out;
@@ -998,6 +1001,7 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     data_x->inode = __get_inode_from_file(file);
     data_x->flags = flags;
     data_x->prot = prot;
+    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
 
     // submit file path event data
     blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),

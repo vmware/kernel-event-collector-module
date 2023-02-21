@@ -402,18 +402,60 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 #define PATH_MSG_SIZE(DATA) (size_t)(sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
 #endif
 
-static inline u8 __set_cgroup_id_from_task(char cgroup_id[MAX_FNAME], struct task_struct* task) {
-    struct kernfs_node* cgroup_node = (struct kernfs_node *)(task->cgroups->subsys[cpuset_cgrp_id]->cgroup->kn);
-    if (!cgroup_node) {
-        return 0;
+// Obtains kernfs_node like sensor.bpf.c find_cgroup_node()
+static inline u8 cgroup_name_from_task(char *buf, struct task_struct *task)
+{
+    int cgrp_id = 0;
+    struct kernfs_node *cgroup_node = NULL;
+
+
+    // BCC seems to somtimes get confused with global enum values and ptr arrays.
+    // So let's manually read the objects.
+    struct css_set *css_set = NULL;
+
+    bpf_probe_read(&css_set, sizeof(css_set), &task->cgroups);
+    if (css_set) {
+        struct cgroup_subsys_state *subsys = NULL;
+
+#if defined(CONFIG_CGROUP_PIDS)
+        bpf_probe_read(&subsys, sizeof(subsys), css_set->subsys + pids_cgrp_id);
+        if (subsys) {
+            struct cgroup *cgroup = NULL;
+
+            bpf_probe_read(&cgroup, sizeof(cgroup), &subsys->cgroup);
+            if (cgroup) {
+                bpf_probe_read(&cgroup_node, sizeof(cgroup_node), &cgroup->kn);
+            }
+        }
+#endif /* CONFIG_CGROUP_PIDS */
+
+        if (!cgroup_node) {
+            bpf_probe_read(&subsys, sizeof(subsys), css_set->subsys);
+            if (subsys) {
+                struct cgroup *cgroup = NULL;
+
+                bpf_probe_read(&cgroup, sizeof(cgroup), &subsys->cgroup);
+                if (cgroup) {
+                    bpf_probe_read(&cgroup_node, sizeof(cgroup_node), &cgroup->kn);
+                }
+            }
+        }
     }
 
-    size_t length = cb_bpf_probe_read_str(cgroup_id, MAX_FNAME, cgroup_node->name);
-    return length;
+    if (cgroup_node) {
+        const char *name = NULL;
+        bpf_probe_read(&name, sizeof(name), &cgroup_node->name);
+
+        if (name) {
+            return (u8)cb_bpf_probe_read_str(buf, MAX_FNAME, name);
+        }
+    }
+
+    return 0;
 }
 
 static inline bool maybe_get_cgroup_data_from_task(cgroup_data *data, struct task_struct* task) {
-    u8 cgroup_length = __set_cgroup_id_from_task(data->fname, task);
+    u8 cgroup_length = cgroup_name_from_task(data->fname, task);
     if (cgroup_length > 0) {
         data->header.state = PP_CGROUP_AND_FINALIZED;
         data->size = cgroup_length;
@@ -915,6 +957,7 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 			  unsigned long prot, unsigned long flags)
 {
 	unsigned long exec_flags;
+	struct super_block *sb = NULL;
 
 	if (!file) {
 		goto out;
@@ -943,6 +986,8 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 #endif
 
+	sb = _sb_from_file(file);
+
 	DECLARE_FILE_EVENT(data);
 	if (!data) goto out;
 
@@ -953,6 +998,9 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	FILE_DATA(data)->inode = __get_inode_from_file(file);
 	FILE_DATA(data)->flags = flags;
 	FILE_DATA(data)->prot = prot;
+	if (sb) {
+		FILE_DATA(data)->fs_magic = sb->s_magic;
+	}
 	// submit initial event data
 	send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
 
