@@ -80,8 +80,8 @@ static __always_inline u32 new_encode_dev(dev_t dev)
 
 // Custom structs
 
-// Handle pid_link before migration pid_thread in task_struct. Roughly
-// targets 4.19.x kernels.
+// Handle pid_link before migration of pid_thread in task_struct. Roughly
+// targets RHEL8.1+ and 4.19.x+ kernels.
 struct task_struct___pdlink {
     struct pid_link {
         struct hlist_node node;

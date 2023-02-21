@@ -337,7 +337,7 @@ static __always_inline void set_pid_ns_data(struct data_header *hdr,
     struct task_struct *group_leader = NULL;
     struct pid *pid = NULL;
 
-    // Assumes group_leader is in the same pid_ns current task is in.
+    // Assumes group_leader is in the same pid_ns as current task.
     bpf_probe_read(&group_leader, sizeof(group_leader), &task->group_leader);
     pid = select_task_pid(group_leader);
     if (pid) {
@@ -347,7 +347,7 @@ static __always_inline void set_pid_ns_data(struct data_header *hdr,
         bpf_probe_read(&level, sizeof(level), &pid->level);
         bpf_probe_read(&pid_ns, sizeof(pid_ns), &pid->numbers[level].ns);
 
-        // Set both at the when pid_ns is available
+        // Sets both only when pid_ns is available
         if (pid_ns) {
             bpf_probe_read(&hdr->pid_ns, sizeof(hdr->pid_ns), &pid_ns->ns.inum);
             bpf_probe_read(&hdr->pid_ns_vnr, sizeof(hdr->pid_ns_vnr), &pid->numbers[level].nr);
