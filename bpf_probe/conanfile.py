@@ -24,14 +24,6 @@ class SHORT_NAME(CbConanFile):
 
     build_requires = "CPPUTEST_VERSION"
     default_options = (
-        "Boost:shared=False",
-        "Boost:without_program_options=False",
-        "Boost:without_thread=False",
-        "Boost:without_system=False",
-        "Boost:without_serialization=False",
-        "Boost:without_filesystem=False",
-        "Boost:without_chrono=False",
-        "Boost:fPIC=True",
         "elfutils:shared=False",
         "llvm:shared=False",
         "bcc:shared=False",
