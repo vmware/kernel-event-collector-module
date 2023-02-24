@@ -243,7 +243,6 @@ bool __ec_get_cmdline(struct task_struct const *task,
 
 struct file *__ec_get_file_from_mm(struct mm_struct *mm)
 {
-    struct vm_area_struct *vma;
     struct file *filep = NULL;
 
     if (!mm)
@@ -258,47 +257,11 @@ struct file *__ec_get_file_from_mm(struct mm_struct *mm)
     if (down_read_trylock(&mm->mmap_sem) == 0)
     {
         TRACE(DL_INFO, "%s: unable to down semaphore\n", __func__);
-        goto dentry_mm_exit;
-    }
-
-    vma = mm->mmap;
-
-    while (vma)
+    } else
     {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
-        if ((vma->vm_flags & VM_EXEC) && vma->vm_file)
-#else
-        if ((vma->vm_flags & VM_EXECUTABLE) && vma->vm_file)
-#endif
-        {
-            // If the vma's space contains the code seciton of the actual process, we have the correct one
-            if (vma->vm_start <= mm->start_code && vma->vm_end >= mm->end_code)
-            {
-                break;
-            }
-            // Otherwise, we're likely looking at a module with executable flags set
-            else
-            {
-                TRACE(DL_VERBOSE, "==========EXECUTABLE MODULE LOADED=========");
-                TRACE(DL_VERBOSE, "pid:%u (%s)", current->pid, current->comm);
-                TRACE(DL_VERBOSE, "    vma count:    %d", mm->map_count);
-                TRACE(DL_VERBOSE, "    code section: 0x%lx -> 0x%lx", mm->start_code, mm->end_code);
-                TRACE(DL_VERBOSE, "    vma(exeflag): 0x%lx -> 0x%lx", vma->vm_start, vma->vm_end);
-                TRACE(DL_VERBOSE, "    Invalid dentry reference as this executable section is not part of process code.");
-                TRACE(DL_VERBOSE, "    Continuing to search vma list...");
-                TRACE(DL_VERBOSE, "===========================================");
-            }
-        }
-        vma = vma->vm_next;
+        filep = mm->exe_file;
+        up_read(&mm->mmap_sem);
     }
-
-    if (vma && vma->vm_file)
-    {
-        filep = vma->vm_file;
-    }
-
-    up_read(&mm->mmap_sem);
-
 dentry_mm_exit:
     return filep;
 }
