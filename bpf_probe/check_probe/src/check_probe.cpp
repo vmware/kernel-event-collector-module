@@ -236,8 +236,8 @@ void ProbeEventCallback(Data data)
                 (data.data->header.state == PP_CGROUP_AND_FINALIZED) ||
                 (data.data->header.state == PP_NO_EXTRA_DATA);
         bool hasPathData = (data.data->header.state == PP_PATH_COMPONENT) ||
-                (data.data->header.state == PP_ENTRY_POINT) ||
-                (data.data->header.state == PP_APPEND) ||
+                (data.data->header.state == PP_ENTRY_POINT && data.data->header.type == EVENT_PROCESS_EXEC_ARG) ||
+                (data.data->header.state == PP_APPEND && data.data->header.type != EVENT_NET_CONNECT_DNS_RESPONSE) ||
                 (data.data->header.state == PP_CGROUP_AND_FINALIZED);
 
         if (isStartingMessage) {

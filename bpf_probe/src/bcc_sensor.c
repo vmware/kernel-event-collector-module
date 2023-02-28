@@ -363,18 +363,61 @@ static inline void __init_header(u8 type, u8 state, struct data_header *header)
 #define PATH_MSG_SIZE(DATA) (size_t)(sizeof(struct path_data) - MAX_FNAME + (DATA)->size)
 #endif
 
-static inline u8 __set_cgroup_id_from_task(char cgroup_id[MAX_FNAME], struct task_struct* task) {
-    struct kernfs_node* cgroup_node = (struct kernfs_node *)(task->cgroups->subsys[cpuset_cgrp_id]->cgroup->kn);
-    if (!cgroup_node) {
-        return 0;
+static inline u8 cgroup_name_from_task(char *buf, struct task_struct *task)
+{
+    int cgrp_id = 0;
+    struct kernfs_node *cgroup_node = NULL;
+
+
+    // BCC seems to somtimes get confused with global enum values and ptr arrays
+    struct css_set *css_set = NULL;
+
+    bpf_probe_read(&css_set, sizeof(css_set), &task->cgroups);
+    if (css_set) {
+        struct cgroup_subsys_state *subsys = NULL;
+
+#if defined(CONFIG_CGROUP_PIDS)
+        bpf_probe_read(&subsys, sizeof(subsys), css_set->subsys + pids_cgrp_id);
+        if (subsys) {
+            struct cgroup *cgroup = NULL;
+
+            bpf_probe_read(&cgroup, sizeof(cgroup), &subsys->cgroup);
+            if (cgroup) {
+                bpf_probe_read(&cgroup_node, sizeof(cgroup_node), &cgroup->kn);
+            }
+        }
+#endif /* CONFIG_CGROUP_PIDS */
+
+        if (!cgroup_node) {
+            bpf_probe_read(&subsys, sizeof(subsys), css_set->subsys);
+            if (subsys) {
+                struct cgroup *cgroup = NULL;
+
+                bpf_probe_read(&cgroup, sizeof(cgroup), &subsys->cgroup);
+                if (cgroup) {
+                    bpf_probe_read(&cgroup_node, sizeof(cgroup_node), &cgroup->kn);
+                }
+            }
+        }
     }
 
-    size_t length = cb_bpf_probe_read_str(cgroup_id, MAX_FNAME, cgroup_node->name);
-    return length;
+    // TODO: Check if getting default cgroup as a backup is portable
+
+    if (cgroup_node) {
+        const char *name = NULL;
+        bpf_probe_read(&name, sizeof(name), &cgroup_node->name);
+
+        if (name) {
+            return (u8)cb_bpf_probe_read_str(buf, MAX_FNAME, name);
+        }
+    }
+
+    return 0;
 }
 
-static inline bool maybe_get_cgroup_data_from_task(cgroup_data *data, struct task_struct* task) {
-    u8 cgroup_length = __set_cgroup_id_from_task(data->fname, task);
+static inline bool maybe_get_cgroup_data_from_task(cgroup_data *data, struct task_struct* task)
+{
+    u8 cgroup_length = cgroup_name_from_task(data->fname, task);
     if (cgroup_length > 0) {
         data->header.state = PP_CGROUP_AND_FINALIZED;
         data->size = cgroup_length;
@@ -384,12 +427,18 @@ static inline bool maybe_get_cgroup_data_from_task(cgroup_data *data, struct tas
     }
 }
 
-static inline bool maybe_get_cgroup_data(cgroup_data *data) {
+static inline bool maybe_get_cgroup_data(cgroup_data *data)
+{
+// Basically only clone will have the cgroup name
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
+    return false;
+#else
     struct task_struct *task = (struct task_struct *)bpf_get_current_task();
     if (!task) {
         return false;
     }
     return maybe_get_cgroup_data_from_task(data, task);
+#endif
 }
 
 
@@ -767,11 +816,9 @@ int after_sys_execve(struct pt_regs *ctx)
 		 __init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
+		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct exec_data));
 	}
-
-	send_event(ctx, &data, sizeof(struct exec_data));
 
 	return 0;
 }
@@ -1117,7 +1164,7 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
         __init_header_with_task(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header, task);
 		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
+		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct file_data));
 	}
 
@@ -1200,54 +1247,21 @@ static inline bool has_ip_cache(struct ip_key *ip_key, u8 flow)
 	return false;
 }
 
-static inline bool has_ip6_cache_by_flow(struct ip6_key *ip6_key, u8 flow)
+static inline bool has_ip6_cache(struct ip6_key *ip6_key, u8 flow)
 {
-	struct ip_entry *ip_entry = NULL;
-	u16 saved_port;
-
-	if (flow == FLOW_RX)
-	{
-		saved_port = ip6_key->remote_port;
-		ip6_key->remote_port = 0;
-	} else {
-		saved_port = ip6_key->local_port;
-		ip6_key->local_port = 0;
-	}
-
-	ip_entry = ip6_cache.lookup(ip6_key);
-	if (!ip_entry) {
-		struct ip_entry new_entry = {};
-		new_entry.flow = flow;
-		ip6_cache.insert(ip6_key, &new_entry);
-	}
-
-	if (flow == FLOW_RX)
-	{
-		ip6_key->remote_port = saved_port;
-	} else {
-		ip6_key->local_port = saved_port;
-	}
-
-	if (ip_entry) {
-		return true;
-	}
-	return false;
-}
-
-static inline bool has_ip6_cache(struct ip6_key *ip6_key) {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0)
 	struct ip6_key *ip_entry = ip6_cache.lookup(&ip6_key->pid);
 	if (ip_entry) {
 		if (ip_entry->remote_port == ip6_key->remote_port &&
-			ip_entry->local_port == ip6_key->local_port &&
-			ip_entry->remote_addr6[0] == ip6_key->remote_addr6[0] &&
-			ip_entry->remote_addr6[1] == ip6_key->remote_addr6[1] &&
-			ip_entry->remote_addr6[2] == ip6_key->remote_addr6[2] &&
-			ip_entry->remote_addr6[3] == ip6_key->remote_addr6[3] &&
-			ip_entry->local_addr6[0] == ip6_key->local_addr6[0] &&
-			ip_entry->local_addr6[1] == ip6_key->local_addr6[1] &&
-			ip_entry->local_addr6[2] == ip6_key->local_addr6[2] &&
-			ip_entry->local_addr6[3] == ip6_key->local_addr6[3]) {
+		    ip_entry->local_port == ip6_key->local_port &&
+		    ip_entry->remote_addr6[0] == ip6_key->remote_addr6[0] &&
+		    ip_entry->remote_addr6[1] == ip6_key->remote_addr6[1] &&
+		    ip_entry->remote_addr6[2] == ip6_key->remote_addr6[2] &&
+		    ip_entry->remote_addr6[3] == ip6_key->remote_addr6[3] &&
+		    ip_entry->local_addr6[0] == ip6_key->local_addr6[0] &&
+		    ip_entry->local_addr6[1] == ip6_key->local_addr6[1] &&
+		    ip_entry->local_addr6[2] == ip6_key->local_addr6[2] &&
+		    ip_entry->local_addr6[3] == ip6_key->local_addr6[3]) {
 			return true;
 		} else {
 			// Update entry
@@ -1256,10 +1270,44 @@ static inline bool has_ip6_cache(struct ip6_key *ip6_key) {
 	} else {
 		ip6_cache.insert(&ip6_key->pid, ip6_key);
 	}
-	return false;
 #else
-	return has_ip6_cache_by_flow(ip6_key, FLOW_RX) || has_ip6_cache_by_flow(ip6_key, FLOW_TX);
+	struct ip_entry *ip_entry = NULL;
+	struct ip_entry new_entry;
+
+	u16 local_port = ip6_key->local_port;
+	u16 remote_port = ip6_key->remote_port;
+
+	new_entry.flow = flow;
+	if (flow == FLOW_RX) {
+		ip6_key->remote_port = 0;
+	} else {
+		ip6_key->local_port = 0;
+	}
+
+	// Check main pkt flow and insert as needed.
+	ip_entry = ip6_cache.lookup(ip6_key);
+	if (ip_entry) {
+		return true;
+	}
+	ip6_cache.insert(ip6_key, &new_entry);
+
+	// Fix up alternate flow ports
+	if (flow == FLOW_RX) {
+		ip6_key->remote_port = remote_port;
+		ip6_key->local_port = 0;
+	} else {
+		ip6_key->remote_port = 0;
+		ip6_key->local_port = local_port;
+	}
+
+	// Check alt flow and insert as needed.
+	ip_entry = ip6_cache.lookup(ip6_key);
+	if (ip_entry) {
+		return true;
+	}
+	ip6_cache.insert(ip6_key, &new_entry);
 #endif
+	return false;
 }
 #endif /* CACHE_UDP */
 
@@ -1279,11 +1327,10 @@ int on_do_exit(struct pt_regs *ctx, long code)
 	cgroup_data cgroup_data = {};
 	bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
 	if (has_cgroup_data) {
-		send_event(ctx, &data, sizeof(struct data));
-        __init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
+        __init_header(EVENT_PROCESS_EXIT, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
+		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct data));
 	}
 
@@ -1378,7 +1425,7 @@ static int trace_connect_return(struct pt_regs *ctx)
 		__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
+		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct net_data));
 	}
 
@@ -1481,7 +1528,7 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 				   &ipv6hdr->daddr.s6_addr32);
 		bpf_probe_read(ip_key.local_addr6, sizeof(data.local_addr6),
 				   &ipv6hdr->saddr.s6_addr32);
-		if (has_ip6_cache(&ip_key)) {
+		if (has_ip6_cache(&ip_key, FLOW_RX)) {
 			return 0;
 		}
 #endif /* CACHE_UDP */
@@ -1496,7 +1543,7 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 		__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
+		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct net_data));
 	}
 
@@ -1541,7 +1588,7 @@ int trace_accept_return(struct pt_regs *ctx)
 				__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 				send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 			} else {
-				data.header.type = PP_NO_EXTRA_DATA;
+				data.header.state = PP_NO_EXTRA_DATA;
 				send_event(ctx, &data, sizeof(struct net_data));
 			}
 
@@ -1560,7 +1607,7 @@ int trace_accept_return(struct pt_regs *ctx)
 			__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 			send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 		} else {
-			data.header.type = PP_NO_EXTRA_DATA;
+			data.header.state = PP_NO_EXTRA_DATA;
 			send_event(ctx, &data, sizeof(struct net_data));
 		}
 
@@ -1793,7 +1840,7 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         bpf_probe_read(
             ip_key.local_addr6, sizeof(data.local_addr6),
             &data.local_addr6);
-        if (has_ip6_cache(&ip_key))
+        if (has_ip6_cache(&ip_key, FLOW_TX))
         {
             goto out;
         }
@@ -1806,7 +1853,7 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 		__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
 		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
 	} else {
-		data.header.type = PP_NO_EXTRA_DATA;
+		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct net_data));
 	}
 
