@@ -11,7 +11,7 @@ from conan_util.CbConanFile import CbConanFile
 class KernelEventCollectorModule(CbConanFile):
     name     = "KernelEventCollectorModule"
     version  = "PACKAGE_VERSION"
-    settings = "os", "arch"
+    settings = "os", "compiler", "arch"
     generators = "cmake"
     options = {
         'module_name': ['event_collector', 'cbsensor']

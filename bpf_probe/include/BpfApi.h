@@ -4,16 +4,14 @@
 #pragma once
 
 #include "bcc_sensor.h"
-
 #include <functional>
 #include <memory>
 #include <list>
 #include <vector>
 #include <chrono>
-
 #include <sys/epoll.h>
-
 #include <bpf/libbpf.h>
+#include <stdexcept>
 
 // A number of calls are annotated with 'warn_unused_result' in their definition, so a
 // normal (void) cast is not enough to satisfy the compiler. The added negation (!) tricks
