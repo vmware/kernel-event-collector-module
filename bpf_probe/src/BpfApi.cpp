@@ -213,19 +213,27 @@ bool BpfApi::AttachProbe(const char * name,
     return result.ok();
 }
 
-bool BpfApi::RegisterEventCallback(EventCallbackFn callback)
+bool BpfApi::RegisterEventCallback(EventCallbackFn callback,
+                                   DroppedCallbackFn dropCallback)
 {
+    // Convert per CPU buffer bytes to approprite number of pages.
+    // This is to correctly handle aarch64. https://docs.kernel.org/arm64/memory.html
+    int perCPUPageCount = MAX_PERCPU_BUFFER_SIZE / getpagesize();
+ 
     if (!m_BPF)
     {
         return false;
     }
 
     m_eventCallbackFn = std::move(callback);
+    m_DroppedCallbackFn = std::move(dropCallback);
 
-    // Trying 1024 pages so we don't drop so many events, no dropped
-    // even callback for now.
-    auto result = m_BPF->open_perf_buffer(
-            "events", on_perf_submit, on_perf_peek, nullptr, static_cast<void*>(this), 1024);
+    auto result = m_BPF->open_perf_buffer("events",
+                                          on_perf_submit,
+                                          on_perf_peek,
+                                          on_perf_dropped,
+                                          static_cast<void*>(this),
+                                          perCPUPageCount);
 
     if (!result.ok())
     {
@@ -438,6 +446,14 @@ void BpfApi::OnEvent(bpf_probe::Data data)
     m_event_list.emplace_back(std::move(data));
 }
 
+void BpfApi::OnDropped(uint64_t drop_count)
+{
+    if (m_DroppedCallbackFn)
+    {
+        m_DroppedCallbackFn(drop_count);
+    }
+}
+
 bool BpfApi::on_perf_peek(int cpu, void *cb_cookie, void *data, int data_size)
 {
     auto bpfApi = static_cast<BpfApi*>(cb_cookie);
@@ -462,6 +478,15 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
     }
 }
 
+void BpfApi::on_perf_dropped(void *cb_cookie, uint64_t drop_count)
+{
+    auto bpfApi = static_cast<BpfApi *>(cb_cookie);
+
+    if (bpfApi)
+    {
+        bpfApi->OnDropped(drop_count);
+    }
+}
 
 bool BpfApi::ClearUDPCache4()
 {
