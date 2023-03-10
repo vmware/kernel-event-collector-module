@@ -167,6 +167,7 @@ bool BpfApi::AttachProbe(const char * name,
 
     std::string           alternate;
     bpf_probe_attach_type attach_type;
+    int                   maxactive = 0;
     switch (type)
     {
     case ProbeType::LookupEntry:
@@ -184,6 +185,10 @@ bool BpfApi::AttachProbe(const char * name,
         [[fallthrough]];
     case ProbeType::Return:
         attach_type = BPF_PROBE_RETURN;
+        // The kernel supports a max number of active hooks.  Due to our inline blocking logic, the
+        //  default is not enough.
+        // https://www.kernel.org/doc/Documentation/kprobes.txt
+        maxactive = 256 * sysconf(_SC_NPROCESSORS_CONF);
         break;
     case ProbeType::Tracepoint:
     {
@@ -203,7 +208,8 @@ bool BpfApi::AttachProbe(const char * name,
             name,
             callback,
             0,
-            attach_type);
+            attach_type,
+            maxactive);
 
     if (!result.ok())
     {
