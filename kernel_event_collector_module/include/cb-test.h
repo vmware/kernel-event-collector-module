@@ -70,3 +70,13 @@ do { \
 } while (false)
 
 #define ATOMIC64_DEC__CHECK_NEG(counter) IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(counter, {})
+
+extern bool g_panic_on_error __read_mostly;
+
+#define CB_BUG() \
+    if (g_panic_on_error) \
+    { \
+        BUG(); \
+    } else { \
+        dump_stack(); \
+    }

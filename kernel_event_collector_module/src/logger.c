@@ -262,7 +262,7 @@ PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     node = (CB_EVENT_NODE *)ec_mem_cache_alloc(&s_event_cache, context);
 
     TRY_DO(node, {
-        TRACE(DL_WARNING, "Error allocating event with mode %s", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL");
+        TRACE(DL_WARNING, "Error allocating event with mode %s, pid: %d", IS_ATOMIC(context) ? "ATOMIC" : "KERNEL", context->pid);
     });
 
     memset(node, 0, sizeof(*node));
