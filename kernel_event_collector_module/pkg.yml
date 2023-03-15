@@ -7,5 +7,6 @@ options:
     - module_name=cbsensor
 builders:
     override:
+        - gcc112-relwithdebinfo
         - gcc73-relwithdebinfo
 
