@@ -188,7 +188,7 @@ bool BpfApi::AttachProbe(const char * name,
         // The kernel supports a max number of active hooks.  Due to our inline blocking logic, the
         //  default is not enough.
         // https://www.kernel.org/doc/Documentation/kprobes.txt
-        maxactive = 256 * sysconf(_SC_NPROCESSORS_CONF);
+        maxactive = 1536;
         break;
     case ProbeType::Tracepoint:
     {
