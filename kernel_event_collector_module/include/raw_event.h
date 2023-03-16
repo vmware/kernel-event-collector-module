@@ -30,11 +30,7 @@
 typedef enum CB_CONFIG_OPTION {
     NO_CHANGE                 = 0,
     DISABLE                   = 1,
-    ENABLE                    = 2,
-    ALL_FORKS_AND_EXITS       = 3,
-    EXECS_ONLY                = 4,
-    COLLAPSED_EXITS_ALL_FORKS = 5,
-    COLLAPSED_EXITS_NO_FORKS  = 6
+    ENABLE                    = 2
 } CB_CONFIG_OPTION;
 
 typedef struct CB_DRIVER_CONFIG {

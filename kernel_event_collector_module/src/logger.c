@@ -163,48 +163,13 @@ bool ec_logger_should_log(CB_EVENT_TYPE eventType)
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START_FORK:
-        switch (g_driver_config.processes)
-        {
-        case COLLAPSED_EXITS_ALL_FORKS:
-        case ALL_FORKS_AND_EXITS:
-            return true;
-        case EXECS_ONLY:
-        case COLLAPSED_EXITS_NO_FORKS:
-        case DISABLE:
-        default:
-            return false;
-        }
-        break;
-
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
     case CB_EVENT_TYPE_DISCOVER:
     case CB_EVENT_TYPE_DISCOVER_COMPLETE:
     case CB_EVENT_TYPE_DISCOVER_FLUSH:
-        return g_driver_config.processes != DISABLE;
-        break;
-
     case CB_EVENT_TYPE_PROCESS_EXIT:
-        switch (g_driver_config.processes)
-        {
-        case ALL_FORKS_AND_EXITS:
-            return true;
-        default:
-            return false;
-        }
-        break;
-
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-        switch (g_driver_config.processes)
-        {
-        case COLLAPSED_EXITS_ALL_FORKS:
-        case ALL_FORKS_AND_EXITS:
-        case COLLAPSED_EXITS_NO_FORKS:
-            return true;
-        case EXECS_ONLY:
-        case DISABLE:
-        default:
-            return false;
-        }
+        return g_driver_config.processes != DISABLE;
         break;
 
     case CB_EVENT_TYPE_MODULE_LOAD:

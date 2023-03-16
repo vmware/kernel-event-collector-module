@@ -1196,7 +1196,7 @@ int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
 
 void __ec_apply_legacy_driver_config(uint32_t eventFilter)
 {
-    g_driver_config.processes = (eventFilter & CB_EVENT_FILTER_PROCESSES ? ALL_FORKS_AND_EXITS : DISABLE);
+    g_driver_config.processes = (eventFilter & CB_EVENT_FILTER_PROCESSES ? ENABLE : DISABLE);
     g_driver_config.module_loads = (eventFilter & CB_EVENT_FILTER_MODULE_LOADS ? ENABLE : DISABLE);
     g_driver_config.file_mods = (eventFilter & CB_EVENT_FILTER_FILEMODS ? ENABLE : DISABLE);
     g_driver_config.net_conns = (eventFilter & CB_EVENT_FILTER_NETCONNS ? ENABLE : DISABLE);
@@ -1230,10 +1230,6 @@ char *__ec_driver_config_option_to_string(CB_CONFIG_OPTION config_option)
     case NO_CHANGE: str = STR(NO_CHANGE); break;
     case DISABLE: str = STR(DISABLE); break;
     case ENABLE: str = STR(ENABLE); break;
-    case ALL_FORKS_AND_EXITS: str = STR(ALL_FORKS_AND_EXITS); break;
-    case EXECS_ONLY: str = STR(EXECS_ONLY); break;
-    case COLLAPSED_EXITS_ALL_FORKS: str = STR(COLLAPSED_EXITS_ALL_FORKS); break;
-    case COLLAPSED_EXITS_NO_FORKS: str = STR(COLLAPSED_EXITS_NO_FORKS); break;
     }
     return str;
 }
