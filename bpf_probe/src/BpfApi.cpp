@@ -28,7 +28,7 @@
 
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
-namespace fs = boost::filesystem; 
+namespace fs = boost::filesystem;
 
 #define DEBUG_ORDER(BLOCK)
 //#define DEBUG_ORDER(BLOCK) BLOCK while(0)
@@ -327,6 +327,7 @@ bool BpfApi::AttachProbe(const char * name,
 
     std::string           alternate;
     bpf_probe_attach_type attach_type;
+    int                   maxactive = 0;
     switch (type)
     {
     case ProbeType::LookupEntry:
@@ -344,6 +345,10 @@ bool BpfApi::AttachProbe(const char * name,
         [[fallthrough]];
     case ProbeType::Return:
         attach_type = BPF_PROBE_RETURN;
+        // The kernel supports a max number of active hooks.  Due to our inline blocking logic, the
+        //  default is not enough.
+        // https://www.kernel.org/doc/Documentation/kprobes.txt
+        maxactive = 1536;
         break;
     case ProbeType::Tracepoint:
     {
@@ -363,7 +368,8 @@ bool BpfApi::AttachProbe(const char * name,
             name,
             callback,
             0,
-            attach_type);
+            attach_type,
+            maxactive);
 
     if (!result.ok())
     {
@@ -441,13 +447,13 @@ bool BpfApi::RegisterEventCallback(EventCallbackFn callback,
                 int perf_buf_fd = perf_reader_fd(perf_reader);
 
                 struct epoll_event event = {};
-                
+
                 event.events = EPOLLIN;
                 event.data.ptr = static_cast<void *>(perf_reader);
                 if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, perf_buf_fd, &event) != 0)
                 {
                     perf_reader_free(perf_reader);
-                    
+
                     m_ErrorMessage = std::string("epoll_ctl failed to add perf buf fd");
                     return false;
                 }
@@ -755,7 +761,7 @@ void BpfApi::on_perf_submit(void *cb_cookie, void *orig_data, int data_size)
         bpf_probe::data *data = reinterpret_cast<bpf_probe::data *>(new (std::nothrow) char[data_size]);
         if (!data) {
             return;
-        } 
+        }
         memcpy(data, orig_data, data_size);
         bpfApi->OnEvent(static_cast<bpf_probe::data *>(data));
     }
