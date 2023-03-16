@@ -46,7 +46,7 @@ bool     g_path_cache_ref_debug __read_mostly;
 bool     g_panic_on_error __read_mostly;
 
 CB_DRIVER_CONFIG g_driver_config  __read_mostly = {
-    .processes =            ALL_FORKS_AND_EXITS,
+    .processes =            ENABLE,
     .module_loads =         ENABLE,
     .file_mods =            ENABLE,
     .net_conns =            ENABLE,
