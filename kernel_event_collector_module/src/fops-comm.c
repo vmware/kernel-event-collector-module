@@ -344,6 +344,8 @@ void __ec_clear_tx_queue(ProcessContext *context)
     list_for_each_safe(eventNode, safeNode, &msg_queue)
     {
         list_del_init(eventNode);
+        // Coverity thinks that we are freeing a bad pointer here because of the container_of
+        // coverity[address_free:SUPPRESS]
         ec_free_event(&(container_of(eventNode, CB_EVENT_NODE, listEntry)->data), context);
         percpu_counter_dec(&tx_ready);
     }
@@ -367,6 +369,9 @@ void ec_user_comm_clear_queue(ProcessContext *context)
     ENABLE_SEND_EVENTS(context);
 }
 
+// Coverity thinks that we leak the event because we use containerof to get the list node.  Tell it that this
+//  will free the event
+// coverity[+free : arg-0]
 int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 {
     int                result     = -1;
@@ -980,8 +985,6 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
                 event->heartbeat.kernel_memory_peak = mem_kernel_peak;
                 ec_send_event(event, &context);
             }
-            // Coverity thinks that we leak the event because we use containerof to get the list node
-            // coverity[leaked_storage]
         }
         break;
 

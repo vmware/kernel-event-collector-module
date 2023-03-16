@@ -56,6 +56,9 @@ time_t ec_get_null_time(void)
     return TO_WIN_TIME(0, 0);
 }
 
+// Coverity thinks that we leak the event because we use containerof to get the list node.  Tell it that this
+//  will free the event
+// coverity[+free : arg-0]
 void ec_free_event(PCB_EVENT event, ProcessContext *context)
 {
     if (event)
@@ -211,6 +214,7 @@ bool ec_shouldExcludeByUID(ProcessContext *context, uid_t uid)
     return ec_banning_IgnoreUid(context, uid);
 }
 
+// coverity[+alloc]
 PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
 {
     CB_EVENT_NODE *node = NULL;
