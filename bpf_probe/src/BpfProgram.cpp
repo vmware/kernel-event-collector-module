@@ -108,9 +108,12 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
 
     // Exec Syscall Hooks
     BPF_LOOKUP_ENTRY_HOOK ("execve",   "syscall__on_sys_execve"),
-    BPF_LOOKUP_RETURN_HOOK("execve",   "after_sys_execve"),
+    BPF_OPTIONAL_TRACEPOINT("syscalls:sys_exit_execve", "on_sys_exit_execve"),
+    BPF_LOOKUP_ALTERNATE_RETURN_HOOK("syscalls:sys_exit_execve", "execve", "after_sys_execve"),
+
     BPF_LOOKUP_ENTRY_HOOK ("execveat", "syscall__on_sys_execveat"),
-    BPF_LOOKUP_RETURN_HOOK("execveat", "after_sys_execve"),
+    BPF_OPTIONAL_TRACEPOINT("syscalls:sys_exit_execveat", "on_sys_exit_execveat"),
+    BPF_LOOKUP_ALTERNATE_RETURN_HOOK("syscalls:sys_exit_execveat", "execveat", "after_sys_execve"),
 
     // Container Hooks
     BPF_ENTRY_HOOK("cgroup_attach_task", "on_cgroup_attach_task"),
