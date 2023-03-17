@@ -79,6 +79,9 @@ typedef enum CB_EVENT_TYPE {
   CB_EVENT_TYPE_PROCESS_START = 1,
   CB_EVENT_TYPE_PROCESS_EXIT = 2,
   CB_EVENT_TYPE_MODULE_LOAD = 3,
+  CB_EVENT_TYPE_DISCOVER = 4,          // Individual process discover
+  CB_EVENT_TYPE_DISCOVER_COMPLETE = 5, // Signal discover sequence is complete
+  CB_EVENT_TYPE_DISCOVER_FLUSH = 6,    // Signal process tracking should be flushed
 
   CB_EVENT_TYPE_FILE_CREATE = 10,
   CB_EVENT_TYPE_FILE_DELETE = 11,
@@ -157,6 +160,17 @@ typedef struct _CB_EVENT_PROCESS_START {
     bool observed; // Flag to identify if the start was actually observed, or this
                  // fake
 } CB_EVENT_PROCESS_START, *PCB_EVENT_PROCESS_START;
+
+
+typedef struct _CB_EVENT_PROCESS_DISCOVER {
+    char *path;
+    uint16_t path_size;
+    uint16_t path_offset;
+    uid_t uid;
+    bool observed; // Flag to identify if the start was actually observed, or this fake
+    ProcessDetails exec;
+    ProcessDetails exec_parent;
+} CB_EVENT_PROCESS_DISCOVER, *PCB_EVENT_PROCESS_DISCOVER;
 
 typedef struct _CB_EVENT_MODULE_LOAD {
     char *path;
@@ -393,6 +407,7 @@ typedef struct CB_EVENT {
     union {
         CB_EVENT_GENERIC_DATA generic_data;
         CB_EVENT_PROCESS_START processStart;
+        CB_EVENT_PROCESS_DISCOVER processDiscover;
         CB_EVENT_MODULE_LOAD moduleLoad;
 
         CB_EVENT_FILE_GENERIC fileGeneric;

@@ -80,6 +80,14 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             }
             break;
 
+        case CB_EVENT_TYPE_DISCOVER:
+            if (event->processDiscover.path)
+            {
+                ec_mem_free(event->processDiscover.path);
+                event->processDiscover.path = NULL;
+            }
+            break;
+
         case CB_EVENT_TYPE_MODULE_LOAD:
             if (event->moduleLoad.path)
             {
@@ -169,6 +177,9 @@ bool ec_logger_should_log(CB_EVENT_TYPE eventType)
         break;
 
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
+    case CB_EVENT_TYPE_DISCOVER:
+    case CB_EVENT_TYPE_DISCOVER_COMPLETE:
+    case CB_EVENT_TYPE_DISCOVER_FLUSH:
         return g_driver_config.processes != DISABLE;
         break;
 
