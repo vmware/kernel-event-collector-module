@@ -8,16 +8,17 @@
 #define BPF_REQUIRED false
 #define BPF_OPTIONAL true
 
-#define BPF_ENTRY_HOOK(NAME, CALLBACK)                    {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Entry,        BPF_REQUIRED}
-#define BPF_RETURN_HOOK(NAME, CALLBACK)                   {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Return,       BPF_REQUIRED}
-#define BPF_LOOKUP_ENTRY_HOOK(NAME, CALLBACK)             {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::LookupEntry,  BPF_REQUIRED}
-#define BPF_LOOKUP_RETURN_HOOK(NAME, CALLBACK)            {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::LookupReturn, BPF_REQUIRED}
-#define BPF_OPTIONAL_ENTRY_HOOK(NAME, CALLBACK)           {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Entry,        BPF_OPTIONAL}
-#define BPF_OPTIONAL_RETURN_HOOK(NAME, CALLBACK)          {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Return,       BPF_OPTIONAL}
-#define BPF_ALTERNATE_ENTRY_HOOK(NAME, ALT, CALLBACK)     {(NAME), (CALLBACK), (ALT),   cb_endpoint::bpf_probe::BpfApi::ProbeType::Entry,        BPF_REQUIRED}
-#define BPF_ALTERNATE_RETURN_HOOK(NAME, ALT, CALLBACK)    {(NAME), (CALLBACK), (ALT),   cb_endpoint::bpf_probe::BpfApi::ProbeType::Return,       BPF_REQUIRED}
-#define BPF_TRACEPOINT(NAME, CALLBACK)                    {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Tracepoint,   BPF_REQUIRED}
-#define BPF_OPTIONAL_TRACEPOINT(NAME, CALLBACK)           {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Tracepoint,   BPF_OPTIONAL}
+#define BPF_ENTRY_HOOK(NAME, CALLBACK)                          {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Entry,        BPF_REQUIRED}
+#define BPF_RETURN_HOOK(NAME, CALLBACK)                         {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Return,       BPF_REQUIRED}
+#define BPF_LOOKUP_ENTRY_HOOK(NAME, CALLBACK)                   {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::LookupEntry,  BPF_REQUIRED}
+#define BPF_LOOKUP_RETURN_HOOK(NAME, CALLBACK)                  {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::LookupReturn, BPF_REQUIRED}
+#define BPF_OPTIONAL_ENTRY_HOOK(NAME, CALLBACK)                 {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Entry,        BPF_OPTIONAL}
+#define BPF_OPTIONAL_RETURN_HOOK(NAME, CALLBACK)                {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Return,       BPF_OPTIONAL}
+#define BPF_ALTERNATE_ENTRY_HOOK(NAME, ALT, CALLBACK)           {(NAME), (CALLBACK), (ALT),   cb_endpoint::bpf_probe::BpfApi::ProbeType::Entry,        BPF_REQUIRED}
+#define BPF_ALTERNATE_RETURN_HOOK(NAME, ALT, CALLBACK)          {(NAME), (CALLBACK), (ALT),   cb_endpoint::bpf_probe::BpfApi::ProbeType::Return,       BPF_REQUIRED}
+#define BPF_TRACEPOINT(NAME, CALLBACK)                          {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Tracepoint,   BPF_REQUIRED}
+#define BPF_OPTIONAL_TRACEPOINT(NAME, CALLBACK)                 {(NAME), (CALLBACK), nullptr, cb_endpoint::bpf_probe::BpfApi::ProbeType::Tracepoint,   BPF_OPTIONAL}
+#define BPF_LOOKUP_ALTERNATE_RETURN_HOOK(NAME, ALT, CALLBACK)   {(NAME), (CALLBACK), (ALT),   cb_endpoint::bpf_probe::BpfApi::ProbeType::LookupReturn, BPF_REQUIRED}
 
 namespace cb_endpoint {
 namespace bpf_probe {

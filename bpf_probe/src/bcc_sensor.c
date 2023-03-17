@@ -124,6 +124,12 @@ struct mount {
 	void *cb_args;
 } __randomize_layout;
 
+struct syscalls_sys_exit_args {
+	__u64 pad;
+	int __syscall_nr;
+	long ret;
+};
+
 #define DNS_RESP_PORT_NUM 53
 #define DNS_RESP_MAXSIZE 512
 #define PROXY_SERVER_MAX_LEN 100
@@ -801,13 +807,12 @@ int syscall__on_sys_execve(struct pt_regs *ctx, const char __user *filename,
 	return 0;
 }
 
-//Note that this can be called more than one from the same pid
-int after_sys_execve(struct pt_regs *ctx)
+static inline void do_sys_exec_exit(void *ctx, long retval)
 {
 	struct exec_data data = {};
 
 	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_ENTRY_POINT, &data.header);
-	data.retval = PT_REGS_RC(ctx);
+	data.retval = (int)retval;
 
 	cgroup_data cgroup_data = {};
 	bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
@@ -819,7 +824,23 @@ int after_sys_execve(struct pt_regs *ctx)
 		data.header.state = PP_NO_EXTRA_DATA;
 		send_event(ctx, &data, sizeof(struct exec_data));
 	}
+}
 
+int after_sys_execve(struct pt_regs *ctx)
+{
+	do_sys_exec_exit(ctx, PT_REGS_RC(ctx));
+	return 0;
+}
+
+int on_sys_exit_execve(struct syscalls_sys_exit_args *args)
+{
+	do_sys_exec_exit(args, args->ret);
+	return 0;
+}
+
+int on_sys_exit_execveat(struct syscalls_sys_exit_args *args)
+{
+	do_sys_exec_exit(args, args->ret);
 	return 0;
 }
 
