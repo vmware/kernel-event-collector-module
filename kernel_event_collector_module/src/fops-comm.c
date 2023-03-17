@@ -28,6 +28,7 @@
 #include "cb-spinlock.h"
 #include "netfilter.h"
 #include "InodeState.h"
+#include "event-factory.h"
 
 const char DRIVER_NAME[] = CB_APP_MODULE_NAME;
 #define MINOR_COUNT 1
@@ -394,6 +395,9 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     {
         if (readyCount < s_fops_config.high_queue_size
             || msg->eventType == CB_EVENT_TYPE_PROCESS_START
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_COMPLETE
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_FLUSH
             || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
             || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
@@ -418,6 +422,9 @@ CATCH_DEFAULT:
         ++tx_dropped;
 
         if (msg->eventType == CB_EVENT_TYPE_PROCESS_START
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_COMPLETE
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_FLUSH
             || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
             || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
@@ -557,6 +564,17 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
         TRY_STEP(COPY_FAIL, !rc);
         break;
 
+    case CB_EVENT_TYPE_DISCOVER:
+        if (msg->processDiscover.path && msg->processDiscover.path_size)
+        {
+            rc = copy_to_user(p, msg->processDiscover.path, msg->processDiscover.path_size);
+            TRY_STEP(COPY_FAIL, !rc);
+            p += msg->processDiscover.path_size;
+        }
+        rc = put_user(0, &msg_user->event.processDiscover.path);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
     case CB_EVENT_TYPE_MODULE_LOAD:
         if (msg->moduleLoad.path && msg->moduleLoad.path_size)
         {
@@ -643,6 +661,9 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     switch (msg->eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START:
+    case CB_EVENT_TYPE_DISCOVER:
+    case CB_EVENT_TYPE_DISCOVER_COMPLETE:
+    case CB_EVENT_TYPE_DISCOVER_FLUSH:
     case CB_EVENT_TYPE_PROCESS_EXIT:
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         ++tx_process;
@@ -751,6 +772,13 @@ int ec_device_open(struct inode *inode, struct file *filp)
     }
 
     TRACE(DL_INFO, "%s: connected to device from pid[%d]", __func__, context.pid);
+
+    // When a new reader connects, send discovery events
+    if (g_module_state_info.module_enabled)
+    {
+        ec_event_send_discover_flush(&context);
+        ec_process_tracking_send_process_discovery(&context);
+    }
 
     return nonseekable_open(inode, filp);
 }
@@ -952,6 +980,8 @@ long ec_device_unlocked_ioctl(struct file *filep, unsigned int cmd_in, unsigned 
                 event->heartbeat.kernel_memory_peak = mem_kernel_peak;
                 ec_send_event(event, &context);
             }
+            // Coverity thinks that we leak the event because we use containerof to get the list node
+            // coverity[leaked_storage]
         }
         break;
 
@@ -1435,6 +1465,20 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
 
             cb_event->processStart.path_offset = payload;
             payload += cb_event->processStart.path_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_DISCOVER:
+        if (cb_event->processDiscover.path && cb_event->processDiscover.path_size)
+        {
+            if (cb_event->processDiscover.path_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "processDiscover.path_size: %d, %s", cb_event->processDiscover.path_size,
+                      cb_event->processDiscover.path);
+            }
+
+            cb_event->processDiscover.path_offset = payload;
+            payload += cb_event->processDiscover.path_size;
         }
         break;
 

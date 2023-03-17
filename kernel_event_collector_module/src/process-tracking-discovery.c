@@ -32,6 +32,7 @@ void ec_process_tracking_send_process_discovery(ProcessContext *context)
     //      enable the wake up logic.
     DISABLE_WAKE_UP(context);
     ec_sorted_tracking_table_for_each(__ec_send_process_discovery, NULL, context);
+    ec_event_send_discover_complete(context);
     ENABLE_WAKE_UP(context);
 
     ec_fops_comm_wake_up_reader(context);
@@ -46,9 +47,8 @@ void __ec_send_process_discovery(void *data, void *priv, ProcessContext *context
 
     TRY(handle);
 
-    ec_event_send_start(handle,
+    ec_event_send_discover(handle,
                     ec_process_tracking_should_track_user() ? ec_process_posix_identity(handle)->uid : (uid_t)-1,
-                    CB_PROCESS_START_BY_DISCOVER,
                     context);
 
 CATCH_DEFAULT:
