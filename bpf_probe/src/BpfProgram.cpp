@@ -115,8 +115,5 @@ const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
     BPF_OPTIONAL_TRACEPOINT("syscalls:sys_exit_execveat", "on_sys_exit_execveat"),
     BPF_LOOKUP_ALTERNATE_RETURN_HOOK("syscalls:sys_exit_execveat", "execveat", "after_sys_execve"),
 
-    // Container Hooks
-    BPF_ENTRY_HOOK("cgroup_attach_task", "on_cgroup_attach_task"),
-
     BPF_ENTRY_HOOK(nullptr,nullptr)
 };
