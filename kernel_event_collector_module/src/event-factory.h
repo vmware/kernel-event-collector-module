@@ -11,6 +11,13 @@ void ec_event_send_start(ProcessHandle  * process_handle,
                          int              start_action,
                          ProcessContext  *context);
 
+void ec_event_send_discover(ProcessHandle   *process_handle,
+                            uid_t            uid,
+                            ProcessContext  *context);
+
+void ec_event_send_discover_complete(ProcessContext *context);
+void ec_event_send_discover_flush(ProcessContext *context);
+
 void ec_event_send_last_exit(PCB_EVENT        event,
                              ProcessContext  *context);
 

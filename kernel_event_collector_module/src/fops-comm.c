@@ -28,6 +28,7 @@
 #include "cb-spinlock.h"
 #include "netfilter.h"
 #include "InodeState.h"
+#include "event-factory.h"
 
 const char DRIVER_NAME[] = CB_APP_MODULE_NAME;
 #define MINOR_COUNT 1
@@ -343,6 +344,8 @@ void __ec_clear_tx_queue(ProcessContext *context)
     list_for_each_safe(eventNode, safeNode, &msg_queue)
     {
         list_del_init(eventNode);
+        // Coverity thinks that we are freeing a bad pointer here because of the container_of
+        // coverity[address_free:SUPPRESS]
         ec_free_event(&(container_of(eventNode, CB_EVENT_NODE, listEntry)->data), context);
         percpu_counter_dec(&tx_ready);
     }
@@ -366,6 +369,9 @@ void ec_user_comm_clear_queue(ProcessContext *context)
     ENABLE_SEND_EVENTS(context);
 }
 
+// Coverity thinks that we leak the event because we use containerof to get the list node.  Tell it that this
+//  will free the event
+// coverity[+free : arg-0]
 int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
 {
     int                result     = -1;
@@ -394,6 +400,9 @@ int ec_send_event(struct CB_EVENT *msg, ProcessContext *context)
     {
         if (readyCount < s_fops_config.high_queue_size
             || msg->eventType == CB_EVENT_TYPE_PROCESS_START
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_COMPLETE
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_FLUSH
             || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
             || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
@@ -418,6 +427,9 @@ CATCH_DEFAULT:
         ++tx_dropped;
 
         if (msg->eventType == CB_EVENT_TYPE_PROCESS_START
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_COMPLETE
+            || msg->eventType == CB_EVENT_TYPE_DISCOVER_FLUSH
             || msg->eventType == CB_EVENT_TYPE_PROCESS_EXIT
             || msg->eventType == CB_EVENT_TYPE_PROCESS_LAST_EXIT)
         {
@@ -596,6 +608,17 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
         TRY_STEP(COPY_FAIL, !rc);
         break;
 
+    case CB_EVENT_TYPE_DISCOVER:
+        if (msg->processDiscover.path && msg->processDiscover.path_size)
+        {
+            rc = copy_to_user(p, msg->processDiscover.path, msg->processDiscover.path_size);
+            TRY_STEP(COPY_FAIL, !rc);
+            p += msg->processDiscover.path_size;
+        }
+        rc = put_user(0, &msg_user->event.processDiscover.path);
+        TRY_STEP(COPY_FAIL, !rc);
+        break;
+
     case CB_EVENT_TYPE_MODULE_LOAD:
         if (msg->moduleLoad.path && msg->moduleLoad.path_size)
         {
@@ -682,6 +705,9 @@ int __ec_copy_cbevent_to_user(char __user *ubuf, size_t count, ProcessContext *c
     switch (msg->eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START:
+    case CB_EVENT_TYPE_DISCOVER:
+    case CB_EVENT_TYPE_DISCOVER_COMPLETE:
+    case CB_EVENT_TYPE_DISCOVER_FLUSH:
     case CB_EVENT_TYPE_PROCESS_EXIT:
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
         ++tx_process;
@@ -790,6 +816,13 @@ int ec_device_open(struct inode *inode, struct file *filp)
     }
 
     TRACE(DL_INFO, "%s: connected to device from pid[%d]", __func__, context.pid);
+
+    // When a new reader connects, send discovery events
+    if (g_module_state_info.module_enabled)
+    {
+        ec_event_send_discover_flush(&context);
+        ec_process_tracking_send_process_discovery(&context);
+    }
 
     return nonseekable_open(inode, filp);
 }
@@ -1166,7 +1199,7 @@ int __ec_DoAction(ProcessContext *context, CB_EVENT_ACTION_TYPE action)
 
 void __ec_apply_legacy_driver_config(uint32_t eventFilter)
 {
-    g_driver_config.processes = (eventFilter & CB_EVENT_FILTER_PROCESSES ? ALL_FORKS_AND_EXITS : DISABLE);
+    g_driver_config.processes = (eventFilter & CB_EVENT_FILTER_PROCESSES ? ENABLE : DISABLE);
     g_driver_config.module_loads = (eventFilter & CB_EVENT_FILTER_MODULE_LOADS ? ENABLE : DISABLE);
     g_driver_config.file_mods = (eventFilter & CB_EVENT_FILTER_FILEMODS ? ENABLE : DISABLE);
     g_driver_config.net_conns = (eventFilter & CB_EVENT_FILTER_NETCONNS ? ENABLE : DISABLE);
@@ -1200,10 +1233,6 @@ char *__ec_driver_config_option_to_string(CB_CONFIG_OPTION config_option)
     case NO_CHANGE: str = STR(NO_CHANGE); break;
     case DISABLE: str = STR(DISABLE); break;
     case ENABLE: str = STR(ENABLE); break;
-    case ALL_FORKS_AND_EXITS: str = STR(ALL_FORKS_AND_EXITS); break;
-    case EXECS_ONLY: str = STR(EXECS_ONLY); break;
-    case COLLAPSED_EXITS_ALL_FORKS: str = STR(COLLAPSED_EXITS_ALL_FORKS); break;
-    case COLLAPSED_EXITS_NO_FORKS: str = STR(COLLAPSED_EXITS_NO_FORKS); break;
     }
     return str;
 }
@@ -1474,6 +1503,20 @@ int __ec_precompute_payload(struct CB_EVENT *cb_event)
 
             cb_event->processStart.path_offset = payload;
             payload += cb_event->processStart.path_size;
+        }
+        break;
+
+    case CB_EVENT_TYPE_DISCOVER:
+        if (cb_event->processDiscover.path && cb_event->processDiscover.path_size)
+        {
+            if (cb_event->processDiscover.path_size > PATH_MAX)
+            {
+                TRACE(DL_WARNING, "processDiscover.path_size: %d, %s", cb_event->processDiscover.path_size,
+                      cb_event->processDiscover.path);
+            }
+
+            cb_event->processDiscover.path_offset = payload;
+            payload += cb_event->processDiscover.path_size;
         }
         break;
 

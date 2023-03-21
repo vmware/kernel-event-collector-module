@@ -82,8 +82,72 @@ void ec_event_send_start(
     event->processStart.path  = ec_mem_get(ec_process_cmdline(process_handle), context);// take reference
     event->processStart.path_size = ec_mem_size(event->processStart.path);
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
+    ec_send_event(event, context);
+}
+
+void ec_event_send_discover(
+    ProcessHandle  * process_handle,
+    uid_t            uid,
+    ProcessContext  *context)
+{
+    PCB_EVENT event = NULL;
+
+    CANCEL_VOID(process_handle);
+
+    event = ec_factory_alloc_event(
+        process_handle,
+        CB_EVENT_TYPE_DISCOVER,
+        0, // No message will be printed
+        NULL,
+        NULL,
+        context);
+
+    CANCEL_VOID(event);
+
+    // Populate the event
+    event->processDiscover.uid            = uid;
+    event->processDiscover.observed       = ec_process_posix_identity(process_handle)->is_real_start;
+
+    event->processDiscover.path  = ec_mem_get(ec_process_cmdline(process_handle), context);// take reference
+    event->processDiscover.path_size = ec_mem_size(event->processDiscover.path);
+
+    memcpy(&event->processDiscover.exec, &ec_process_exec_identity(process_handle)->exec_details, sizeof(ProcessDetails));
+    memcpy(&event->processDiscover.exec_parent, &ec_process_exec_identity(process_handle)->exec_parent_details, sizeof(ProcessDetails));
+
+    ec_send_event(event, context);
+}
+
+void ec_event_send_discover_complete(ProcessContext  *context)
+{
+    PCB_EVENT event = NULL;
+
+    event = ec_factory_alloc_event(
+        NULL,
+        CB_EVENT_TYPE_DISCOVER_COMPLETE,
+        0, // No message will be printed
+        NULL,
+        NULL,
+        context);
+
+    CANCEL_VOID(event);
+
+    ec_send_event(event, context);
+}
+
+void ec_event_send_discover_flush(ProcessContext  *context)
+{
+    PCB_EVENT event = NULL;
+
+    event = ec_factory_alloc_event(
+        NULL,
+        CB_EVENT_TYPE_DISCOVER_FLUSH,
+        0, // No message will be printed
+        NULL,
+        NULL,
+        context);
+
+    CANCEL_VOID(event);
+
     ec_send_event(event, context);
 }
 
@@ -100,8 +164,6 @@ void ec_event_send_last_exit(PCB_EVENT        event,
            event->procInfo.all_process_details.array[EXEC].start_time,
            event->procInfo.all_process_details.array[EXEC_PARENT].pid);
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -128,8 +190,6 @@ void ec_event_send_exit(
             // This is a fork exit, so send it now
             //  Note: This exit event may be collected by the agent before events
             //        produced by this fork.
-            // Coverity thinks that we leak the event because we use containerof to get the list node
-            // coverity[leaked_storage]
             ec_send_event(event, context);
             status_msg = "<SEND> ";
         } else
@@ -186,8 +246,6 @@ void ec_event_send_block(
         event->blockResponse.path_size = ec_mem_size(event->blockResponse.path);
     }
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -239,8 +297,6 @@ void ec_event_send_file(
         event->fileGeneric.path_size = ec_mem_size(path_data->path);
     }
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -299,8 +355,6 @@ void ec_event_send_modload(
         event->moduleLoad.path_size = ec_mem_size(event->moduleLoad.path);
     }
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -344,8 +398,6 @@ void ec_event_send_net_proxy(
         event->netConnect.server_size = ec_mem_size(event->netConnect.actual_server);
     }
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -377,16 +429,18 @@ void ec_event_send_dns(
     CB_EVENT_DNS_RESPONSE *response,
     ProcessContext        *context)
 {
-    PCB_EVENT event = ec_factory_alloc_event(
+    PCB_EVENT event;
+
+    CANCEL_VOID(response);
+
+    event = ec_factory_alloc_event(
         NULL,           // The procInfo is ignored for this event type
         net_event_type,
         0,              // No message will be printed
         NULL,
         NULL,
         context);
-
     CANCEL_VOID(event);
-    CANCEL_VOID(response);
 
     // Populate the event
     memcpy(&event->dnsResponse, response, sizeof(CB_EVENT_DNS_RESPONSE));
@@ -394,8 +448,6 @@ void ec_event_send_dns(
     // Clear this from the input because it is now owned by the event.
     response->records = NULL;
 
-    // Coverity thinks that we leak the event because we use containerof to get the list node
-    // coverity[leaked_storage]
     ec_send_event(event, context);
 }
 
@@ -405,6 +457,9 @@ const char *ec_EventType_ToString(int event_type)
     {
     case CB_EVENT_TYPE_PROCESS_START: return "START"; break;
     case CB_EVENT_TYPE_PROCESS_EXIT: return "EXIT"; break;
+    case CB_EVENT_TYPE_DISCOVER: return "DISCOVER"; break;
+    case CB_EVENT_TYPE_DISCOVER_COMPLETE: return "DISCOVER COMPLETE"; break;
+    case CB_EVENT_TYPE_DISCOVER_FLUSH: return "DISCOVER FLUSH"; break;
     case CB_EVENT_TYPE_MODULE_LOAD: return "MODULE LOAD"; break;
     case CB_EVENT_TYPE_FILE_CREATE: return "FILE CREATE"; break;
     case CB_EVENT_TYPE_FILE_DELETE: return "FILE DELETE"; break;
