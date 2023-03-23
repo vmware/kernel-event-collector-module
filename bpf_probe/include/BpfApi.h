@@ -168,6 +168,7 @@ namespace bpf_probe {
             case PP_FINALIZED: str = "FINALIZED"; break;
             case PP_APPEND: str = "APPEND"; break;
             case PP_DEBUG: str = "DEBUG"; break;
+            case PP_CGROUP_AND_FINALIZED: str = "CGROUP_AND_FINALIZED"; break;
             default: break;
             }// LCOV_EXCL_END
             return str;
