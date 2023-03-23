@@ -22,6 +22,7 @@ enum PP
     PP_FINALIZED,
     PP_APPEND,
     PP_DEBUG,
+    PP_CGROUP_AND_FINALIZED,
 };
 
 enum event_type
@@ -45,13 +46,13 @@ enum event_type
     EVENT_FILE_CLOSE,
     EVENT_FILE_RENAME,
     EVENT_CONTAINER_CREATE,
+    EVENT_CGROUP_PATH,
 };
 
 #define REPORT_FLAGS_COMPAT     0x0000
 // Signifies to use dynamic version of structs
 #define REPORT_FLAGS_DYNAMIC    0x0001
 #define REPORT_FLAGS_DENTRY     0x0002
-#define REPORT_FLAGS_TASK_DATA  0x0004
 
 struct data_header {
     uint64_t event_time; // Time the event collection started.  (Same across message parts.)
@@ -67,14 +68,8 @@ struct data_header {
     uint32_t mnt_ns;
 };
 
-struct extra_task_data {
-    uint8_t cgroup_size;
-    char cgroup_name[MAX_FNAME];
-};
-
 struct data {
     struct data_header header;
-    struct extra_task_data extra;
 };
 
 struct exec_data
@@ -82,7 +77,6 @@ struct exec_data
     struct data_header header;
 
     int retval;
-    struct extra_task_data extra;
 };
 
 struct file_data {
@@ -93,7 +87,6 @@ struct file_data {
     uint64_t flags; // MMAP only
     uint64_t prot;  // MMAP only
     uint64_t fs_magic;
-    struct extra_task_data extra;
 };
 
 struct container_data {
@@ -179,11 +172,6 @@ struct net_data {
         uint32_t remote_addr6[4];
     };
     uint16_t remote_port;
-};
-
-struct net_data_compat {
-    struct net_data net_data;
-    struct extra_task_data extra;
 };
 
 #ifdef __cplusplus
