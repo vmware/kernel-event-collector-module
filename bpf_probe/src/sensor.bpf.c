@@ -773,7 +773,7 @@ int tracepoint__syscalls__sys_exit_execve(struct trace_event_raw_sys_exit* ctx)
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
     data.retval = ctx->ret;
 
-    send_event(ctx, &data, sizeof(struct exec_data));
+    send_event(ctx, &data, offsetof(typeof(data), extra));
 
     return 0;
 }
@@ -798,7 +798,7 @@ int tracepoint__syscalls__sys_exit_execveat(struct trace_event_raw_sys_exit* ctx
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
     data.retval = ctx->ret;
 
-    send_event(ctx, &data, sizeof(struct exec_data));
+    send_event(ctx, &data, offsetof(typeof(data), extra));
 
     return 0;
 }
