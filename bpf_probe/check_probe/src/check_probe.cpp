@@ -636,7 +636,10 @@ static int ReadMountInfo(const std::string &relpath,
 
         if (strcmp(mountInfoTokens.at(0).c_str(), mntidbuf) == 0)
         {
-            fd = open(mountInfoTokens.at(4).c_str(), O_RDONLY);
+            std::string relmountpoint = relpath + mountInfoTokens.at(4);
+
+            fprintf(stderr, "relmountpoint:%s\n", relmountpoint.c_str());
+            fd = open(relmountpoint.c_str(), O_RDONLY);
             if (fd < 0)
             {
                 fd = -errno;
