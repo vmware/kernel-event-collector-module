@@ -61,10 +61,15 @@ struct data_header {
     uint16_t report_flags;
     uint32_t payload;
 
-    uint32_t tid;
-    uint32_t pid;
-    uint32_t uid;
+    uint32_t tid;           // child thread (in kernel PID)
+    uint32_t pid;           // main thread (in kernel TGID)
     uint32_t ppid;
+
+    uint32_t pid_ns;        // pid ns of main thread/TGID can be different from tid.
+                            // tid_ns_vnr would be useless to provide.
+    uint32_t pid_ns_vnr;    // virtual value of our `pid` field for current event.
+
+    uint32_t uid;
     uint32_t mnt_ns;
 };
 
