@@ -994,6 +994,7 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 			  unsigned long prot, unsigned long flags)
 {
 	unsigned long exec_flags;
+	struct super_block *sb = NULL;
 
 	if (!file) {
 		goto out;
@@ -1022,6 +1023,7 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 #endif
 
+	sb = _sb_from_file(file);
 	DECLARE_FILE_EVENT(data);
 	if (!data) goto out;
 
@@ -1033,6 +1035,9 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	file_data->inode = __get_inode_from_file(file);
 	file_data->flags = flags;
 	file_data->prot = prot;
+	if (sb) {
+		file_data->fs_magic = sb->s_magic;
+	}
 	// submit initial event data
 	send_event(ctx, file_data, sizeof_without_extra(*file_data));
 
