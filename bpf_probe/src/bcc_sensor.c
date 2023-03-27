@@ -456,41 +456,74 @@ static inline u8 cgroup_name_from_task(char *buf, struct task_struct *task)
     return 0;
 }
 
-static inline bool maybe_get_cgroup_data_from_task(cgroup_data *data, struct task_struct* task)
+#define sizeof_without_extra(t) offsetof(typeof((t)), extra)
+
+#define init_extra_task_data(extra, ...) do { \
+	(extra)->cgroup_size = 0; \
+	(extra)->cgroup_name[0] = 0; \
+} while (0)
+
+
+static void __send_final_event(void *ctx, struct data *data,
+                               struct task_struct *task)
 {
-    u8 cgroup_length = cgroup_name_from_task(data->fname, task);
-    if (cgroup_length > 0) {
-        data->header.state = PP_CGROUP_AND_FINALIZED;
-        data->size = cgroup_length;
-        return true;
-    } else {
-        return false;
+    data->header.state = PP_FINALIZED;
+    if (task) {
+        init_extra_task_data(&data->extra);
+        u8 cgroup_len = cgroup_name_from_task(data->extra.cgroup_name, task);
+        if (cgroup_len) {
+            data->extra.cgroup_size = cgroup_len;
+            data->header.report_flags |= REPORT_FLAGS_TASK_DATA;
+            send_event(ctx, data, sizeof(*data));
+            data->header.report_flags &= ~(REPORT_FLAGS_TASK_DATA);
+            return;
+        }
     }
+    send_event(ctx, data, sizeof_without_extra(*data));
 }
 
-static inline bool maybe_get_cgroup_data(cgroup_data *data)
-{
-// Basically only clone will have the cgroup name
+#define __send_single_event(ctx, var, hdr, task_var) do { \
+	if ((task_var)) { \
+		init_extra_task_data(&(var)->extra); \
+		u8 cgroup_len = cgroup_name_from_task((var)->extra.cgroup_name, (task_var)); \
+		if (cgroup_len) { \
+			(hdr)->report_flags |= REPORT_FLAGS_TASK_DATA; \
+			(var)->extra.cgroup_size = cgroup_len; \
+			send_event(ctx, (var), sizeof(*(var))); \
+			break; \
+		} \
+	} \
+	send_event(ctx, (var), sizeof_without_extra(*(var))); \
+} while (0)
+
+
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
-    return false;
+#define send_single_event(ctx, var) \
+    send_event(ctx, var, sizeof_without_extra(*(var)));
+
+#define send_single_net_event(ctx, net_var) \
+    send_event(ctx, net_var, sizeof_without_extra(*(net_var)));
+
+#define send_final_event(ctx, var) \
+    __send_final_event(ctx, var, NULL)
+
 #else
-    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
-    if (!task) {
-        return false;
-    }
-    return maybe_get_cgroup_data_from_task(data, task);
+#define send_single_event(ctx, var) do { \
+    struct task_struct *task = (typeof(task))bpf_get_current_task(); \
+    __send_single_event(ctx, var, &((var)->header), task); \
+} while (0)
+
+#define send_single_net_event(ctx, net_var) do { \
+    struct task_struct *task = (typeof(task))bpf_get_current_task(); \
+    __send_single_event(ctx, net_var, &((net_var)->net_data.header), task); \
+} while (0)
+
+#define send_final_event(ctx, data) do { \
+    struct task_struct *task = (typeof(task))bpf_get_current_task(); \
+    __send_final_event((ctx), (data), task); \
+} while (0)
+
 #endif
-}
-
-
-static inline bool maybe_send_cgroup_and_finalized(struct pt_regs *ctx, cgroup_data *data) {
-    if (maybe_get_cgroup_data(data)) {
-        send_event(ctx, data, PATH_MSG_SIZE(data));
-        return true;
-    } else {
-        return false;
-    }
-}
 
 static u8 __write_fname(struct path_data *data, const void *ptr)
 {
@@ -554,10 +587,7 @@ static void submit_all_args(struct pt_regs *ctx,
     __submit_arg(ctx, (void *)ellipsis, data);
 
 out:
-    if (!maybe_send_cgroup_and_finalized(ctx, data)) {
-        data->header.state = PP_FINALIZED;
-        send_event(ctx, (struct data*)data, sizeof(struct data));
-    }
+    send_final_event(ctx, GENERIC_DATA(data));
 
     return;
 }
@@ -612,10 +642,7 @@ static void submit_all_args(struct pt_regs *ctx,
 	__submit_arg(ctx, (void *)ellipsis, data);
 
 out:
-	if (!maybe_send_cgroup_and_finalized(ctx, data)) {
-		data->header.state = PP_FINALIZED;
-		send_event(ctx, (struct data*)data, sizeof(struct data));
-	}
+	send_final_event(ctx, GENERIC_DATA(data));
 
 	return;
 }
@@ -733,10 +760,8 @@ static inline int __do_file_path(struct pt_regs *ctx,
 		}
 	}
 
-	if (!maybe_send_cgroup_and_finalized(ctx, data)) {
-		data->header.state = PP_FINALIZED;
-		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
-	}
+	send_final_event(ctx, GENERIC_DATA(data));
+
 	return 0;
 }
 
@@ -804,13 +829,11 @@ static inline int __do_dentry_path(struct pt_regs *ctx, struct dentry *dentry,
 	} else {
 		// Trigger the agent to add the mount path
 		data->header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
+		send_event(ctx, GENERIC_DATA(data), offsetof(struct data, extra));
 	}
 
-	if(!maybe_send_cgroup_and_finalized(ctx, data)) {
-		data->header.state = PP_FINALIZED;
-		send_event(ctx, GENERIC_DATA(data), sizeof(struct data));
-	}
+	send_final_event(ctx, GENERIC_DATA(data));
+
 	return 0;
 }
 
@@ -849,16 +872,7 @@ static inline void do_sys_exec_exit(void *ctx, long retval)
 	__init_header(EVENT_PROCESS_EXEC_RESULT, PP_ENTRY_POINT, &data.header);
 	data.retval = (int)retval;
 
-	cgroup_data cgroup_data = {};
-	bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
-	if (has_cgroup_data) {
-		send_event(ctx, &data, sizeof(struct exec_data));
-		 __init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-	} else {
-		data.header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct exec_data));
-	}
+	send_single_event(ctx, &data);
 }
 
 int after_sys_execve(struct pt_regs *ctx)
@@ -957,16 +971,17 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 		if (!data) return 0;
 
 		__init_header(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+		struct file_data *file_data = FILE_DATA(data);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
-		FILE_DATA(data)->device = ((struct file_data_cache *)cachep)->device;
-		FILE_DATA(data)->inode = ((struct file_data_cache *)cachep)->inode;
+		file_data->device = ((struct file_data_cache *)cachep)->device;
+		file_data->inode = ((struct file_data_cache *)cachep)->inode;
 #else
-		FILE_DATA(data)->device = __get_device_from_file(file);
-		FILE_DATA(data)->inode = __get_inode_from_file(file);
+		file_data->device = __get_device_from_file(file);
+		file_data->inode = __get_inode_from_file(file);
 #endif
 
-		send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
+		send_event(ctx, file_data, sizeof_without_extra(*file_data));
 
 		__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
 	}
@@ -979,6 +994,7 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 			  unsigned long prot, unsigned long flags)
 {
 	unsigned long exec_flags;
+	struct super_block *sb = NULL;
 
 	if (!file) {
 		goto out;
@@ -1007,19 +1023,23 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	}
 #endif
 
+	sb = _sb_from_file(file);
 	DECLARE_FILE_EVENT(data);
 	if (!data) goto out;
 
 	__init_header(EVENT_FILE_MMAP, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+	struct file_data *file_data = FILE_DATA(data);
 
 	// event specific data
-	FILE_DATA(data)->device = __get_device_from_file(file);
-	FILE_DATA(data)->inode = __get_inode_from_file(file);
-	FILE_DATA(data)->flags = flags;
-	FILE_DATA(data)->prot = prot;
-
+	file_data->device = __get_device_from_file(file);
+	file_data->inode = __get_inode_from_file(file);
+	file_data->flags = flags;
+	file_data->prot = prot;
+	if (sb) {
+		file_data->fs_magic = sb->s_magic;
+	}
 	// submit initial event data
-	send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
+	send_event(ctx, file_data, sizeof_without_extra(*file_data));
 
 	// submit file path event data
 	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
@@ -1077,13 +1097,14 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 
 	DECLARE_FILE_EVENT(data);
 	if (!data) goto out;
+	struct file_data *file_data = FILE_DATA(data);
 
 	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
-	FILE_DATA(data)->device = __get_device_from_file(file);
-	FILE_DATA(data)->inode = __get_inode_from_file(file);
-	FILE_DATA(data)->flags = file->f_flags;
-	FILE_DATA(data)->prot = file->f_mode;
-	FILE_DATA(data)->fs_magic = sb->s_magic;
+	file_data->device = __get_device_from_file(file);
+	file_data->inode = __get_inode_from_file(file);
+	file_data->flags = file->f_flags;
+	file_data->prot = file->f_mode;
+	file_data->fs_magic = sb->s_magic;
 
 	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
@@ -1091,7 +1112,7 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 		__track_write_entry(file, FILE_DATA(data));
 	}
 
-	send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
+	send_event(ctx, FILE_DATA(data), sizeof_without_extra(*file_data));
 
 	__do_file_path(ctx, file->f_path.dentry, file->f_path.mnt, PATH_DATA(data));
 
@@ -1108,15 +1129,16 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 		if (sb && !__is_special_filesystem(sb))
 		{
 			__init_header(EVENT_FILE_DELETE, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+			struct file_data *file_data = FILE_DATA(data);
 
-			FILE_DATA(data)->device = __get_device_from_sb(sb);
-			FILE_DATA(data)->inode = __get_inode_from_dentry(dentry);
-			FILE_DATA(data)->fs_magic = sb->s_magic;
+			file_data->device = __get_device_from_sb(sb);
+			file_data->inode = __get_inode_from_dentry(dentry);
+			file_data->fs_magic = sb->s_magic;
 
-			__file_tracking_delete(0, FILE_DATA(data)->device, FILE_DATA(data)->inode);
+			__file_tracking_delete(0, file_data->device, file_data->inode);
 
-			send_event(ctx, FILE_DATA(data), sizeof(struct file_data));
-			__do_dentry_path(ctx, dentry, PATH_DATA(data), FILE_DATA(data)->fs_magic);
+			send_event(ctx, file_data, sizeof_without_extra(*file_data));
+			__do_dentry_path(ctx, dentry, PATH_DATA(data), file_data->fs_magic);
 			return true;
 		}
 	}
@@ -1213,17 +1235,8 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 		data.device = __get_device_from_file(task->mm->exe_file);
 		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
-    
-	cgroup_data cgroup_data = {};
-	bool has_cgroup_data = maybe_get_cgroup_data_from_task(&cgroup_data, task);
-	if (has_cgroup_data) {
-		send_event(ctx, &data, sizeof(struct file_data));
-        __init_header_with_task(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header, task);
-		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-	} else {
-		data.header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct file_data));
-	}
+
+	__send_single_event(ctx, &data, &data.header, task);
 
 out:
 	return 0;
@@ -1381,15 +1394,7 @@ int on_do_exit(struct pt_regs *ctx, long code)
 	}
 
 	__init_header(EVENT_PROCESS_EXIT, PP_ENTRY_POINT, &data.header);
-	cgroup_data cgroup_data = {};
-	bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
-	if (has_cgroup_data) {
-        __init_header(EVENT_PROCESS_EXIT, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-	} else {
-		data.header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct data));
-	}
+	send_single_event(ctx, &data);
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 	last_parent.delete(&data.header.pid);
@@ -1446,45 +1451,37 @@ static int trace_connect_return(struct pt_regs *ctx)
 		return 0;
 	}
 
-	struct net_data data = {};
+	struct net_data_compat net_data = {};
+	struct net_data *data = &net_data.net_data;
 	struct sock *skp = *skpp;
 	u16 dport = skp->__sk_common.skc_dport;
 
-	__init_header(EVENT_NET_CONNECT_PRE, PP_ENTRY_POINT, &data.header);
-	data.protocol = IPPROTO_TCP;
-	data.remote_port = dport;
+	__init_header(EVENT_NET_CONNECT_PRE, PP_ENTRY_POINT, &data->header);
+	data->protocol = IPPROTO_TCP;
+	data->remote_port = dport;
 
 	struct inet_sock *sockp = (struct inet_sock *)skp;
-	data.local_port = sockp->inet_sport;
+	data->local_port = sockp->inet_sport;
 
 	if (check_family(skp, AF_INET)) {
-		data.ipver = AF_INET;
-		data.local_addr =
+		data->ipver = AF_INET;
+		data->local_addr =
 			skp->__sk_common.skc_rcv_saddr;
-		data.remote_addr =
+		data->remote_addr =
 			skp->__sk_common.skc_daddr;
 
 	} else if (check_family(skp, AF_INET6)) {
-		data.ipver = AF_INET6;
+		data->ipver = AF_INET6;
 		bpf_probe_read(
-			&data.local_addr6, sizeof(data.local_addr6),
+			&data->local_addr6, sizeof(data->local_addr6),
 			skp->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
-		bpf_probe_read(&data.remote_addr6,
-				   sizeof(data.remote_addr6),
+		bpf_probe_read(&data->remote_addr6,
+				   sizeof(data->remote_addr6),
 				   skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
 
 	}
 
-	cgroup_data cgroup_data = {};
-	bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
-	if (has_cgroup_data) {
-		send_event(ctx, &data, sizeof(struct net_data));
-		__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-	} else {
-		data.header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct net_data));
-	}
+	send_single_net_event(ctx, &net_data);
 
 	currsock.delete(&id);
 	return 0;
@@ -1528,35 +1525,36 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 	void *hdr = (struct iphdr *)(skb->head + skb->network_header);
 	u32 hdr_len = skb->transport_header - skb->network_header;
 
-	struct net_data data = {};
+	struct net_data_compat net_data = {};
+	struct net_data *data = &net_data.net_data;
 
-	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_ENTRY_POINT, &data.header);
+	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_ENTRY_POINT, &data->header);
 
-	data.protocol = IPPROTO_UDP;
+	data->protocol = IPPROTO_UDP;
 
 	udphdr = (struct udphdr *)(skb->head + skb->transport_header);
-	data.remote_port = udphdr->source;
-	data.local_port = udphdr->dest;
+	data->remote_port = udphdr->source;
+	data->local_port = udphdr->dest;
 
 	if (hdr_len == sizeof(struct iphdr)) {
 		struct iphdr *iphdr = (struct iphdr *)hdr;
 
-		data.ipver = AF_INET;
-		data.local_addr = iphdr->daddr;
-		data.remote_addr = iphdr->saddr;
+		data->ipver = AF_INET;
+		data->local_addr = iphdr->daddr;
+		data->remote_addr = iphdr->saddr;
 
 #ifdef CACHE_UDP
 		struct ip_key ip_key = {};
-		ip_key.pid = data.header.pid;
-		bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
-				   &data.remote_port);
-		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
-				   &data.local_port);
+		ip_key.pid = data->header.pid;
+		bpf_probe_read(&ip_key.remote_port, sizeof(data->remote_port),
+				   &data->remote_port);
+		bpf_probe_read(&ip_key.local_port, sizeof(data->local_port),
+				   &data->local_port);
 		bpf_probe_read(&ip_key.remote_addr,
-				   sizeof(data.remote_addr),
-				   &data.remote_addr);
-		bpf_probe_read(&ip_key.local_addr, sizeof(data.local_addr),
-				   &data.local_addr);
+				   sizeof(data->remote_addr),
+				   &data->remote_addr);
+		bpf_probe_read(&ip_key.local_addr, sizeof(data->local_addr),
+				   &data->local_addr);
 		if (has_ip_cache(&ip_key, FLOW_RX)) {
 			return 0;
 		}
@@ -1567,23 +1565,23 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 		//  - especially when accessing members of a struct containing bitfields
 		struct ipv6hdr *ipv6hdr = (struct ipv6hdr *)hdr;
 
-		data.ipver = AF_INET6;
-		bpf_probe_read(data.local_addr6, sizeof(uint32_t) * 4,
+		data->ipver = AF_INET6;
+		bpf_probe_read(data->local_addr6, sizeof(uint32_t) * 4,
 				   &ipv6hdr->daddr.s6_addr32);
-		bpf_probe_read(data.remote_addr6, sizeof(uint32_t) * 4,
+		bpf_probe_read(data->remote_addr6, sizeof(uint32_t) * 4,
 				   &ipv6hdr->saddr.s6_addr32);
 
 #ifdef CACHE_UDP
 		struct ip6_key ip_key = {};
-		ip_key.pid = data.header.pid;
-		bpf_probe_read(&ip_key.remote_port, sizeof(data.remote_port),
-				   &data.remote_port);
-		bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
-				   &data.local_port);
+		ip_key.pid = data->header.pid;
+		bpf_probe_read(&ip_key.remote_port, sizeof(data->remote_port),
+				   &data->remote_port);
+		bpf_probe_read(&ip_key.local_port, sizeof(data->local_port),
+				   &data->local_port);
 		bpf_probe_read(ip_key.remote_addr6,
-				   sizeof(data.remote_addr6),
+				   sizeof(data->remote_addr6),
 				   &ipv6hdr->daddr.s6_addr32);
-		bpf_probe_read(ip_key.local_addr6, sizeof(data.local_addr6),
+		bpf_probe_read(ip_key.local_addr6, sizeof(data->local_addr6),
 				   &ipv6hdr->saddr.s6_addr32);
 		if (has_ip6_cache(&ip_key, FLOW_RX)) {
 			return 0;
@@ -1593,16 +1591,7 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 		return 0;
 	}
 
-	cgroup_data cgroup_data = {};
-	bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
-	if (has_cgroup_data) {
-		send_event(ctx, &data, sizeof(struct net_data));
-		__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-	} else {
-		data.header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct net_data));
-	}
+	send_single_net_event(ctx, &net_data);
 
 	return 0;
 }
@@ -1617,57 +1606,37 @@ int trace_accept_return(struct pt_regs *ctx)
 		return 0;
 	}
 
-	struct net_data data = {};
-	cgroup_data cgroup_data = {};
+	struct net_data_compat net_data = {};
+	struct net_data *data = &net_data.net_data;
 
-	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_ENTRY_POINT, &data.header);
-	data.protocol = IPPROTO_TCP;
+	__init_header(EVENT_NET_CONNECT_ACCEPT, PP_ENTRY_POINT, &data->header);
+	data->protocol = IPPROTO_TCP;
 
-	data.ipver = newsk->__sk_common.skc_family;
-	bpf_probe_read(&data.local_port, sizeof(newsk->__sk_common.skc_num),
+	data->ipver = newsk->__sk_common.skc_family;
+	bpf_probe_read(&data->local_port, sizeof(newsk->__sk_common.skc_num),
 			   &newsk->__sk_common.skc_num);
-	data.local_port = htons(data.local_port);
-	data.remote_port =
+	data->local_port = htons(data->local_port);
+	data->remote_port =
 		newsk->__sk_common.skc_dport; // network order dport
 
 	if (check_family(newsk, AF_INET)) {
-		data.local_addr =
+		data->local_addr =
 			newsk->__sk_common.skc_rcv_saddr;
-		data.remote_addr =
+		data->remote_addr =
 			newsk->__sk_common.skc_daddr;
 
-		if (data.local_addr != 0 && data.remote_addr != 0 &&
-			data.local_port != 0 && data.remote_port != 0) {
-
-			bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
-			if (has_cgroup_data) {
-				send_event(ctx, &data, sizeof(struct net_data));
-				__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-				send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-			} else {
-				data.header.state = PP_NO_EXTRA_DATA;
-				send_event(ctx, &data, sizeof(struct net_data));
-			}
-
+		if (data->local_addr != 0 && data->remote_addr != 0 &&
+			data->local_port != 0 && data->remote_port != 0) {
+			send_single_net_event(ctx, &net_data);
 		}
 	} else if (check_family(newsk, AF_INET6)) {
 		bpf_probe_read(
-			&data.local_addr6, sizeof(data.local_addr6),
+			&data->local_addr6, sizeof(data->local_addr6),
 			newsk->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32);
-		bpf_probe_read(&data.remote_addr6,
-				   sizeof(data.remote_addr6),
+		bpf_probe_read(&data->remote_addr6,
+				   sizeof(data->remote_addr6),
 				   newsk->__sk_common.skc_v6_daddr.in6_u.u6_addr32);
-
-		bool has_cgroup_data = maybe_get_cgroup_data(&cgroup_data);
-		if (has_cgroup_data) {
-			send_event(ctx, &data, sizeof(struct net_data));
-			__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-			send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-		} else {
-			data.header.state = PP_NO_EXTRA_DATA;
-			send_event(ctx, &data, sizeof(struct net_data));
-		}
-
+		send_single_net_event(ctx, &net_data);
 	}
 	return 0;
 }
@@ -1706,8 +1675,14 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 		return 0;
 	}
 
-	struct dns_data data = {};
-	__init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_ENTRY_POINT, &data.header);
+	// Anonymous union to guarantee enough space for final event
+	union {
+		struct dns_data dns_data;
+		struct data dummy;
+	} u = {};
+
+	struct dns_data *data = &u.dns_data;
+	__init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_ENTRY_POINT, &data->header);
 
 	// Send DNS info if port is DNS
 	struct msghdr *msgp = *msgpp;
@@ -1717,20 +1692,20 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 
 	u16 dport = (((struct sockaddr_in *)(msgp->msg_name))->sin_port);
 	u16 len = ret;
-	data.name_len = ret;
+	data->name_len = ret;
 
     if (DNS_RESP_PORT_NUM == ntohs(dport)) {
 #pragma unroll
         for (int i = 1; i <= (DNS_RESP_MAXSIZE / DNS_SEGMENT_LEN) + 1;
              ++i) {
             if (len > 0 && len < DNS_RESP_MAXSIZE) {
-                bpf_probe_read(&data.dns, DNS_SEGMENT_LEN, dns);
+                bpf_probe_read(&data->dns, DNS_SEGMENT_LEN, dns);
 
                 if (i > 1) {
-                    data.header.state = PP_APPEND;
+                    data->header.state = PP_APPEND;
                 }
 
-                send_event(ctx, &data, sizeof(struct dns_data));
+                send_event(ctx, data, sizeof(struct dns_data));
                 len = len - DNS_SEGMENT_LEN;
                 dns = dns + DNS_SEGMENT_LEN;
             } else {
@@ -1738,14 +1713,7 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
             }
         }
 
-		cgroup_data cgroup_data = {};
-		__init_header(EVENT_NET_CONNECT_DNS_RESPONSE, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-		bool sent_cgroup_and_finalized = maybe_send_cgroup_and_finalized(ctx, &cgroup_data);
-		if (!sent_cgroup_and_finalized) {
-			data.header.state = PP_FINALIZED;
-			send_event(ctx, &data, sizeof(struct dns_data));
-		}
-
+        send_final_event(ctx, (struct data *)data);
 	}
 
 	// Don't remove from bpf map currsock3
@@ -1786,15 +1754,16 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         return 0;
     }
 
-    struct net_data data = {};
-    __init_header(EVENT_NET_CONNECT_PRE, PP_ENTRY_POINT, &data.header);
-    data.protocol = IPPROTO_UDP;
+	struct net_data_compat net_data = {};
+	struct net_data *data = &net_data.net_data;
+    __init_header(EVENT_NET_CONNECT_PRE, PP_ENTRY_POINT, &data->header);
+    data->protocol = IPPROTO_UDP;
     // The remote addr could be in the msghdr::msg_name or on the sock
     bool addr_in_msghr = false;
 
     // get ip version
     struct sock *skp = *skpp;
-    data.ipver = skp->__sk_common.skc_family;
+    data->ipver = skp->__sk_common.skc_family;
 
     if (msgpp)
     {
@@ -1810,8 +1779,8 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
             {
                 struct sockaddr_in addr_in;
                 bpf_probe_read(&addr_in, sizeof(addr_in), msg_name);
-                data.remote_port = addr_in.sin_port;
-                data.remote_addr = addr_in.sin_addr.s_addr;
+                data->remote_port = addr_in.sin_port;
+                data->remote_addr = addr_in.sin_addr.s_addr;
 
                 addr_in_msghr = true;
             }
@@ -1819,9 +1788,9 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
             {
                 struct sockaddr_in6 addr_in;
                 bpf_probe_read(&addr_in, sizeof(addr_in), msg_name);
-                data.remote_port = addr_in.sin6_port;
+                data->remote_port = addr_in.sin6_port;
                 bpf_probe_read(
-                    &data.remote_addr6, sizeof(data.remote_addr6),
+                    &data->remote_addr6, sizeof(data->remote_addr6),
                     &addr_in.sin6_addr);
 
                 addr_in_msghr = true;
@@ -1829,13 +1798,13 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         }
     }
 
-    bpf_probe_read(&data.local_port, sizeof(skp->__sk_common.skc_num),
+    bpf_probe_read(&data->local_port, sizeof(skp->__sk_common.skc_num),
                    &skp->__sk_common.skc_num);
-    data.local_port = htons(data.local_port);
+    data->local_port = htons(data->local_port);
 
     if (!addr_in_msghr)
     {
-        data.remote_port =
+        data->remote_port =
             skp->__sk_common.skc_dport; // already network order
     }
 
@@ -1843,26 +1812,26 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
     {
         if (!addr_in_msghr)
         {
-            data.remote_addr =
+            data->remote_addr =
                 skp->__sk_common.skc_daddr;
         }
 
-        data.local_addr =
+        data->local_addr =
             skp->__sk_common.skc_rcv_saddr;
 
 #ifdef CACHE_UDP
         struct ip_key ip_key = {};
-        ip_key.pid = data.header.pid;
+        ip_key.pid = data->header.pid;
         bpf_probe_read(&ip_key.remote_port,
-                       sizeof(data.remote_port),
-                       &data.remote_port);
-        bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
-                       &data.local_port);
+                       sizeof(data->remote_port),
+                       &data->remote_port);
+        bpf_probe_read(&ip_key.local_port, sizeof(data->local_port),
+                       &data->local_port);
         bpf_probe_read(&ip_key.remote_addr,
-                       sizeof(data.remote_addr),
-                       &data.remote_addr);
-        bpf_probe_read(&ip_key.local_addr, sizeof(data.local_addr),
-                       &data.local_addr);
+                       sizeof(data->remote_addr),
+                       &data->remote_addr);
+        bpf_probe_read(&ip_key.local_addr, sizeof(data->local_addr),
+                       &data->local_addr);
 
         if (has_ip_cache(&ip_key, FLOW_TX))
         {
@@ -1875,28 +1844,28 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
         if (!addr_in_msghr)
         {
             bpf_probe_read(
-                &data.remote_addr6, sizeof(data.remote_addr6),
+                &data->remote_addr6, sizeof(data->remote_addr6),
                 &(skp->__sk_common.skc_v6_daddr.in6_u.u6_addr32));
         }
 
         bpf_probe_read(
-            &data.local_addr6, sizeof(data.local_addr6),
+            &data->local_addr6, sizeof(data->local_addr6),
             &(skp->__sk_common.skc_v6_rcv_saddr.in6_u.u6_addr32));
 
 #ifdef CACHE_UDP
         struct ip6_key ip_key = {};
-        ip_key.pid = data.header.pid;
+        ip_key.pid = data->header.pid;
         bpf_probe_read(&ip_key.remote_port,
-                       sizeof(data.remote_port),
-                       &data.remote_port);
-        bpf_probe_read(&ip_key.local_port, sizeof(data.local_port),
-                       &data.local_port);
+                       sizeof(data->remote_port),
+                       &data->remote_port);
+        bpf_probe_read(&ip_key.local_port, sizeof(data->local_port),
+                       &data->local_port);
         bpf_probe_read(
-            ip_key.remote_addr6, sizeof(data.remote_addr6),
-            &data.remote_addr6);
+            ip_key.remote_addr6, sizeof(data->remote_addr6),
+            &data->remote_addr6);
         bpf_probe_read(
-            ip_key.local_addr6, sizeof(data.local_addr6),
-            &data.local_addr6);
+            ip_key.local_addr6, sizeof(data->local_addr6),
+            &data->local_addr6);
         if (has_ip6_cache(&ip_key, FLOW_TX))
         {
             goto out;
@@ -1904,70 +1873,11 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 #endif /* CACHE_UDP */
     }
 
-	cgroup_data cgroup_data = {};
-	if (maybe_get_cgroup_data(&cgroup_data)) {
-		send_event(ctx, &data, sizeof(struct net_data));
-		__init_header(data.header.type, PP_CGROUP_AND_FINALIZED, &cgroup_data.header);
-		send_event(ctx, &cgroup_data, sizeof(cgroup_data));
-	} else {
-		data.header.state = PP_NO_EXTRA_DATA;
-		send_event(ctx, &data, sizeof(struct net_data));
-	}
+	send_single_net_event(ctx, &net_data);
 
 out:
 	currsock3.delete(&id);
 	currsock2.delete(&id);
-	return 0;
-}
-
-int on_cgroup_attach_task(struct pt_regs *ctx, struct cgroup *dst_cgrp, struct task_struct *task, bool threadgroup)
-{
-	struct kernfs_node *node = NULL;
-
-	bpf_probe_read(&node, sizeof(node), &(dst_cgrp->kn));
-	if (node == NULL)
-		return 0;
-
-	const char * cgroup_dirname = NULL;
-	bpf_probe_read(&cgroup_dirname, sizeof(cgroup_dirname), &(node->name));
-
-	struct container_data data = {};
-	__init_header(EVENT_CONTAINER_CREATE, PP_ENTRY_POINT, &GENERIC_DATA(&data)->header);
-
-
-	// Check for common container prefixes, and then try to read the full-length CONTAINER_ID
-	unsigned int offset = 0;
-	if (cb_bpf_probe_read_str(&data.container_id, 8, cgroup_dirname) == 8)
-	{
-
-		if (data.container_id[0] == 'd' &&
-			data.container_id[1] == 'o' &&
-			data.container_id[2] == 'c' &&
-			data.container_id[3] == 'k' &&
-			data.container_id[4] == 'e' &&
-			data.container_id[5] == 'r' &&
-			data.container_id[6] == '-')
-		{
-			offset = 7;
-		}
-
-		if (data.container_id[0] == 'l' &&
-			data.container_id[1] == 'i' &&
-			data.container_id[2] == 'b' &&
-			data.container_id[3] == 'p' &&
-			data.container_id[4] == 'o' &&
-			data.container_id[5] == 'd' &&
-			data.container_id[6] == '-')
-		{
-			offset = 7;
-		}
-	}
-
-	if (cb_bpf_probe_read_str(&data.container_id, CONTAINER_ID_LEN + 1, cgroup_dirname + offset) == CONTAINER_ID_LEN + 1)
-	{
-		send_event(ctx, &data, sizeof(data));
-	}
-
 	return 0;
 }
 

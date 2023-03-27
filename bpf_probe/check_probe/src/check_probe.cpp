@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <sstream>
 #include <iostream>
+#include <arpa/inet.h>
 
 using namespace cb_endpoint::bpf_probe;
 
@@ -25,6 +26,8 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
 static void ProbeEventCallback(Data data);
 static void DroppedCallback(uint64_t drop_count);
 static std::string EventToBlobStrings(const data *event);
+static std::string EventToExtraData(const data *event);
+static void PrintNetEvent(std::stringstream &ss, const data *event);
 
 static std::string s_bpf_program;
 static bool read_events = false;
@@ -233,12 +236,10 @@ void ProbeEventCallback(Data data)
 
         bool isStartingMessage = (data.data->header.state == PP_ENTRY_POINT) || (data.data->header.state == PP_NO_EXTRA_DATA);
         bool isEndingMessage = (data.data->header.state == PP_FINALIZED) ||
-                (data.data->header.state == PP_CGROUP_AND_FINALIZED) ||
                 (data.data->header.state == PP_NO_EXTRA_DATA);
         bool hasPathData = (data.data->header.state == PP_PATH_COMPONENT) ||
                 (data.data->header.state == PP_ENTRY_POINT && data.data->header.type == EVENT_PROCESS_EXEC_ARG) ||
-                (data.data->header.state == PP_APPEND && data.data->header.type != EVENT_NET_CONNECT_DNS_RESPONSE) ||
-                (data.data->header.state == PP_CGROUP_AND_FINALIZED);
+                (data.data->header.state == PP_APPEND && data.data->header.type != EVENT_NET_CONNECT_DNS_RESPONSE);
 
         if (isStartingMessage) {
             output << "\n+++++++++++++++++++++ " << BpfApi::TypeToString(data.data->header.type) << " ++++++++++++++++++++++\n";
@@ -254,10 +255,11 @@ void ProbeEventCallback(Data data)
                << "pid_ns:" << data.data->header.pid_ns << " "
                << "mnt_ns:" << data.data->header.mnt_ns;
 
+        output << " report_flags:0x" << std::hex
+               << data.data->header.report_flags << std::dec;
+
         if (data.data->header.report_flags & REPORT_FLAGS_DYNAMIC)
         {
-            output << " report_flags:0x" << std::hex
-                   << data.data->header.report_flags << std::dec;
             output << " payload:" << data.data->header.payload;
             output << " [" << EventToBlobStrings(data.data) << "]";
         }
@@ -265,6 +267,10 @@ void ProbeEventCallback(Data data)
         {
             auto pdata = reinterpret_cast<const path_data*>(data.data);
             output << " [" << pdata->fname << "]";
+        }
+        else if (data.data->header.report_flags & REPORT_FLAGS_TASK_DATA)
+        {
+            output << " [" << EventToExtraData(data.data) << "]";
         }
 
         if (isEndingMessage) {
@@ -400,7 +406,9 @@ static std::string EventToBlobStrings(const data *event)
     case EVENT_NET_CONNECT_ACCEPT: {
         auto data_x = reinterpret_cast<const net_data_x *>(event);
 
-        return BlobToPath(event, data_x->cgroup_blob);
+        PrintNetEvent(ss, event);
+        ss << BlobToPath(event, data_x->cgroup_blob);
+        return ss.str();
     }
 
     case EVENT_NET_CONNECT_DNS_RESPONSE: {
@@ -426,11 +434,105 @@ static std::string EventToBlobStrings(const data *event)
     // Unused for the most part
     case EVENT_NET_CONNECT_WEB_PROXY:
     case EVENT_FILE_TEST:
-    case EVENT_CONTAINER_CREATE:
-    case EVENT_CGROUP_PATH:
     default:
         break;
     }
 
     return "Blob data unused here";
+}
+
+static void EventToExtraData(std::stringstream &ss,
+                             const struct extra_task_data &extra_data)
+{
+    if (extra_data.cgroup_size) {
+        ss << " CgroupName[size:" << (uint32_t)extra_data.cgroup_size;
+        ss << " '" << extra_data.cgroup_name << "']";
+    }
+}
+
+static std::string EventToExtraData(const data *event)
+{
+    std::stringstream ss;
+
+    switch (event->header.type)
+    {
+    // single message events - aka struct specific handling for extra data
+    case EVENT_PROCESS_CLONE: {
+        auto data = reinterpret_cast<const file_data *>(event);
+
+        EventToExtraData(ss, data->extra);
+        break;
+    }
+    case EVENT_PROCESS_EXEC_RESULT: {
+        auto data = reinterpret_cast<const exec_data *>(event);
+
+        EventToExtraData(ss, data->extra);
+        break;
+    }
+    case EVENT_PROCESS_EXIT: {
+        EventToExtraData(ss, event->extra);
+        break;
+    }
+    case EVENT_NET_CONNECT_PRE:
+    case EVENT_NET_CONNECT_ACCEPT: {
+        auto net_data = reinterpret_cast<const net_data_compat *>(event);
+
+        PrintNetEvent(ss, event);
+        EventToExtraData(ss, net_data->extra);
+        break;
+    }
+
+    // multi message events - aka struct data with PP_FINALIZED
+    default:
+        if (event->header.state == PP_FINALIZED) {
+            EventToExtraData(ss, event->extra);
+        } else {
+            ss << "{Not Finalized But Has Cgroup Name???}";
+        }
+        break;
+    }
+
+    return ss.str();
+}
+
+static void PrintNetEvent(std::stringstream &ss, const data *event)
+{
+    char local[64] = {};
+    char remote[64] = {};
+    const net_data *net_data = nullptr;
+
+    if (event->header.report_flags & REPORT_FLAGS_DYNAMIC)
+    {
+        net_data = &reinterpret_cast<const net_data_x *>(event)->net_data;
+    }
+    else
+    {
+        net_data = &reinterpret_cast<const net_data_compat *>(event)->net_data;
+    }
+
+    inet_ntop(net_data->ipver, &net_data->local_addr, local, sizeof(local));
+    inet_ntop(net_data->ipver, &net_data->remote_addr, remote, sizeof(remote));
+
+    if (net_data->protocol == IPPROTO_UDP)
+    {
+        ss << "udp ";
+    }
+    else
+    {
+        ss << "tcp ";
+    }
+
+    if (net_data->ipver == AF_INET)
+    {
+        ss << "ipv4 ";
+    }
+    else
+    {
+        ss << "ipv6 ";
+    }
+
+    ss << local << ":" << ntohs(net_data->local_port);
+    ss << " -> ";
+    ss << remote << ":" << ntohs(net_data->remote_port);
+    ss << " ";
 }
