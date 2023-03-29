@@ -291,40 +291,6 @@ void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_
         event->procInfo.path_found = false;
     }
 
-    // We need to ensure that user-space does not get any exit events for a
-    //  process until all events for that process are already collected.
-    //  This can be tricky because exit events belong in the P0 queue so they
-    //  are not dropped.  But other events will be in the P1 and P2 queues.
-    // To solve this, each event will hold a reference to the exec_identity object
-    //  for its associated process.  When an exit is observed, the exit event
-    //  is stored in the exec_identity.  When an event is deleted, the reference
-    //  will be released (either sent to user-space or dropped).
-    // When the exec_identity reference_count reaches 0, the event will be placed
-    //  in the queue.
-    switch (eventType)
-    {
-    case CB_EVENT_TYPE_PROCESS_EXIT:
-    case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-    case CB_EVENT_TYPE_PROCESS_START_EXEC:
-    case CB_EVENT_TYPE_PROCESS_BLOCKED:
-        // For process start events we hold a reference to the parent process
-        //  (This forces an exit of the parent to be sent after the start of a child)
-        // For process exit events we hold a reference to the child process
-        //  (This forces the child's exit to be sent after the parent's exit)
-        ec_event_set_process_data(
-            event,
-            ec_exec_identity(&ec_process_posix_identity(process_handle)->temp_exec_handle),
-            context);
-        break;
-    default:
-        // For all other events we hold a reference to this process
-        ec_event_set_process_data(
-            event,
-            ec_process_exec_identity(process_handle),
-            context);
-        break;
-    }
-
 CATCH_DEFAULT:
     // In some cases we expect this function to be called with a NULL event
     //  because we still need to free the parent shared data
@@ -393,22 +359,6 @@ void ec_process_tracking_set_path(ProcessHandle *process_handle, PathData *path_
 void ec_process_tracking_put_path(char *path, ProcessContext *context)
 {
     ec_mem_put(path);
-}
-
-void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVENT event, ProcessContext *context)
-{
-    PCB_EVENT prev_event;
-    ExecIdentity *exec_identity = ec_process_tracking_get_exec_identity(posix_identity, context);
-
-    CANCEL_VOID(posix_identity && exec_identity);
-
-    // This is the last exit, so store the event in the tracking entry to be sent later
-    prev_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, (uint64_t) event);
-
-    // This should never happen, but just in case
-    ec_free_event(prev_event, context);
-
-    ec_process_tracking_put_exec_identity(exec_identity, context);
 }
 
 int __ec_hashtbl_search_callback(HashTbl * hashTblp, void *datap, void *priv, ProcessContext *context);

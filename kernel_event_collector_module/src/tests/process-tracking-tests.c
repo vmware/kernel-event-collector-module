@@ -48,7 +48,6 @@ bool __init test__proc_track_report_double_exit(ProcessContext *context)
 
     atomic64_set(&ec_process_exec_identity(handle)->active_process_count, 0);
     ASSERT_TRY(ec_process_tracking_report_exit(200, context));
-    ASSERT_TRY(atomic64_read(&ec_process_exec_identity(handle)->exit_event) == 0);
 
     passed = true;
 CATCH_DEFAULT:
@@ -90,3 +89,4 @@ CATCH_DEFAULT:
 
     return passed;
 }
+

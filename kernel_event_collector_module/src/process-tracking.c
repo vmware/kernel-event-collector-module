@@ -591,7 +591,6 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
     if (exec_identity)
     {
         atomic64_set(&exec_identity->active_process_count, 0);
-        atomic64_set(&exec_identity->exit_event, 0);
         ec_spinlock_init(&exec_identity->string_lock, context);
         exec_identity->path_data          = NULL;
         exec_identity->cmdline            = NULL;
@@ -606,19 +605,12 @@ void __ec_exec_identity_delete_callback(void *value, ProcessContext *context)
 
     if (exec_identity)
     {
-        PCB_EVENT exit_event;
-
         // Free the lock
         ec_spinlock_destroy(&exec_identity->string_lock, context);
 
         // Free the path and commandline
         ec_path_cache_put(exec_identity->path_data, context);
         ec_mem_put(exec_identity->cmdline);
-
-        exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
-
-        // Send the exit
-        ec_event_send_last_exit(exit_event, context);
     }
 }
 

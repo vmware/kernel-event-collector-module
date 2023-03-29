@@ -155,7 +155,6 @@ extern void ec_logger_shutdown(ProcessContext *context);
 extern PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context);
 extern void ec_free_event(PCB_EVENT event, ProcessContext *context);
 extern void ec_free_event_on_error(PCB_EVENT event, ProcessContext *context);
-extern void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context);
 
 extern bool ec_logger_should_log(CB_EVENT_TYPE eventType);
 
@@ -393,7 +392,6 @@ typedef struct _CB_EVENT_NODE {
     struct llist_node  llistEntry;
     struct CB_EVENT    data;
     uint16_t           payload; // precomputed size of event data to be sent to userspace
-    void              *process_data;
 } CB_EVENT_NODE;
 
 // Helpers

@@ -65,11 +65,6 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
     {
         CB_EVENT_NODE *node = container_of(event, CB_EVENT_NODE, data);
 
-        // Free the stored process data
-        //  This may cause a stored exit event to be sent if this is the last event
-        //  for a process.
-        ec_event_set_process_data(event, NULL, context);
-
         ec_mem_free(event->procInfo.path);
         event->procInfo.path = NULL;
 
@@ -143,21 +138,6 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
         }
 
         ec_mem_cache_disown(node, context);
-    }
-}
-
-void ec_event_set_process_data(PCB_EVENT event, void *process_data, ProcessContext *context)
-{
-    if (event)
-    {
-        CB_EVENT_NODE *node = container_of(event, CB_EVENT_NODE, data);
-
-        // If we have something stored free it now
-        ec_process_tracking_put_exec_identity(node->process_data, context);
-
-        // Save the process data in the event node and increase the ref
-        //  We don't actually do anything with this.  We only release it later.
-        node->process_data = ec_process_tracking_get_exec_identity_ref(process_data, context);
     }
 }
 
@@ -248,7 +228,6 @@ PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
     memset(node, 0, sizeof(*node));
     INIT_LIST_HEAD(&node->listEntry);
 
-    node->process_data = NULL;
     event              = &node->data;
 
     event->apiVersion = CB_APP_API_VERSION;
