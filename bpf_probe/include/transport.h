@@ -138,13 +138,21 @@ typedef struct path_data cgroup_data;
 // there can be now overflow. The biggest factor for overflow
 // then are max iteration amounts.
 
+struct file_handle_blob {
+    uint32_t handle_bytes;
+    int handle_type;
+    unsigned char f_handle[128];
+};
 
 #define MAX_CGROUP_BLOB_SIZE (MAX_PATH_COMPONENT_SIZE * MAX_CGROUP_PATH_ITER)
 
 #define MAX_FILE_BLOB_SIZE (MAX_PATH_COMPONENT_SIZE * HARD_MAX_PATH_ITER)
 
 #define MAX_EXEC_ARG_BLOB_SIZE (MAXARG * MAX_ARG_CHUNK_SIZE + MAX_CGROUP_BLOB_SIZE)
-#define MAX_FILE_PATH_BLOB_SIZE (MAX_FILE_BLOB_SIZE + MAX_CGROUP_BLOB_SIZE)
+#define MAX_FILE_PATH_BLOB_SIZE (MAX_FILE_BLOB_SIZE + \
+                                 MAX_CGROUP_BLOB_SIZE + \
+                                 sizeof(struct file_handle_blob))
+
 #define MAX_RENAME_BLOB_SIZE ((MAX_FILE_BLOB_SIZE * 2) + MAX_CGROUP_BLOB_SIZE)
 
 #define _MAX_DNS_BLOB_SIZE 4096
@@ -225,9 +233,11 @@ struct file_path_data_x {
     uint64_t flags;
     uint64_t prot;
     uint64_t fs_magic;
+    int32_t mnt_id;
 
     struct blob_ctx file_blob;
     struct blob_ctx cgroup_blob;
+    struct blob_ctx file_handle_blob;
     char blob[MAX_FILE_PATH_BLOB_SIZE];
 };
 

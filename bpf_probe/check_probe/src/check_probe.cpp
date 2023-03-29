@@ -17,6 +17,11 @@
 #include <iostream>
 #include <arpa/inet.h>
 
+#include <map>
+#include <fstream>
+
+static std::map<int, int> mntid_to_fd;
+
 using namespace cb_endpoint::bpf_probe;
 
 static void PrintUsage();
@@ -28,6 +33,7 @@ static void DroppedCallback(uint64_t drop_count);
 static std::string EventToBlobStrings(const data *event);
 static std::string EventToExtraData(const data *event);
 static void PrintNetEvent(std::stringstream &ss, const data *event);
+static void DebugOpenFileHandle(int mnt_id, int pid, const file_handle_blob *fh);
 
 static std::string s_bpf_program;
 static bool read_events = false;
@@ -398,6 +404,45 @@ static std::string EventToBlobStrings(const data *event)
         ss << " CgroupBlob:" << BlobToPath(event, data_x->cgroup_blob);
         ss << std::hex << " fsmagic:0x" << data_x->fs_magic << std::dec;
 
+        switch (event->header.type)
+        {
+        case EVENT_PROCESS_EXEC_PATH:
+        case EVENT_FILE_READ:
+        case EVENT_FILE_WRITE:
+        case EVENT_FILE_CREATE:
+        case EVENT_FILE_PATH: {
+
+            ss << " mnt_id:" << data_x->mnt_id;
+
+            if (data_x->file_handle_blob.size && data_x->file_handle_blob.offset)
+            {
+                auto start = reinterpret_cast<const char *>(event);
+                auto fh_blob = reinterpret_cast<const file_handle_blob *>(start +
+                                data_x->file_handle_blob.offset);
+
+                ss << " FileHandle{";
+                ss << "handle_bytes:" << fh_blob->handle_bytes;
+                ss << " handle_type:" << fh_blob->handle_type;
+                if (fh_blob->handle_type == 1 &&
+                    fh_blob->handle_bytes >= sizeof(uint32_t) * 2) {
+                    auto fid_i32gen = reinterpret_cast<const uint32_t *>(fh_blob->f_handle);
+                    ss << " FILEID_INO32_GEN ino:" << fid_i32gen[0] << " gen:" << fid_i32gen[1];
+
+                    if (event->header.type == EVENT_PROCESS_EXEC_PATH)
+                    {
+                        DebugOpenFileHandle(data_x->mnt_id, data_x->header.pid, fh_blob);
+                    }
+                }
+                ss << "}";
+            }
+
+            break;
+        }
+
+        default:
+            break;
+        }
+
         return ss.str();
     }
 
@@ -535,4 +580,140 @@ static void PrintNetEvent(std::stringstream &ss, const data *event)
     ss << " -> ";
     ss << remote << ":" << ntohs(net_data->remote_port);
     ss << " ";
+}
+
+
+static bool Tokenize(std::string &line, std::vector<std::string> &result)
+{
+    std::stringstream mountInfoStream(line);
+    std::string token;
+    size_t token_count = 0;
+
+    result.clear();
+    while (std::getline(mountInfoStream, token, ' '))
+    {
+        result.push_back(token);
+        token_count += 1;
+    }
+
+    return (token_count > 0);
+}
+
+// Optionally could pass in preloaded current device map
+static int ReadMountInfo(const std::string &relpath,
+                  const std::string &path, int mnt_id)
+{
+    int fd = -ENOENT;
+    std::string line;
+    std::ifstream in(path);
+
+    if (!in.is_open())
+    {
+        return fd;
+    }
+
+    char mntidbuf[32] = {};
+    sprintf(mntidbuf, "%d", mnt_id);
+
+    while (std::getline(in, line))
+    {
+        std::vector<std::string> mountInfoTokens;
+
+        if (!Tokenize(line, mountInfoTokens))
+        {
+            continue;
+        }
+
+        // Sample mountinfo entry:
+        // 36 35 98:0 /mnt1 /mnt2 rw,noatime master:1 - ext3 /dev/root rw,errors=continue
+        //(0) (1) (2) (3)   (4)      (5)      (6)    (7) (8)   (9)         (10)
+        // major:minor entry is at index 2.
+        // mount source entry is at index 9.
+        if (mountInfoTokens.size() < 10)
+        {
+            continue;
+        }
+
+        if (strcmp(mountInfoTokens.at(0).c_str(), mntidbuf) == 0)
+        {
+            fd = open(mountInfoTokens.at(4).c_str(), O_RDONLY);
+            if (fd < 0)
+            {
+                fd = -errno;
+            }
+            break;
+        }
+    }
+
+    return fd;
+}
+
+static int AddMntIdEntry(int mnt_id, int pid)
+{
+    std::string relpath = "";
+    std::string mountinfo = "/proc/self/mountinfo";
+
+    // First try from our root filesystem
+    int fd = ReadMountInfo(relpath, mountinfo, mnt_id);
+
+    //
+    // On failure try the root filesystem from using special symlink
+    // /proc/<pid>/root.
+    // If the mount namespace is known, and pid in that mnt namespace
+    // should work. So it's still a best effort, due to being timing based
+    // However if were tracking mnt_ns for pids, then this would be cleaner.
+    //
+    if (fd < 0)
+    {
+        relpath = "/proc/" + std::to_string(pid) + "/root";
+        mountinfo = relpath + "/proc/1/mountinfo";
+
+        fd = ReadMountInfo(relpath, mountinfo, mnt_id);
+    }
+
+    return fd;
+}
+
+static void DebugOpenFileHandle(int mnt_id, int pid, const file_handle_blob *fh)
+{
+    int fd = -1;
+    auto itr = mntid_to_fd.find(mnt_id);
+
+    if (itr == mntid_to_fd.end())
+    {
+        fd = AddMntIdEntry(mnt_id, pid);
+        if (fd >= 0)
+        {
+            fprintf(stderr, "Found mnt_id:%d\n", mnt_id);
+            mntid_to_fd.insert(std::pair<int,int>(mnt_id, fd));
+        }
+        else
+        {
+            fprintf(stderr, "Not Found mnt_id:%d\n", mnt_id);
+        }
+    }
+    else
+    {
+        fd = itr->second;
+    }
+
+    if (fd >= 0)
+    {
+        // If we get errno ESTALE the file system may not support file handles,
+        // or we have not implemented its special encoding yet.
+
+        //
+        // TODO:
+        //  - btrfs, overlayfs, cephfs
+        //
+
+        int fh_fd = open_by_handle_at(fd, (struct file_handle *)fh, O_RDONLY);
+
+        fprintf(stderr, "open_by_handle_at(%d, fh, O_RDONLY) = %d\n", fd,
+                fh_fd >= 0 ? fh_fd : -errno);
+        if (fh_fd >= 0)
+        {
+            close(fh_fd);
+        }
+    }
 }

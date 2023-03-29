@@ -646,6 +646,11 @@ static __always_inline int __get_next_parent_dentry(struct dentry **dentry,
     return retVal;
 }
 
+static __always_inline
+struct mount *get_real_mount(struct vfsmount *vfsmnt)
+{
+    return ((void *)vfsmnt) - offsetof(struct mount, mnt);
+}
 
 static size_t __do_file_path_x(struct dentry *dentry,
                             struct vfsmount *vfsmnt,
@@ -661,7 +666,8 @@ static size_t __do_file_path_x(struct dentry *dentry,
     bpf_core_read(&mnt_root, sizeof(struct dentry *), &vfsmnt->mnt_root);
 
     // poorman's container_of
-    real_mount = ((void *)vfsmnt) - offsetof(struct mount, mnt);
+    // real_mount = ((void *)vfsmnt) - offsetof(struct mount, mnt);
+    real_mount = get_real_mount(vfsmnt);
 
 #pragma clang loop unroll(full)
     for (i = 0; i < MAX_FULL_PATH_ITER; ++i) {
@@ -765,6 +771,32 @@ out:
 
     return total_blob_len;
 }
+
+static size_t blobify_file_handle(const struct inode *inode, char *blob)
+{
+    size_t total_blob_len = 0;
+    struct file_handle_blob *fh = (struct file_handle_blob *)blob;
+    struct fid *fid = (struct fid *)fh->f_handle;
+
+    //
+    // TODO: Encode file handles for more file system types
+    //  - btrfs, overlayfs, cephfs maybe nfs
+    //
+
+    if (inode) {
+        total_blob_len = offsetof(typeof(*fh), f_handle);
+
+        fh->handle_type = FILEID_INO32_GEN;
+        // value is truncated
+        fid->i32.ino = (typeof(fid->i32.ino))BPF_CORE_READ(inode, i_ino);
+        BPF_CORE_READ_INTO(&fid->i32.gen, inode, i_generation);
+
+        total_blob_len += (2 * sizeof(u32));
+        fh->handle_bytes = 2 * sizeof(u32);
+    }
+
+    return total_blob_len;
+};
 
 static void submit_exec_arg_event(void *ctx, const char __user *const __user *argv)
 {
@@ -1030,6 +1062,8 @@ out:
 SEC("kprobe/security_file_open")
 int BPF_KPROBE(on_security_file_open, struct file *file)
 {
+    struct mount *mount = NULL;
+    struct vfsmount *vfsmnt = NULL;
     struct super_block *sb = NULL;
     struct inode *inode = NULL;
     umode_t umode;
@@ -1064,6 +1098,10 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
         goto out;
     }
 
+    BPF_CORE_READ_INTO(&vfsmnt, file, f_path.mnt);
+    mount = get_real_mount(vfsmnt);
+
+
     // Indirect store in case f_flags is ever expanded
     f_flags = BPF_CORE_READ(file, f_flags);
     BPF_CORE_READ_INTO(&f_mode, file, f_mode);
@@ -1092,6 +1130,7 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
     data_x->flags = BPF_CORE_READ(file, f_flags);
     data_x->prot = BPF_CORE_READ(file, f_mode);
     data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    BPF_CORE_READ_INTO(&data_x->mnt_id, mount, mnt_id);
 
     if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
     {
@@ -1099,9 +1138,7 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
         __track_write_entry(file, data_x);
     }
 
-    blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
-                                 BPF_CORE_READ(file, f_path.mnt),
-                                 blob_pos);
+    blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry), vfsmnt, blob_pos);
     if (!blob_size) {
         goto out;
     }
@@ -1109,6 +1146,10 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
                                 &payload, blob_pos);
     blob_size = blobify_cgroup_path(blob_pos);
     blob_pos = compute_blob_ctx(blob_size, &data_x->cgroup_blob, &payload, blob_pos);
+
+    blob_size = blobify_file_handle(inode, blob_pos);
+    blob_pos = compute_blob_ctx(blob_size, &data_x->file_handle_blob,
+                                &payload, blob_pos);
 
     data_x->header.payload = payload;
     if (payload <= MAX_BLOB_EVENT_SIZE) {
