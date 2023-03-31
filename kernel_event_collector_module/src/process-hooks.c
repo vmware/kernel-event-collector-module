@@ -137,10 +137,10 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
 
     getnstimeofday(&start_time);
 
-    // If the `pid` and `tid` are the same than this is a fork.  If they are different this is a
-    //  thread.  We need to ignore threads.
+    // If the `pid` and `tid` are the same then this is a fork. If they are different this is a
+    //  thread. We need to ignore threads.
     // In theory we should see `CLONE_THREAD` in flags, but I have often found this to be garbage data.
-    if (ec_gettid(task) != ec_getpid(task))
+    if (tid != pid)
     {
         return;
     }
@@ -183,10 +183,10 @@ void ec_sys_clone(ProcessContext *context, struct task_struct *task)
     ec_process_tracking_put_handle(process_handle, context);
 }
 
-// This hook happens before the exec.  It will process_handle both the banning case and the start case
+// This hook happens before the exec. It will process_handle both the banning case and the start case
 //  Note: We used to process_handle the start in a post hook.  We are using the pre hook for two reasons.
 //        1. We had problems with page faults in the post hook
-//        2. We need the process tracking entry to be updated for the baned event anyway
+//        2. We need the process tracking entry to be updated for the banned event anyway
 int ec_lsm_bprm_check_security(struct linux_binprm *bprm)
 {
     struct task_struct *task = current;

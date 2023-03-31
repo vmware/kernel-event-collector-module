@@ -53,11 +53,6 @@ typedef struct exec_identity {
     //  when sending an exit event.
     atomic64_t        active_process_count;
 
-    // This holds a PCB_EVENT for the exit event for this process; which will only be enqueued
-    // when the final process exits AND all outstanding events for the process have been read by the agent.
-    // It is stored as an atomic so we can replace the pointer atomically
-    atomic64_t        exit_event;
-
     // Set once all the static information about a process (path, cmdline) has been collected. This allows us not to
     // use the string_lock when reading.
     bool              is_complete;
@@ -178,7 +173,6 @@ void ec_process_exec_handle_clone(ExecHandle *from, ExecHandle *to, ProcessConte
 
 // Event Helper
 void ec_process_tracking_set_event_info(ProcessHandle *process_handle, CB_EVENT_TYPE eventType, PCB_EVENT event, ProcessContext *context);
-void ec_process_tracking_store_exit_event(PosixIdentity *posix_identity, PCB_EVENT event, ProcessContext *context);
 bool ec_process_tracking_should_track_user(void);
 bool ec_process_tracking_has_active_process(PosixIdentity *posix_identity, ProcessContext *context);
 

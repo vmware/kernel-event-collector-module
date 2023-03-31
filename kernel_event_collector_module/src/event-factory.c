@@ -174,7 +174,6 @@ void ec_event_send_exit(
 {
     // We need to know if this is the last running proccess when we allocate
     //  the event because we may not be sending exits for all forks
-    char      *status_msg           = "";
     PCB_EVENT  event                = ec_factory_alloc_event(
         process_handle,
         was_last_active_process ? CB_EVENT_TYPE_PROCESS_LAST_EXIT : CB_EVENT_TYPE_PROCESS_EXIT,
@@ -183,29 +182,12 @@ void ec_event_send_exit(
         NULL,
         context);
 
-    if (event)
-    {
-        if (!was_last_active_process)
-        {
-            // This is a fork exit, so send it now
-            //  Note: This exit event may be collected by the agent before events
-            //        produced by this fork.
-            ec_send_event(event, context);
-            status_msg = "<SEND> ";
-        } else
-        {
-            ec_process_tracking_store_exit_event(ec_process_posix_identity(process_handle), event, context);
-            status_msg = "<HOLD-LAST> ";
-        }
-    } else
-    {
-        status_msg = "<IGNORED> ";
-    }
+    ec_send_event(event, context);
 
     if (MAY_TRACE_LEVEL(DL_PROCESS))
     {
-        TRACE(DL_PROCESS, "EXIT %s%s of %d by %d (reported as %d:%ld by %d)",
-              status_msg,
+        TRACE(DL_PROCESS, "EXIT %s %s of %d by %d (reported as %d:%ld by %d)",
+              event ? "<SENT>" : "<IGNORED>",
               SAFE_STRING(ec_process_path(process_handle)),
               ec_process_posix_identity(process_handle)->posix_details.pid,
               ec_process_posix_identity(process_handle)->posix_parent_details.pid,

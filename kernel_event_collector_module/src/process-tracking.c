@@ -161,10 +161,7 @@ ProcessHandle *ec_process_tracking_create_process(
         // TODO: We really need to build my parent
         // This gives us a local reference
         exec_identity = ec_process_tracking_alloc_exec_identity(context);
-        if (!exec_identity)
-        {
-            return NULL;
-        }
+        TRY(exec_identity);
 
         exec_identity->exec_details.pid                = parent;
         exec_identity->exec_details.start_time         = start_time;
@@ -385,24 +382,29 @@ ProcessHandle *ec_process_tracking_update_process(
     // If this is was the last remaining process of the exec identity we want to
     //  send an exit for it.
     //  This will catch exec-other and last fork cases.  We want to ignore a fake start however.
-    if (was_last_active_process && is_real_start)
-    {
-        ExecHandle temp_exec_handle   = { 0 };
+    //
+    // Note: We changed the logic to send exit events immediately instead of sending them after all other events.
+    //       A result of this change is that sending the exit here will cause the exit to be sent before the child start.
+    //       This in turn breaks the process tracking in user space.  We intend to account for this in the user-space tracking
+    //       table, but we are not ready for that yet.
+    // if (was_last_active_process && is_real_start)
+    // {
+    //     ExecHandle temp_exec_handle   = { 0 };
 
-        ec_process_exec_handle_set_exec_identity(&temp_exec_handle, exec_identity, context);
+    //     ec_process_exec_handle_set_exec_identity(&temp_exec_handle, exec_identity, context);
 
-        // This will set the current proc's temp_exec_identity to the new shared data of the execed proc.
-        // The exit event (for the previous exec identity/parent) will take a reference to this exec_identity.
-        // This forces the new exec's exit event to wait to be queued until after previous exec's exit event.
-        ec_process_tracking_set_temp_exec_handle(process_handle, &temp_exec_handle, context);
+    //     // This will set the current proc's temp_exec_identity to the new shared data of the execed proc.
+    //     // The exit event (for the previous exec identity/parent) will take a reference to this exec_identity.
+    //     // This forces the new exec's exit event to wait to be queued until after previous exec's exit event.
+    //     ec_process_tracking_set_temp_exec_handle(process_handle, &temp_exec_handle, context);
 
-        // Send the event based on the current process information.
-        //  We will not delete the posix_identity since it will be used by the new process.
-        //  The exec_identity will be released later
-        ec_event_send_exit(process_handle, was_last_active_process, context);
+    //     // Send the event based on the current process information.
+    //     //  We will not delete the posix_identity since it will be used by the new process.
+    //     //  The exec_identity will be released later
+    //     ec_event_send_exit(process_handle, was_last_active_process, context);
 
-        ec_process_tracking_put_exec_handle(&temp_exec_handle, context);
-    }
+    //     ec_process_tracking_put_exec_handle(&temp_exec_handle, context);
+    // }
 
     // Update our table entry with the new exec_identity
     //  This will lock the hashtable to prevent any data racing
@@ -591,7 +593,6 @@ void ec_process_tracking_init_exec_identity(ExecIdentity *exec_identity, Process
     if (exec_identity)
     {
         atomic64_set(&exec_identity->active_process_count, 0);
-        atomic64_set(&exec_identity->exit_event, 0);
         ec_spinlock_init(&exec_identity->string_lock, context);
         exec_identity->path_data          = NULL;
         exec_identity->cmdline            = NULL;
@@ -606,19 +607,12 @@ void __ec_exec_identity_delete_callback(void *value, ProcessContext *context)
 
     if (exec_identity)
     {
-        PCB_EVENT exit_event;
-
         // Free the lock
         ec_spinlock_destroy(&exec_identity->string_lock, context);
 
         // Free the path and commandline
         ec_path_cache_put(exec_identity->path_data, context);
         ec_mem_put(exec_identity->cmdline);
-
-        exit_event = (PCB_EVENT) atomic64_xchg(&exec_identity->exit_event, 0);
-
-        // Send the exit
-        ec_event_send_last_exit(exit_event, context);
     }
 }
 
