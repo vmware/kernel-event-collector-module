@@ -96,7 +96,7 @@ message("CONAN_INCLUDE_DIRS_LIBBPF: ${CONAN_INCLUDE_DIRS_LIBBPF}")
 
 add_custom_command(
     OUTPUT ${BPF_ELF_FILE} ${BPF_SKEL_FILE}
-    COMMAND ${CLANG} -g -O2 -Wall
+    COMMAND ${CLANG} -v -g -O2 -Wall
         -target bpf
         -D${TARGET_ARCH}
         -I${CONAN_INCLUDE_DIRS_LIBBPF}
