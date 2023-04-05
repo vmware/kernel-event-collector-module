@@ -273,6 +273,12 @@ void ProbeEventCallback(Data data)
             output << " [" << EventToExtraData(data.data) << "]";
         }
 
+        if (data.data->header.type == EVENT_PROCESS_EXEC_RESULT)
+        {
+            auto exec_result = reinterpret_cast<const exec_data *>(data.data);
+            output << " ret:" << exec_result->retval;
+        }
+
         if (isEndingMessage) {
             output << "\n++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
         }

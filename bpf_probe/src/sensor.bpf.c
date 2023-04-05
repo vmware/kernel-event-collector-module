@@ -766,7 +766,7 @@ out:
     return total_blob_len;
 }
 
-static void submit_exec_arg_event(void *ctx, const char __user *const __user *argv)
+static void submit_exec_arg_event(void *ctx, const char **argv)
 {
     struct exec_arg_data *exec_arg_data = __current_blob();
     u32 payload = offsetof(typeof(*exec_arg_data), blob);
@@ -799,23 +799,30 @@ static void submit_exec_arg_event(void *ctx, const char __user *const __user *ar
 
 // Tracepoint of exec entry
 SEC("tracepoint/syscalls/sys_enter_execve")
-int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter* ctx)
+int sys_enter_execve(struct syscall_trace_enter *ctx)
 {
-    // ctx is trace_event struct
+    const char **argv = NULL;
+    unsigned long argv_l = 0;
+
+    // For args refer to man 2 execve or
     // /sys/kernel/debug/tracing/events/syscalls/sys_enter_execve/format
-    const char **argv = (const char **)(ctx->args[1]);
+    BPF_CORE_READ_INTO(&argv_l, ctx, args[1]);
+    argv = (const char **)argv_l;
+
     submit_exec_arg_event(ctx, argv);
     return 0;
 }
 
 // Tracepoint of exec exit
 SEC("tracepoint/syscalls/sys_exit_execve")
-int tracepoint__syscalls__sys_exit_execve(struct trace_event_raw_sys_exit* ctx)
+int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit *ctx)
 {
     struct exec_data data = {};
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
-    data.retval = ctx->ret;
+
+    // Implicit cast
+    data.retval = BPF_CORE_READ(ctx, ret);
 
     send_event(ctx, &data, offsetof(typeof(data), extra));
 
@@ -824,29 +831,35 @@ int tracepoint__syscalls__sys_exit_execve(struct trace_event_raw_sys_exit* ctx)
 
 // Tracepoint of execveat entry
 SEC("tracepoint/syscalls/sys_enter_execveat")
-int tracepoint__syscalls__sys_enter_execveat(struct trace_event_raw_sys_enter* ctx)
+int tracepoint__syscalls__sys_enter_execveat(struct syscall_trace_enter *ctx)
 {
-    // ctx is trace_event struct
+    const char **argv = NULL;
+    unsigned long argv_l = 0;
+
+    // For args to man 2 execveat or
     // /sys/kernel/debug/tracing/events/syscalls/sys_enter_execveat/format
-    const char **argv = (const char **)(ctx->args[2]);
+    BPF_CORE_READ_INTO(&argv_l, ctx, args[2]);
+    argv = (const char **)argv_l;
+
     submit_exec_arg_event(ctx, argv);
     return 0;
 }
 
 // Tracepoint of execveat exit
 SEC("tracepoint/syscalls/sys_exit_execveat")
-int tracepoint__syscalls__sys_exit_execveat(struct trace_event_raw_sys_exit* ctx)
+int tracepoint__syscalls__sys_exit_execveat(struct syscall_trace_exit *ctx)
 {
     struct exec_data data = {};
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
-    data.retval = ctx->ret;
+
+    // Implicit cast
+    data.retval = BPF_CORE_READ(ctx, ret);
 
     send_event(ctx, &data, offsetof(typeof(data), extra));
 
     return 0;
 }
-
 
 static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inode)
 {

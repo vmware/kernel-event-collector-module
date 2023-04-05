@@ -124,11 +124,23 @@ struct mount {
 	void *cb_args;
 } __randomize_layout;
 
+// Refer to kernel/trace/trace.h syscall_trace_exit
+// Only explicitly include trace_events.h
+// for kernels that have patched struct trace_entry
+#if defined(RHEL_MAJOR) && RHEL_MAJOR == 9
+#include <linux/trace_events.h>
+struct syscalls_sys_exit_args {
+	struct trace_entry ent;
+	int __syscall_nr;
+	long int ret;
+};
+#else
 struct syscalls_sys_exit_args {
 	__u64 pad;
 	int __syscall_nr;
-	long ret;
+	long int ret;
 };
+#endif
 
 #define DNS_RESP_PORT_NUM 53
 #define DNS_RESP_MAXSIZE 512
