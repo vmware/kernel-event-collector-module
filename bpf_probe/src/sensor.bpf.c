@@ -344,8 +344,18 @@ static __always_inline u64 __get_inode_from_dentry(struct dentry *dentry)
 
 static __always_inline bool __has_fmode_nonotify(const struct file *file)
 {
-    return !!(BPF_CORE_READ(file, f_flags) & FMODE_NONOTIFY) &&
-           ((BPF_CORE_READ(file, f_flags) & O_ACCMODE) == O_RDONLY);
+    if (BPF_CORE_READ(file, f_flags) & FMODE_NONOTIFY) {
+        // If open for read then definitely eat the event.
+        if ((BPF_CORE_READ(file, f_flags) & O_ACCMODE) == O_RDONLY) {
+            return true;
+        }
+
+        // Definitely are opened for internal use, eat it.
+        if (BPF_CORE_READ(file, f_mode) & FMODE_NOACCOUNT) {
+            return true;
+        }
+    }
+    return false;
 }
 
 
