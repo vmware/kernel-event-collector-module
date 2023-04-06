@@ -328,11 +328,23 @@ static inline u64 __get_inode_from_dentry(struct dentry *dentry)
 static inline bool __has_fmode_nonotify(const struct file *file)
 {
 #ifdef FMODE_NONOTIFY
-    return file && (file->f_flags & FMODE_NONOTIFY) &&
-		   ((file->f_flags & (O_WRONLY|O_RDWR)) == 0);
-#else
+    if (file && (file->f_flags & FMODE_NONOTIFY)) {
+        // If open for read then definitely eat the event.
+        if (((file->f_flags & (O_WRONLY|O_RDWR)) == 0)) {
+            return true;
+        }
+
+#ifdef FMODE_NOACCOUNT
+        // Definitely are opened for internal use
+        if (file->f_mode & FMODE_NOACCOUNT) {
+            return true;
+        }
+#endif /* FMODE_NOACCOUNT */
+
+    }
+#endif /* FMODE_NONOTIFY */
+
     return false;
-#endif
 }
 
 static inline struct pid *select_task_pid(struct task_struct *task)

@@ -46,6 +46,7 @@
 #define FMODE_EXEC      ((fmode_t)0x20)
 #define FMODE_CREATED   ((fmode_t)0x100000)
 #define FMODE_NONOTIFY  ((fmode_t)0x4000000)
+#define FMODE_NOACCOUNT ((fmode_t)0x20000000)
 
 #define O_ACCMODE       00000003
 #define O_RDONLY        00000000
