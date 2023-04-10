@@ -21,6 +21,7 @@
 #include "hook-tracking.h"
 #include "tests/run-tests.h"
 #include "path-cache.h"
+#include "event-factory.h"
 
 #ifdef HOOK_SELECTOR
 #define HOOK_MASK  0x0000000000000000
@@ -45,7 +46,7 @@ bool     g_path_cache_ref_debug __read_mostly;
 bool     g_panic_on_error __read_mostly;
 
 CB_DRIVER_CONFIG g_driver_config  __read_mostly = {
-    .processes =            ALL_FORKS_AND_EXITS,
+    .processes =            ENABLE,
     .module_loads =         ENABLE,
     .file_mods =            ENABLE,
     .net_conns =            ENABLE,
@@ -530,6 +531,8 @@ bool ec_enable_module(ProcessContext *context)
 
             ec_set_module_state(context, ModuleStateEnabled);
             g_module_state_info.module_enabled = true;
+            ec_event_send_discover_flush(context);
+            ec_process_tracking_send_process_discovery(context);
             TRACE(DL_INIT, "%s Module enable operation succeeded. ", __func__);
         }
             break;

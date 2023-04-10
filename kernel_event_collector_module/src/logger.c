@@ -56,6 +56,9 @@ time_t ec_get_null_time(void)
     return TO_WIN_TIME(0, 0);
 }
 
+// Coverity thinks that we leak the event because we use containerof to get the list node.  Tell it that this
+//  will free the event
+// coverity[+free : arg-0]
 void ec_free_event(PCB_EVENT event, ProcessContext *context)
 {
     if (event)
@@ -77,6 +80,14 @@ void ec_free_event(PCB_EVENT event, ProcessContext *context)
             {
                 ec_mem_free(event->processStart.path);
                 event->processStart.path = NULL;
+            }
+            break;
+
+        case CB_EVENT_TYPE_DISCOVER:
+            if (event->processDiscover.path)
+            {
+                ec_mem_free(event->processDiscover.path);
+                event->processDiscover.path = NULL;
             }
             break;
 
@@ -155,45 +166,13 @@ bool ec_logger_should_log(CB_EVENT_TYPE eventType)
     switch (eventType)
     {
     case CB_EVENT_TYPE_PROCESS_START_FORK:
-        switch (g_driver_config.processes)
-        {
-        case COLLAPSED_EXITS_ALL_FORKS:
-        case ALL_FORKS_AND_EXITS:
-            return true;
-        case EXECS_ONLY:
-        case COLLAPSED_EXITS_NO_FORKS:
-        case DISABLE:
-        default:
-            return false;
-        }
-        break;
-
     case CB_EVENT_TYPE_PROCESS_START_EXEC:
-        return g_driver_config.processes != DISABLE;
-        break;
-
+    case CB_EVENT_TYPE_DISCOVER:
+    case CB_EVENT_TYPE_DISCOVER_COMPLETE:
+    case CB_EVENT_TYPE_DISCOVER_FLUSH:
     case CB_EVENT_TYPE_PROCESS_EXIT:
-        switch (g_driver_config.processes)
-        {
-        case ALL_FORKS_AND_EXITS:
-            return true;
-        default:
-            return false;
-        }
-        break;
-
     case CB_EVENT_TYPE_PROCESS_LAST_EXIT:
-        switch (g_driver_config.processes)
-        {
-        case COLLAPSED_EXITS_ALL_FORKS:
-        case ALL_FORKS_AND_EXITS:
-        case COLLAPSED_EXITS_NO_FORKS:
-            return true;
-        case EXECS_ONLY:
-        case DISABLE:
-        default:
-            return false;
-        }
+        return g_driver_config.processes != DISABLE;
         break;
 
     case CB_EVENT_TYPE_MODULE_LOAD:
@@ -235,6 +214,7 @@ bool ec_shouldExcludeByUID(ProcessContext *context, uid_t uid)
     return ec_banning_IgnoreUid(context, uid);
 }
 
+// coverity[+alloc]
 PCB_EVENT ec_alloc_event(CB_EVENT_TYPE eventType, ProcessContext *context)
 {
     CB_EVENT_NODE *node = NULL;
