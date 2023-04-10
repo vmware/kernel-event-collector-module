@@ -161,10 +161,7 @@ ProcessHandle *ec_process_tracking_create_process(
         // TODO: We really need to build my parent
         // This gives us a local reference
         exec_identity = ec_process_tracking_alloc_exec_identity(context);
-        if (!exec_identity)
-        {
-            return NULL;
-        }
+        TRY(exec_identity);
 
         exec_identity->exec_details.pid                = parent;
         exec_identity->exec_details.start_time         = start_time;
