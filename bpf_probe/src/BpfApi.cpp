@@ -26,6 +26,11 @@
 #include <sys/epoll.h>
 #include <sys/resource.h>   // Only for setrlimit()
 
+#if defined(__aarch64__)
+#include <regex>
+#include <sys/utsname.h>
+#endif /* __aarch64__ */
+
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
 namespace fs = boost::filesystem;
@@ -133,7 +138,7 @@ bool BpfApi::Init_libbpf()
 
     // TODO: Log if using ringbuf or perf buffer here
 
-    m_ProgInstanceType = BpfApi::ProgInstanceType::LibbpfAutoAttached;
+    m_ProgInstanceType = BpfApi::ProgInstanceType::Libbpf;
 
     return true;
 }
@@ -277,7 +282,7 @@ bool BpfApi::IsLRUCapable() const
 // syscall for ARM architecture. So, handling the same for ARM here.
 void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
 {
-    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::Libbpf)
     {
         return;
     }
@@ -315,7 +320,7 @@ bool BpfApi::AttachProbe(const char * name,
                          ProbeType    type)
 {
     // Just return true even though if we don't care
-    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::Libbpf)
     {
         return true;
     }
@@ -379,26 +384,120 @@ bool BpfApi::AttachProbe(const char * name,
     return result.ok();
 }
 
-bool BpfApi::AutoAttach()
+bool BpfApi::IsEL9Aarch64()
 {
-    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+#if defined(__aarch64__)
+    const std::string re_MajMinDot = R"(5\.14\.0)";
+    const std::string re_DotDigits = R"((?:\.\d+){0,2})"; // zero to 2 instances of a _\d+
+    const std::string re_EL9_Dist = R"(\.el9)";           // .el9
+    const std::string re_EL9_Dist_Extra = R"((?:_\d+)?)"; // "_\d+" zero or one times
+    const std::string re_arch = R"(\.aarch64)";           // .arch
+
+    const std::string complex_aarch64_el9_str = (
+        "^" +               // Starts With
+        re_MajMinDot +      // 5.14.0
+        "-" +               // -
+
+        R"((\d+))" +        // Capture Group: \d+
+        re_DotDigits +      // Try to handle optional patched EL builds
+
+        re_EL9_Dist +       // Literal .el9
+        re_EL9_Dist_Extra + // Try to handle dot releases
+        re_DotDigits +      // Try to handle patched distro releases
+
+        re_arch +           // .aarch64
+        "$"                 // End of String/Line
+    );
+
+    // Simplified version of the regex above that in case
+    // RHEL9 does something weird in their kernel release version.
+    const std::string simple_aarch64_el9_str =
+        R"(^5\.14\.0-(\d+)\..*?\.el9.*?\.aarch64$)";
+
+    // Might as well try both
+    const std::regex complex_el9_aarch64_regex(complex_aarch64_el9_str);
+    const std::regex simple_el9_aarch64_regex(simple_aarch64_el9_str);
+
+    struct utsname uts = {};
+    int ret = uname(&uts);
+
+    if (ret || !uts.release[0])
     {
-        if (!m_skel)
+        return false;
+    }
+
+    return std::regex_search(uts.release, complex_el9_aarch64_regex) ||
+           std::regex_search(uts.release, simple_el9_aarch64_regex);
+#else
+    return false;
+#endif
+}
+
+bool BpfApi::AttachLibbpf(const struct libbpf_kprobe &kprobe)
+{
+    struct bpf_program *prog = NULL;
+
+    if (!m_skel || !kprobe.bpf_prog || !kprobe.target_func)
+    {
+        return false;
+    }
+
+    prog = bpf_object__find_program_by_name(m_skel->obj, kprobe.bpf_prog);
+    if (prog)
+    {
+        struct bpf_link *link = NULL;
+        int err = 0;
+
+        link = bpf_program__attach_kprobe(prog,
+                                          kprobe.is_retprobe,
+                                          kprobe.target_func);
+        err = libbpf_get_error(link);
+
+        if (err)
         {
-            m_ErrorMessage = std::string("Cannot Auto Attach null bpf skeleton");
+            m_ErrorMessage = "Failed to attach: " + std::string(kprobe.bpf_prog);
             return false;
         }
 
-        if (sensor_bpf__attach(m_skel))
+        return true;
+    }
+    else
+    {
+        m_ErrorMessage = "Failed to find: " + std::string(kprobe.bpf_prog);
+        return false;
+    }
+}
+
+bool BpfApi::AttachLibbpf(const struct libbpf_tracepoint &tp)
+{
+    struct bpf_program *prog = NULL;
+
+    if (!m_skel || !tp.bpf_prog || !tp.tp_category || !tp.tp_name)
+    {
+        return false;
+    }
+
+    prog = bpf_object__find_program_by_name(m_skel->obj, tp.bpf_prog);
+    if (prog)
+    {
+        struct bpf_link *link = NULL;
+        int err = 0;
+
+        link = bpf_program__attach_tracepoint(prog, tp.tp_category, tp.tp_name);
+        err = libbpf_get_error(link);
+
+        if (err)
         {
-            m_ErrorMessage = std::string("sensor_bpf__attach failed");
+            m_ErrorMessage = "Failed to attach: " + std::string(tp.bpf_prog);
             return false;
         }
         return true;
     }
-
-    m_ErrorMessage = std::string("Cannot Auto Attach With InstanceType");
-    return false;
+    else
+    {
+        m_ErrorMessage = "Failed to find: " + std::string(tp.bpf_prog);
+        return false;
+    }
 }
 
 bool BpfApi::RegisterEventCallback(EventCallbackFn callback,

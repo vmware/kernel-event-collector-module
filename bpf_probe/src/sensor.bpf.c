@@ -809,7 +809,7 @@ static void submit_exec_arg_event(void *ctx, const char **argv)
 
 // Tracepoint of exec entry
 SEC("tracepoint/syscalls/sys_enter_execve")
-int sys_enter_execve(struct syscall_trace_enter *ctx)
+int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter *ctx)
 {
     const char **argv = NULL;
     unsigned long argv_l = 0;
@@ -870,6 +870,49 @@ int tracepoint__syscalls__sys_exit_execveat(struct syscall_trace_exit *ctx)
 
     return 0;
 }
+
+#if defined(USE_RAW_SYSCALLS_TP)
+// Not used explicitly but safer to keep this around just in case.
+SEC("tracepoint/raw_syscalls/sys_exit")
+int raw_syscalls__sys_exit(struct trace_event_raw_sys_exit *ctx)
+{
+    long id = BPF_CORE_READ(ctx, id);
+
+    if (id == __NR_execve || id == __NR_execveat)
+    {
+        struct exec_data data = {};
+
+        __init_header(EVENT_PROCESS_EXEC_RESULT, PP_ENTRY_POINT, &data.header);
+
+        data.retval = BPF_CORE_READ(ctx, ret);
+
+        send_event(ctx, &data, offsetof(typeof(data), extra));
+    }
+
+    return 0;
+}
+#endif /* USE_RAW_SYSCALLS_TP */
+
+#if defined(bpf_target_arm64)
+static int kret_exec_result(void *ctx, long ret, u8 state)
+{
+    struct exec_data data = {};
+
+    __init_header(EVENT_PROCESS_EXEC_RESULT, state, &data.header);
+    data.retval = (int)ret;
+    send_event(ctx, &data, offsetof(typeof(data), extra));
+    return 0;
+}
+
+// Works on RHEL 9.1 Aarch64
+SEC("kretprobe/do_execveat_common")
+int BPF_KPROBE(kret_do_execveat_common)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+
+    return kret_exec_result(ctx, ret, PP_ENTRY_POINT);
+}
+#endif
 
 static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inode)
 {
