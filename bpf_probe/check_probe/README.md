@@ -19,11 +19,11 @@ workspace/bpf_probe/build/gcc-arm-8_2-relwithdebinfo.1/bin/check_probe
 ## Run
 * Use libbpf
 ```
-sudo ./check_probe -L -vvv -r
+sudo ./check_probe -L -vvv -r 2>&1
 ```
 * Use BCC
 ```
-sudo ./check_probe -B -vvv -r
+sudo ./check_probe -B -r 2>&1
 ```
 
 # Docker
