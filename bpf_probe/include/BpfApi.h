@@ -29,6 +29,19 @@ struct perf_reader;
 
 namespace cb_endpoint {
 namespace bpf_probe {
+
+    struct libbpf_kprobe {
+        const char *bpf_prog;
+        const char *target_func;
+        bool is_retprobe;
+    };
+
+    struct libbpf_tracepoint {
+        const char *bpf_prog;
+        const char *tp_category;
+        const char *tp_name;
+    };
+
     class Data
     {
     public:
@@ -78,7 +91,7 @@ namespace bpf_probe {
         enum class ProgInstanceType
         {
             Uninitialized,
-            LibbpfAutoAttached,
+            Libbpf,
             Bcc,
         };
 
@@ -91,12 +104,16 @@ namespace bpf_probe {
 
         virtual bool IsLRUCapable() const = 0;
 
+        virtual bool IsEL9Aarch64() = 0;
+
         virtual bool AttachProbe(
             const char * name,
             const char * callback,
             ProbeType     type) = 0;
 
-        virtual bool AutoAttach() = 0;
+        virtual bool AttachLibbpf(const struct libbpf_tracepoint &tp) = 0;
+
+        virtual bool AttachLibbpf(const struct libbpf_kprobe &kprobe) = 0;
 
         virtual bool RegisterEventCallback(EventCallbackFn callback,
                                            DroppedCallbackFn dropCallback) = 0;
@@ -121,7 +138,7 @@ namespace bpf_probe {
             switch (progInstanceType)
             {// LCOV_EXCL_START
             case ProgInstanceType::Uninitialized: str = "Uninitialized"; break;
-            case ProgInstanceType::LibbpfAutoAttached: str = "LibbpfAutoAttached"; break;
+            case ProgInstanceType::Libbpf: str = "Libbpf"; break;
             case ProgInstanceType::Bcc: str = "Bcc"; break;
             default: break;
             }// LCOV_EXCL_END
@@ -196,12 +213,16 @@ namespace bpf_probe {
         void Reset() override;
         bool IsLRUCapable() const override;
 
+        bool IsEL9Aarch64() override;
+
         bool AttachProbe(
             const char * name,
             const char * callback,
             ProbeType     type) override;
 
-        bool AutoAttach() override;
+        bool AttachLibbpf(const struct libbpf_tracepoint &tp) override;
+
+        bool AttachLibbpf(const struct libbpf_kprobe &kprobe) override;
 
         bool RegisterEventCallback(EventCallbackFn callback,
                                    DroppedCallbackFn dropCallback) override;

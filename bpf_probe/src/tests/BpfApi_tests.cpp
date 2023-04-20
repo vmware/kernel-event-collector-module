@@ -45,7 +45,7 @@ TEST(BpfApi, InstallHooks_AttachFail)
 {
     bpfApi->setup_AttachProbe(NAME_A, NAME_A, BpfApi::ProbeType::Entry, false);
     
-    CHECK_FALSE(BpfProgram::InstallHooks(*bpfApi, test_hook_list));
+    CHECK_FALSE(BpfProgram::InstallHookList(*bpfApi, test_hook_list));
 }
 
 TEST(BpfApi, InstallHooks_OptionalInstalled)
@@ -54,7 +54,7 @@ TEST(BpfApi, InstallHooks_OptionalInstalled)
     bpfApi->setup_AttachProbe(NAME_B, NAME_A, BpfApi::ProbeType::Return, true);
     bpfApi->setup_AttachProbe(NAME_C, NAME_A, BpfApi::ProbeType::Return, true);
 
-    CHECK_TRUE(BpfProgram::InstallHooks(*bpfApi, test_hook_list));
+    CHECK_TRUE(BpfProgram::InstallHookList(*bpfApi, test_hook_list));
 }
 
 TEST(BpfApi, InstallHooks_OptionalSkipped)
@@ -64,7 +64,7 @@ TEST(BpfApi, InstallHooks_OptionalSkipped)
     bpfApi->setup_AttachProbe(NAME_C, NAME_A, BpfApi::ProbeType::Return, false);
     bpfApi->setup_AttachProbe(NAME_D, NAME_A, BpfApi::ProbeType::Return, true);
 
-    CHECK_TRUE(BpfProgram::InstallHooks(*bpfApi, test_hook_list));
+    CHECK_TRUE(BpfProgram::InstallHookList(*bpfApi, test_hook_list));
 }
 
 TEST(BpfApi, MockInit)
