@@ -60,6 +60,13 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
+        void setup_IsEL9Aarch64(bool result)
+        {
+            ::mock(BPF_API_SCOPE)
+                    .expectOneCall(__MOCKED_FUNCTION__)
+                    .andReturnValue(result);
+        }
+
         void setup_RegisterEventCallback(BpfApi::EventCallbackFn callback,
                                          BpfApi::DroppedCallbackFn dropCallback,
                                          bool result)
@@ -95,6 +102,13 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
 
+        bool IsEL9Aarch64() override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
         bool AttachProbe(const char * name,
                                       const char * callback,
                                       ProbeType    type) override
@@ -104,7 +118,14 @@ namespace tdd_mock {
             return ::mock(BPF_API_SCOPE).boolReturnValue();
         }
 
-        bool AutoAttach() override
+        bool AttachLibbpf(const struct libbpf_tracepoint &tp) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool AttachLibbpf(const struct libbpf_kprobe &kprobe) override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);
