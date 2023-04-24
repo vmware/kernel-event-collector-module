@@ -387,36 +387,50 @@ bool BpfApi::AttachProbe(const char * name,
 bool BpfApi::IsEL9Aarch64()
 {
 #if defined(__aarch64__)
-    const std::string re_MajMinDot = R"(5\.14\.0)";
+    const std::string re_MajMinDot = R"((?:5\.14\.0|4\.18\.0))";
     const std::string re_DotDigits = R"((?:\.\d+){0,2})"; // zero to 2 instances of a _\d+
-    const std::string re_EL9_Dist = R"(\.el9)";           // .el9
-    const std::string re_EL9_Dist_Extra = R"((?:_\d+)?)"; // "_\d+" zero or one times
+    const std::string re_EL_Dist = R"(\.el[8-9])";        // .el8 or .el9
+    const std::string re_EL_Dist_Extra = R"((?:_\d+)?)";  // "_\d+" zero or one times
     const std::string re_arch = R"(\.aarch64)";           // .arch
+    const std::string re_anything = R"(\.*?)";            // Any non-greedy, good with literals
 
-    const std::string complex_aarch64_el9_str = (
+    // May not always match against cloud variant kernels
+    const std::string complex_aarch64_el_str = (
         "^" +               // Starts With
-        re_MajMinDot +      // 5.14.0
+        re_MajMinDot +      // 5.14.0 or 4.18.0
         "-" +               // -
 
         R"((\d+))" +        // Capture Group: \d+
         re_DotDigits +      // Try to handle optional patched EL builds
 
-        re_EL9_Dist +       // Literal .el9
-        re_EL9_Dist_Extra + // Try to handle dot releases
+        re_EL_Dist +       // Literal .el8 or .el9
+        re_EL_Dist_Extra + // Try to handle dot releases
         re_DotDigits +      // Try to handle patched distro releases
 
+        re_anything +       // Any mount of characters non-greedy
         re_arch +           // .aarch64
         "$"                 // End of String/Line
     );
 
     // Simplified version of the regex above that in case
-    // RHEL9 does something weird in their kernel release version.
-    const std::string simple_aarch64_el9_str =
-        R"(^5\.14\.0-(\d+)\..*?\.el9.*?\.aarch64$)";
+    // special variant kernels are built.
+    const std::string simple_aarch64_el_str = (
+        "^" +           // Starts With
+        re_MajMinDot +  // 5.14.0 or 4.18.0
+        "-" +           // -
+        R"((\d+))" +    // Capture group of digits
+
+        re_anything +   // Followed by anything.
+        re_EL_Dist +    // then containing .el9 or .el8
+
+        re_anything +   // followed by anything
+        re_arch +       // before finally matching to .aarch64
+        "$"             // EOL
+    );
 
     // Might as well try both
-    const std::regex complex_el9_aarch64_regex(complex_aarch64_el9_str);
-    const std::regex simple_el9_aarch64_regex(simple_aarch64_el9_str);
+    const std::regex complex_el_aarch64_regex(complex_aarch64_el_str);
+    const std::regex simple_el_aarch64_regex(simple_aarch64_el_str);
 
     struct utsname uts = {};
     int ret = uname(&uts);
@@ -426,8 +440,8 @@ bool BpfApi::IsEL9Aarch64()
         return false;
     }
 
-    return std::regex_search(uts.release, complex_el9_aarch64_regex) ||
-           std::regex_search(uts.release, simple_el9_aarch64_regex);
+    return std::regex_search(uts.release, complex_el_aarch64_regex) ||
+           std::regex_search(uts.release, simple_el_aarch64_regex);
 #else
     return false;
 #endif
