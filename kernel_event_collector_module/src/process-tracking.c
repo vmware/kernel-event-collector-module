@@ -637,7 +637,6 @@ void ec_hashtbl_delete_callback(void *data, ProcessContext *context)
                 IF_ATOMIC64_DEC_AND_TEST__CHECK_NEG(&exec_identity->active_process_count, {
                     // We're being called with the hashtbl locked
                     ec_mem_cache_disown(exec_identity, context);
-                    posix_identity->exec_identity = NULL;
                 });
             }
 
