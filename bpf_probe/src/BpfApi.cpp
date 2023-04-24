@@ -392,7 +392,7 @@ bool BpfApi::IsEL9Aarch64()
     const std::string re_EL_Dist = R"(\.el[8-9])";        // .el8 or .el9
     const std::string re_EL_Dist_Extra = R"((?:_\d+)?)";  // "_\d+" zero or one times
     const std::string re_arch = R"(\.aarch64)";           // .arch
-    const std::string re_anything = R"(\.*?)";            // Any non-greedy, good with literals
+    const std::string re_anything = R"(.*?)";            // Any non-greedy, good with literals
 
     // May not always match against cloud variant kernels
     const std::string complex_aarch64_el_str = (
