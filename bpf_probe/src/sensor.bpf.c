@@ -1037,6 +1037,7 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
     blob_pos = data_x->blob;
     __init_header_dynamic(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &data_x->header);
 
+    data_x->fs_magic = cachep->fs_magic;
     data_x->device = cachep->device;
     data_x->inode = cachep->inode;
     data_x->flags = BPF_CORE_READ(file, f_flags);

@@ -410,7 +410,11 @@ static std::string EventToBlobStrings(const data *event)
 
         ss << " FilePathBlob:" << BlobToPath(event, data_x->file_blob);
         ss << " CgroupBlob:" << BlobToPath(event, data_x->cgroup_blob);
-        ss << std::hex << " fsmagic:0x" << data_x->fs_magic << std::dec;
+        ss << " ino:" << data_x->inode;
+        ss << std::hex;
+        ss << " dev:0x"  << data_x->device;
+        ss << " fsmagic:0x" << data_x->fs_magic;
+        ss << std::dec;
 
         return ss.str();
     }
