@@ -28,6 +28,8 @@ static void DroppedCallback(uint64_t drop_count);
 static std::string EventToBlobStrings(const data *event);
 static std::string EventToExtraData(const data *event);
 static void PrintNetEvent(std::stringstream &ss, const data *event);
+static void CompatFilePathData(std::stringstream &output,
+                               const data *event);
 
 static std::string s_bpf_program;
 static bool read_events = false;
@@ -271,6 +273,12 @@ void ProbeEventCallback(Data data)
         else if (data.data->header.report_flags & REPORT_FLAGS_TASK_DATA)
         {
             output << " [" << EventToExtraData(data.data) << "]";
+        }
+
+        // Print extra compat primitive data here
+        if (!(data.data->header.report_flags & REPORT_FLAGS_DYNAMIC))
+        {
+            CompatFilePathData(output, data.data);
         }
 
         if (data.data->header.type == EVENT_PROCESS_EXEC_RESULT)
@@ -541,4 +549,41 @@ static void PrintNetEvent(std::stringstream &ss, const data *event)
     ss << " -> ";
     ss << remote << ":" << ntohs(net_data->remote_port);
     ss << " ";
+}
+
+static void CompatFilePathData(std::stringstream &output,
+                               const data *event)
+{
+    if (event->header.state != PP_ENTRY_POINT ||
+        (event->header.report_flags & REPORT_FLAGS_DYNAMIC))
+    {
+        return;
+    }
+
+    switch (event->header.type)
+    {
+    case EVENT_PROCESS_CLONE:
+    case EVENT_PROCESS_EXEC_PATH:
+    case EVENT_FILE_READ:
+    case EVENT_FILE_WRITE:
+    case EVENT_FILE_CREATE:
+    case EVENT_FILE_PATH:
+    case EVENT_FILE_DELETE:
+    case EVENT_FILE_CLOSE:
+    case EVENT_FILE_MMAP: {
+
+        auto compat_file_data = reinterpret_cast<const file_data *>(event);
+
+        output << " ino:" << compat_file_data->inode;
+        output << std::hex;
+        output << " dev:0x"  << compat_file_data->device;
+        output << " fsmagic:0x" << compat_file_data->fs_magic;
+        output << std::dec;
+
+        break;
+    }
+
+    default:
+        break;
+    }
 }

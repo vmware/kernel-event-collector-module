@@ -50,7 +50,7 @@ struct file_data_cache {
     u64 pid;
     u64 device;
     u64 inode;
-    // TODO: Store fs_magic
+    u64 fs_magic;
 };
 
 struct ip_key {
@@ -87,6 +87,8 @@ volatile const unsigned int USE_RINGBUF = 0;
 //  will however serve to de-dup some events.  (Ie.. If a program does frequent open/write/close.)
 // TODO: On kernels with CONFIG_SECURITY_PATH support handle security_path_mknod
 // for when files are really created before being opened.
+
+// TODO: Delete Map. Unused.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, struct file_data_cache);
@@ -294,6 +296,16 @@ static __always_inline u32 __get_device_from_dentry(struct dentry *dentry)
 static __always_inline u32 __get_device_from_file(struct file *file)
 {
     return __get_device_from_sb(_sb_from_file(file));
+}
+
+static __always_inline u64 __get_magic_from_sb(struct super_block *sb)
+{
+    u64 fs_magic = 0;
+
+    if (sb) {
+        bpf_core_read(&fs_magic, sizeof(fs_magic), &sb->s_magic);
+    }
+    return fs_magic;
 }
 
 static __always_inline u64 __get_inode_from_pinode(struct inode *pinode)
@@ -989,7 +1001,8 @@ static __always_inline void __track_write_entry(
         struct file_data_cache cache_data = {
                 .pid = data->header.pid,
                 .device = data->device,
-                .inode = data->inode
+                .inode = data->inode,
+                .fs_magic = data->fs_magic,
         };
         bpf_map_update_elem(&file_write_cache, &file_cache_key, &cache_data, BPF_NOEXIST);
     }
@@ -1106,11 +1119,11 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     __init_header_dynamic(EVENT_FILE_MMAP, PP_ENTRY_POINT, &data_x->header);
 
     // event specific data
-    data_x->device = __get_device_from_file(file);
+    data_x->device = __get_device_from_sb(sb);
     data_x->inode = __get_inode_from_file(file);
     data_x->flags = flags;
     data_x->prot = prot;
-    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     // submit file path event data
     blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
@@ -1196,11 +1209,11 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
     blob_pos = data_x->blob;
     __init_header_dynamic(type, PP_ENTRY_POINT, &data_x->header);
 
-    data_x->device = __get_device_from_file(file);
+    data_x->device = __get_device_from_sb(sb);
     data_x->inode = __get_inode_from_file(file);
     data_x->flags = BPF_CORE_READ(file, f_flags);
     data_x->prot = BPF_CORE_READ(file, f_mode);
-    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
     {
@@ -1255,7 +1268,7 @@ int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentr
 
     data_x->device = __get_device_from_sb(sb);
     data_x->inode = __get_inode_from_dentry(dentry);
-    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     __file_tracking_delete(0, data_x->device, data_x->inode);
 
@@ -1299,9 +1312,9 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
     __init_header_dynamic(EVENT_FILE_RENAME, PP_ENTRY_POINT, &data_x->header);
     data_x->header.report_flags |= REPORT_FLAGS_DENTRY;
 
-    data_x->device = __get_device_from_dentry(old_dentry);
+    data_x->device = __get_device_from_sb(sb);
     data_x->old_inode = __get_inode_from_dentry(old_dentry);
-    data_x->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     __file_tracking_delete(0, data_x->device, data_x->old_inode);
 
@@ -1356,9 +1369,17 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
                             REPORT_FLAGS_DYNAMIC, &data_x->header, task);
 
     data_x->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
-    if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm) && BPF_CORE_READ(task, mm, exe_file)) {
-        data_x->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
-        data_x->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
+
+    if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm)) {
+        struct file *exe_file = BPF_CORE_READ(task, mm, exe_file);
+
+        if (exe_file) {
+            struct super_block *sb = _sb_from_file(exe_file);
+
+            data_x->device = __get_device_from_sb(sb);
+            data_x->inode = __get_inode_from_file(exe_file);
+            data_x->fs_magic = __get_magic_from_sb(sb);
+        }
     }
 
     blob_size = __blobify_cgroup_path(task, blob_pos);
