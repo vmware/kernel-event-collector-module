@@ -414,13 +414,33 @@ static __always_inline void __init_header_with_task(u8 type, u8 state, u16 repor
     header->payload = 0;
 
     if (task) {
+        u32 ppid = 0;
+
         BPF_CORE_READ_INTO(&header->tid, task, pid);
         BPF_CORE_READ_INTO(&header->pid, task, tgid);
         BPF_CORE_READ_INTO(&header->uid, task, cred, uid.val);
-        BPF_CORE_READ_INTO(&header->ppid, task, real_parent, tgid);
         header->mnt_ns = __get_mnt_ns_id(task);
 
         set_pid_ns_data(header, task);
+
+        // Try to handle when task is being reparented
+        if (header->pid > 2)
+        {
+            struct task_struct *real_parent = NULL;
+
+#pragma clang loop unroll(full)
+            for (int i = 0; i < 3; i++)
+            {
+                barrier_var(real_parent);
+                BPF_CORE_READ_INTO(&real_parent, task, real_parent);
+                if (real_parent)
+                {
+                    BPF_CORE_READ_INTO(&ppid, real_parent, tgid);
+                    break;
+                }
+            }
+        }
+        header->ppid = ppid;
     }
 }
 

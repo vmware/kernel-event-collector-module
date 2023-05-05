@@ -402,6 +402,11 @@ static inline void __init_header_with_task(u8 type, u8 state, struct data_header
 		if (task->real_parent) {
 			header->ppid = task->real_parent->tgid;
 		}
+		// try grabbing the real_parent one more time
+		// if we are being reparented.
+		else if (task->real_parent) {
+			header->ppid = task->real_parent->tgid;
+		}
 		header->mnt_ns = __get_mnt_ns_id(task);
 		set_pid_ns_data(header, task);
 	}
