@@ -83,9 +83,30 @@ bool BpfProgram::InstallLibbpfHooks(IBpfApi &bpf_api)
     // figure out which kernels versions exactly.
     if (bpf_api.IsEL9Aarch64())
     {
+        const struct libbpf_kprobe kexecve = {
+            .bpf_prog = "kret_syscall__execve",
+            .target_func = "__arm64_sys_execve",
+            .is_retprobe = true,
+        };
+        const struct libbpf_kprobe kexecveat = {
+            .bpf_prog = "kret_syscall__execveat",
+            .target_func = "__arm64_sys_execveat",
+            .is_retprobe = true,
+        };
+
         if (bpf_api.AttachLibbpf(EL9_WORKAROUND))
         {
             do_execveat_common_attached = true;
+        }
+
+        // Re-verify this works on RHEL aarch64
+        if (!do_execveat_common_attached)
+        {
+            if (bpf_api.AttachLibbpf(kexecve) &&
+                bpf_api.AttachLibbpf(kexecveat))
+            {
+                do_execveat_common_attached = true;
+            }
         }
     }
 
@@ -111,7 +132,6 @@ bool BpfProgram::InstallHooks(IBpfApi &bpf_api,
                               const ProbePoint *hook_list)
 {
     bool result = true;
-    bool do_execveat_common_attached = false;
 
     if (bpf_api.GetProgInstanceType() == BpfApi::ProgInstanceType::Libbpf)
     {
@@ -126,13 +146,23 @@ bool BpfProgram::InstallHooks(IBpfApi &bpf_api,
 
     if (bpf_api.IsEL9Aarch64())
     {
-        do_execveat_common_attached = InstallHookList(bpf_api, EL9Aarch64_EXEC_RESLT_LIST);
-        result = do_execveat_common_attached;
+        result = InstallHookList(bpf_api, EL9Aarch64_EXEC_RESLT_LIST);
+
+        if (!result)
+        {
+            const ProbePoint sys_exec_ret_hooks[] = {
+                BPF_LOOKUP_RETURN_HOOK("execveat", "after_sys_execve"),
+                BPF_LOOKUP_RETURN_HOOK("execve", "after_sys_execve"),
+                BPF_ENTRY_HOOK(nullptr,nullptr),
+            };
+
+            result = InstallHookList(bpf_api, sys_exec_ret_hooks);
+        }
     }
 
     // Attach prefered if not EL9 Aarch64 or if EL9 special case
     // failed to attach.
-    if (!do_execveat_common_attached)
+    if (!result)
     {
         result = InstallHookList(bpf_api, PREFERRED_EXEC_RESULT_LIST);
     }

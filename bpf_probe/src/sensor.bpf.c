@@ -912,6 +912,20 @@ int BPF_KPROBE(kret_do_execveat_common)
 
     return kret_exec_result(ctx, ret, PP_ENTRY_POINT);
 }
+
+SEC("kretprobe/__arm64_sys_execve")
+int BPF_KRETPROBE(kret_syscall__execve)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+    return kret_exec_result(ctx, ret, PP_FINALIZED);
+}
+
+SEC("kretprobe/__arm64_sys_execveat")
+int BPF_KRETPROBE(kret_syscall__execveat)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+    return kret_exec_result(ctx, ret, PP_FINALIZED);
+}
 #endif
 
 static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inode)
