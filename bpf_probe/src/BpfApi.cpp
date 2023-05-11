@@ -26,11 +26,6 @@
 #include <sys/epoll.h>
 #include <sys/resource.h>   // Only for setrlimit()
 
-#if defined(__aarch64__)
-#include <regex>
-#include <sys/utsname.h>
-#endif /* __aarch64__ */
-
 using namespace cb_endpoint::bpf_probe;
 using namespace std::chrono;
 namespace fs = boost::filesystem;
@@ -387,61 +382,7 @@ bool BpfApi::AttachProbe(const char * name,
 bool BpfApi::IsEL9Aarch64()
 {
 #if defined(__aarch64__)
-    const std::string re_MajMinDot = R"((?:5\.14\.0|4\.18\.0))";
-    const std::string re_DotDigits = R"((?:\.\d+){0,2})"; // zero to 2 instances of a _\d+
-    const std::string re_EL_Dist = R"(\.el[8-9])";        // .el8 or .el9
-    const std::string re_EL_Dist_Extra = R"((?:_\d+)?)";  // "_\d+" zero or one times
-    const std::string re_arch = R"(\.aarch64)";           // .arch
-    const std::string re_anything = R"(.*?)";            // Any non-greedy, good with literals
-
-    // May not always match against cloud variant kernels
-    const std::string complex_aarch64_el_str = (
-        "^" +               // Starts With
-        re_MajMinDot +      // 5.14.0 or 4.18.0
-        "-" +               // -
-
-        R"((\d+))" +        // Capture Group: \d+
-        re_DotDigits +      // Try to handle optional patched EL builds
-
-        re_EL_Dist +       // Literal .el8 or .el9
-        re_EL_Dist_Extra + // Try to handle dot releases
-        re_DotDigits +      // Try to handle patched distro releases
-
-        re_anything +       // Any mount of characters non-greedy
-        re_arch +           // .aarch64
-        "$"                 // End of String/Line
-    );
-
-    // Simplified version of the regex above that in case
-    // special variant kernels are built.
-    const std::string simple_aarch64_el_str = (
-        "^" +           // Starts With
-        re_MajMinDot +  // 5.14.0 or 4.18.0
-        "-" +           // -
-        R"((\d+))" +    // Capture group of digits
-
-        re_anything +   // Followed by anything.
-        re_EL_Dist +    // then containing .el9 or .el8
-
-        re_anything +   // followed by anything
-        re_arch +       // before finally matching to .aarch64
-        "$"             // EOL
-    );
-
-    // Might as well try both
-    const std::regex complex_el_aarch64_regex(complex_aarch64_el_str);
-    const std::regex simple_el_aarch64_regex(simple_aarch64_el_str);
-
-    struct utsname uts = {};
-    int ret = uname(&uts);
-
-    if (ret || !uts.release[0])
-    {
-        return false;
-    }
-
-    return std::regex_search(uts.release, complex_el_aarch64_regex) ||
-           std::regex_search(uts.release, simple_el_aarch64_regex);
+    return true;
 #else
     return false;
 #endif
