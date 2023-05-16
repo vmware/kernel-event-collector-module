@@ -69,7 +69,7 @@ makefile_test:
   get_ci_variables
   if [[ ${PACKAGES_TO_BUILD} = *bpf_probe* ]]; then
       ARTIFACTORY_BASE_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${CI_COMMIT_REF_NAME}
-      for arch in "x86_64" "aarch64"
+      for arch in "x86_64"
       do
           ARTIFACTORY_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${arch}/${CI_COMMIT_REF_NAME}
           echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
