@@ -131,6 +131,7 @@ static void __enable_clone_tp(uint32_t tp_hooks)
         return;
     }
 
+#if 0
     new_task_kprobe = &__new_task_kprobe;
     memset(new_task_kprobe, 0, sizeof(*new_task_kprobe));
     new_task_kprobe->symbol_name = "wake_up_new_task";
@@ -144,6 +145,7 @@ static void __enable_clone_tp(uint32_t tp_hooks)
         enabled_process_hooks |= DYNSEC_TP_HOOK_TYPE_CLONE;
         return;
     }
+#endif
     new_task_kprobe = NULL;
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0)
