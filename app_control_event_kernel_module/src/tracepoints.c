@@ -31,7 +31,9 @@ extern void dynsec_sched_process_free_tp(void *data, struct task_struct *task);
 extern void dynsec_sched_process_free_tp(struct task_struct *task);
 #endif
 
+#if 0
 extern int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs);
+#endif
 
 static DEFINE_MUTEX(tp_lock);
 uint32_t enabled_process_hooks = 0;
@@ -109,6 +111,7 @@ static void tracepoint_itr_cb(struct tracepoint *tp, void *data)
 }
 #endif
 
+#if 0
 static void dummy_post_handler(struct kprobe *p, struct pt_regs *regs,
                 unsigned long flags)
 {
@@ -118,6 +121,7 @@ static int dummy_fault_handler(struct kprobe *kprobe, struct pt_regs *regs, int 
 {
     return 0;
 }
+#endif
 #endif
 
 // hold tp_lock

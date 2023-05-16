@@ -1228,6 +1228,7 @@ out:
     return ret;
 }
 
+#if 0
 struct kprobe;
 // Primary hook for clone events
 int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
@@ -1270,6 +1271,7 @@ int dynsec_wake_up_new_task(struct kprobe *kprobe, struct pt_regs *regs)
 out:
     return 0;
 }
+#endif
 
 int dynsec_task_dump_all(uint16_t opts, pid_t start_pid)
 {
