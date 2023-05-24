@@ -59,8 +59,6 @@ bool BpfProgram::InstallHookList(IBpfApi &bpf_api,
 
 bool BpfProgram::InstallLibbpfHooks(IBpfApi &bpf_api)
 {
-    bool do_execveat_common_attached = false;
-
     for (int i = 0; DEFAULT_KPROBE_LIST[i].bpf_prog; i++)
     {
         if (!bpf_api.AttachLibbpf(DEFAULT_KPROBE_LIST[i]))
@@ -77,23 +75,82 @@ bool BpfProgram::InstallLibbpfHooks(IBpfApi &bpf_api)
         }
     }
 
-    // Handle Special Case: PSCLNX-12099
-    // Some patched RHEL9.1 Aarch64 kernel introduces
-    // a nasty bug. In the future we can probably
-    // figure out which kernels versions exactly.
+    // IsEL9Aarch64 is true for all of aarch64 instances.
+    // Handle Special Case: PSCLNX-12211
+    //  Some EL9 and Ubuntu kernels of 2023 have broken tracepoints.
     if (bpf_api.IsEL9Aarch64())
     {
-        if (bpf_api.AttachLibbpf(EL9_WORKAROUND))
+        const struct libbpf_tracepoint tp_sched_exec = {
+            .bpf_prog = "tp__sched_process_exec",
+            .tp_category = "sched",
+            .tp_name = "sched_process_exec",
+        };
+        bool use_kretprobes = false;
+
+        // Try the EXEC_RESULT tracepoints with bugs before trying
+        // sched_process_exec tracepoint. The default EXEC_RESULT tracepoints
+        // are good indicators for if we should even try sched_process_exec.
+        for (int i = 0; DEFAULT_EXEC_RESULT_LIST[i].bpf_prog; i++)
         {
-            do_execveat_common_attached = true;
+            if (!bpf_api.AttachLibbpf(DEFAULT_EXEC_RESULT_LIST[i]))
+            {
+                use_kretprobes = true;
+                break;
+            }
+        }
+
+        if (!use_kretprobes)
+        {
+            // The normal case for libbpf tracepoint enabled systems.
+            // Aka most if not all BTF/libbpf systems.
+            if (bpf_api.AttachLibbpf(tp_sched_exec))
+            {
+                return true;
+            }
+            else
+            {
+                // This should not happen if we could attach
+                // syscalls/sys_exit_exec* tracepoints. Those tracepoints
+                // are less likely to be attachable than sched_process_exec.
+                use_kretprobes = true;
+
+                // TODO: Create DetachLibbpf BpfApi methods.
+                // Due to this case being very unlikely, it's okay to keep going.
+            }
+        }
+
+        if (use_kretprobes)
+        {
+            const struct libbpf_kprobe kexecve = {
+                .bpf_prog = "kret_syscall__execve",
+                .target_func = "__arm64_sys_execve",
+                .is_retprobe = true,
+            };
+            const struct libbpf_kprobe kexecveat = {
+                .bpf_prog = "kret_syscall__execveat",
+                .target_func = "__arm64_sys_execveat",
+                .is_retprobe = true,
+            };
+
+            // try do_execveat_common, this might only work on special
+            // EL9 kernels. Some EL9 kretprobes on exec syscalls were weird.
+            if (bpf_api.AttachLibbpf(EL9_WORKAROUND))
+            {
+                return true;
+            }
+            // try 
+            else if (bpf_api.AttachLibbpf(kexecve) &&
+                     bpf_api.AttachLibbpf(kexecveat))
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
     }
-
-    // On failure of the workaround still try attaching the
-    // preferred EXEC_RESULT tracepoints.
-    // We do not want to attach the default EXEC_RESULT progs
-    // with the workaround!
-    if (!do_execveat_common_attached)
+    else
     {
         for (int i = 0; DEFAULT_EXEC_RESULT_LIST[i].bpf_prog; i++)
         {
@@ -111,7 +168,6 @@ bool BpfProgram::InstallHooks(IBpfApi &bpf_api,
                               const ProbePoint *hook_list)
 {
     bool result = true;
-    bool do_execveat_common_attached = false;
 
     if (bpf_api.GetProgInstanceType() == BpfApi::ProgInstanceType::Libbpf)
     {
@@ -126,13 +182,46 @@ bool BpfProgram::InstallHooks(IBpfApi &bpf_api,
 
     if (bpf_api.IsEL9Aarch64())
     {
-        do_execveat_common_attached = InstallHookList(bpf_api, EL9Aarch64_EXEC_RESLT_LIST);
-        result = do_execveat_common_attached;
-    }
+        result = InstallHookList(bpf_api, PREFERRED_EXEC_RESULT_LIST);
+        if (result)
+        {
+            // On aarch64 we use two sources for EXEC_RESULT due to ugly
+            // bugs in RedHat and Ubuntu syscall tracepoints.
+            // This hook provides the successful exec result events.
+            const ProbePoint tp_sched_exec[] = {
+                 BPF_TRACEPOINT("sched:sched_process_exec", "on_sched_process_exec"),
+                 BPF_ENTRY_HOOK(nullptr,nullptr),
+            };
 
-    // Attach prefered if not EL9 Aarch64 or if EL9 special case
-    // failed to attach.
-    if (!do_execveat_common_attached)
+            result = InstallHookList(bpf_api, tp_sched_exec);
+            if (result)
+            {
+                return true;
+            }
+
+            // TODO: Detach extra residual EXEC_RESULT tracepoints.
+            // This is unlikely to happen since we try to attach the
+            // least likely to attach tracepoint first.
+        }
+        else
+        {
+            result = InstallHookList(bpf_api, EL9Aarch64_EXEC_RESLT_LIST);
+        }
+
+        // When tracepoints fail on aarch64 fallback to regular syscall
+        // exec kretprobes.
+        if (!result)
+        {
+            const ProbePoint sys_exec_ret_hooks[] = {
+                BPF_LOOKUP_RETURN_HOOK("execveat", "after_sys_execve"),
+                BPF_LOOKUP_RETURN_HOOK("execve", "after_sys_execve"),
+                BPF_ENTRY_HOOK(nullptr,nullptr),
+            };
+
+            result = InstallHookList(bpf_api, sys_exec_ret_hooks);
+        }
+    }
+    else
     {
         result = InstallHookList(bpf_api, PREFERRED_EXEC_RESULT_LIST);
     }
@@ -146,6 +235,14 @@ const BpfProgram::ProbePoint BpfProgram::EL9Aarch64_EXEC_RESLT_LIST[] = {
     BPF_ENTRY_HOOK(nullptr,nullptr),
 };
 
+#if defined(__aarch64__)
+// The caller for aarch64 should not fall back to kretprobes, yet.
+const BpfProgram::ProbePoint BpfProgram::PREFERRED_EXEC_RESULT_LIST[] = {
+    BPF_TRACEPOINT("syscalls:sys_exit_execveat", "on_sys_exit_execveat"),
+    BPF_TRACEPOINT("syscalls:sys_exit_execve", "on_sys_exit_execve"),
+    BPF_ENTRY_HOOK(nullptr, nullptr),
+};
+#else
 const BpfProgram::ProbePoint BpfProgram::PREFERRED_EXEC_RESULT_LIST[] = {
     BPF_OPTIONAL_TRACEPOINT("syscalls:sys_exit_execveat", "on_sys_exit_execveat"),
     BPF_LOOKUP_ALTERNATE_RETURN_HOOK("syscalls:sys_exit_execveat", "execveat", "after_sys_execve"),
@@ -153,6 +250,7 @@ const BpfProgram::ProbePoint BpfProgram::PREFERRED_EXEC_RESULT_LIST[] = {
     BPF_LOOKUP_ALTERNATE_RETURN_HOOK("syscalls:sys_exit_execve", "execve", "after_sys_execve"),
     BPF_ENTRY_HOOK(nullptr,nullptr),
 };
+#endif
 
 const BpfProgram::ProbePoint BpfProgram::DEFAULT_HOOK_LIST[] = {
 
