@@ -829,6 +829,16 @@ int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit *ctx)
 {
     struct exec_data data = {};
 
+#if defined(bpf_target_arm64)
+    // PSCLNX-12211
+    // Some aarch64 kernels don't report successful exec. So we
+    // will use this for the failed cases and leverage sched/sched_process_exec
+    // for the successful case.
+    if (BPF_CORE_READ(ctx, ret) == 0) {
+        return 0;
+    }
+#endif
+
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
 
     // Implicit cast
@@ -860,6 +870,16 @@ SEC("tracepoint/syscalls/sys_exit_execveat")
 int tracepoint__syscalls__sys_exit_execveat(struct syscall_trace_exit *ctx)
 {
     struct exec_data data = {};
+
+#if defined(bpf_target_arm64)
+    // PSCLNX-12211
+    // Some aarch64 kernels don't report successful exec. So we
+    // will use this for the failed cases and leverage sched/sched_process_exec
+    // for the successful case.
+    if (BPF_CORE_READ(ctx, ret) == 0) {
+        return 0;
+    }
+#endif
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
 
@@ -904,6 +924,15 @@ static int kret_exec_result(void *ctx, long ret, u8 state)
     return 0;
 }
 
+// On aarch64 this is the preferred tracepoint coupled with the
+// syscalls/sys_exit_execv* tracepoints. If we make it here, we
+// may assume a successful EXEC_RESULT event.
+SEC("tracepoint/sched/sched_process_exec")
+int tp__sched_process_exec(struct trace_event_raw_sched_process_exec *ctx)
+{
+    return kret_exec_result(ctx, 0, PP_NO_EXTRA_DATA);
+}
+
 // Works on RHEL 9.1 Aarch64
 SEC("kretprobe/do_execveat_common")
 int BPF_KPROBE(kret_do_execveat_common)
@@ -911,6 +940,20 @@ int BPF_KPROBE(kret_do_execveat_common)
     long ret = PT_REGS_RC_CORE(ctx);
 
     return kret_exec_result(ctx, ret, PP_ENTRY_POINT);
+}
+
+SEC("kretprobe/__arm64_sys_execve")
+int BPF_KRETPROBE(kret_syscall__execve)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+    return kret_exec_result(ctx, ret, PP_FINALIZED);
+}
+
+SEC("kretprobe/__arm64_sys_execveat")
+int BPF_KRETPROBE(kret_syscall__execveat)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+    return kret_exec_result(ctx, ret, PP_FINALIZED);
 }
 #endif
 
