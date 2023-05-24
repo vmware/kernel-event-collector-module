@@ -7,6 +7,7 @@ builder: centos7
 builders:
     - gcc112-relwithdebinfo
     - gcc73-relwithdebinfo
+    - gcc-arm-8_2-relwithdebinfo
 service-env:
     PROJECT_VERSION:     ${SOURCE_VERSION}
     UTIL_DIR:            /src/util
