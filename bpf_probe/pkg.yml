@@ -1,3 +1,7 @@
 name: BpfProbe
 packagers:
     - cmake
+builders:
+    override:
+        - gcc112-relwithdebinfo
+        - gcc-arm-8_2-relwithdebinfo
