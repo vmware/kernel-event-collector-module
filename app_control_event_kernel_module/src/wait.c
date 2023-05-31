@@ -190,7 +190,7 @@ static void do_stall_timing_records(struct stall_entry *entry)
     sum += stall_times[ctr++];
     g_avg_stall_time = (sum / divisor); 
 
-    if (ctr == DYNSEC_RECORDS_TO_AVERAGE) {
+    if (ctr >= DYNSEC_RECORDS_TO_AVERAGE) {
         ctr = 0;
         // flag indicates counter beyond DYNSEC_RECORDS_TO_AVERAGE
         flag = true;
