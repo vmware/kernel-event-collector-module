@@ -98,14 +98,6 @@ makefile_test:
 deploy_probe_test:
   extends: .deploy
 
-# Build downstream
-build_endpoint_common:
-  extends: .build_downstream_template
-  stage: build_downstream
-  variables:
-    GIT_STRATEGY: none
-    DOWNSTREAM_PACKAGE: 'cbsensor/endpoint-common'
-
 deploy_branch:
   extends: .deploy_branch_template
   stage: deploy_branch
