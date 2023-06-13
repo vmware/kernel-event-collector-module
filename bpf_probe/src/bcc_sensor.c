@@ -907,13 +907,36 @@ int after_sys_execve(struct pt_regs *ctx)
 
 int on_sys_exit_execve(struct syscalls_sys_exit_args *args)
 {
-	do_sys_exec_exit(args, args->ret);
+	long ret = args->ret;
+
+#if defined(__aarch64__)
+	if (ret != 0)
+#endif /* __aarch64__ */
+	{
+		do_sys_exec_exit(args, ret);
+	}
 	return 0;
 }
 
 int on_sys_exit_execveat(struct syscalls_sys_exit_args *args)
 {
-	do_sys_exec_exit(args, args->ret);
+	long ret = args->ret;
+
+#if defined(__aarch64__)
+	if (ret != 0)
+#endif /* __aarch64__ */
+	{
+		do_sys_exec_exit(args, ret);
+	}
+	return 0;
+}
+
+// We don't worry about arg data here. If we attach to
+// sched:sched_process_exec, safe to say the exec will complete
+// task will segfault.
+int on_sched_process_exec(void *ctx)
+{
+	do_sys_exec_exit(ctx, 0);
 	return 0;
 }
 
