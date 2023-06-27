@@ -290,6 +290,16 @@ static inline u32 __get_device_from_file(struct file *file)
 	return __get_device_from_sb(_sb_from_file(file));
 }
 
+static inline u64 __get_magic_from_sb(struct super_block *sb)
+{
+	u64 fs_magic = 0;
+
+	if (sb) {
+		bpf_probe_read(&fs_magic, sizeof(fs_magic), &sb->s_magic);
+	}
+	return fs_magic;
+}
+
 static inline u64 __get_inode_from_pinode(struct inode *pinode)
 {
 	u64 inode = 0;
@@ -907,25 +917,52 @@ int after_sys_execve(struct pt_regs *ctx)
 
 int on_sys_exit_execve(struct syscalls_sys_exit_args *args)
 {
-	do_sys_exec_exit(args, args->ret);
+	long ret = args->ret;
+
+#if defined(__aarch64__)
+	if (ret != 0)
+#endif /* __aarch64__ */
+	{
+		do_sys_exec_exit(args, ret);
+	}
 	return 0;
 }
 
 int on_sys_exit_execveat(struct syscalls_sys_exit_args *args)
 {
-	do_sys_exec_exit(args, args->ret);
+	long ret = args->ret;
+
+#if defined(__aarch64__)
+	if (ret != 0)
+#endif /* __aarch64__ */
+	{
+		do_sys_exec_exit(args, ret);
+	}
 	return 0;
 }
 
+// We don't worry about arg data here. If we attach to
+// sched:sched_process_exec, safe to say the exec will complete
+// task will segfault.
+int on_sched_process_exec(void *ctx)
+{
+	do_sys_exec_exit(ctx, 0);
+	return 0;
+}
+
+// Use minimal size of data fields to keep stack storage low.
 struct file_data_cache {
-	u64 pid;
-	u64 device;
+	u32 pid;
+	u32 device;
 	u64 inode;
+	u64 fs_magic;
 };
 
 // This hash tracks the "observed" file-create events.  This will not be 100% accurate because we will report a
 //  file create for any file the first time it is opened with WRITE|TRUNCATE (even if it already exists).  It
 //  will however serve to de-dup some events.  (Ie.. If a program does frequent open/write/close.)
+
+// TODO: Delete Map. Unused.
 BPF_LRU(file_map, struct file_data_cache, u32);
 
 static void __file_tracking_delete(u64 pid, u64 device, u64 inode)
@@ -972,7 +1009,8 @@ static inline void __track_write_entry(
 		struct file_data_cache cache_data = {
 			.pid = data->header.pid,
 			.device = data->device,
-			.inode = data->inode
+			.inode = data->inode,
+			.fs_magic = data->fs_magic,
 		};
 #else
 		u32 cache_data = data->header.pid;
@@ -1000,9 +1038,11 @@ int on_security_file_free(struct pt_regs *ctx, struct file *file)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 		file_data->device = ((struct file_data_cache *)cachep)->device;
 		file_data->inode = ((struct file_data_cache *)cachep)->inode;
+		file_data->fs_magic = ((struct file_data_cache *)cachep)->fs_magic;
 #else
 		file_data->device = __get_device_from_file(file);
 		file_data->inode = __get_inode_from_file(file);
+		file_data->fs_magic = __get_magic_from_sb(_sb_from_file(file));
 #endif
 
 		send_event(ctx, file_data, sizeof_without_extra(*file_data));
@@ -1055,13 +1095,12 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	struct file_data *file_data = FILE_DATA(data);
 
 	// event specific data
-	file_data->device = __get_device_from_file(file);
+	file_data->device = __get_device_from_sb(sb);
 	file_data->inode = __get_inode_from_file(file);
 	file_data->flags = flags;
 	file_data->prot = prot;
-	if (sb) {
-		file_data->fs_magic = sb->s_magic;
-	}
+	file_data->fs_magic = __get_magic_from_sb(sb);
+
 	// submit initial event data
 	send_event(ctx, file_data, sizeof_without_extra(*file_data));
 
@@ -1076,8 +1115,10 @@ out:
 #define FMODE_CREATED 0
 #endif
 
-// This hook may not be very accurate but at least tells us the intent
-// to create the file if needed. So this will likely be written to next.
+// Provides a few different file open events types and open for exec intents.
+// Stack space for stage is getting low. May need a refactore
+// to reduce storage to keep future changes working. Storage must be
+// below 512 bytes. There's a lot redundant internal data reads.
 int on_security_file_open(struct pt_regs *ctx, struct file *file)
 {
 	struct super_block *sb = NULL;
@@ -1124,11 +1165,11 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 	struct file_data *file_data = FILE_DATA(data);
 
 	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
-	file_data->device = __get_device_from_file(file);
+	file_data->device = __get_device_from_sb(sb);
 	file_data->inode = __get_inode_from_file(file);
 	file_data->flags = file->f_flags;
 	file_data->prot = file->f_mode;
-	file_data->fs_magic = sb->s_magic;
+	file_data->fs_magic = __get_magic_from_sb(sb);
 
 	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
 	{
@@ -1157,7 +1198,7 @@ static bool __send_dentry_delete(struct pt_regs *ctx, void *data, struct dentry 
 
 			file_data->device = __get_device_from_sb(sb);
 			file_data->inode = __get_inode_from_dentry(dentry);
-			file_data->fs_magic = sb->s_magic;
+			file_data->fs_magic = __get_magic_from_sb(sb);
 
 			__file_tracking_delete(0, file_data->device, file_data->inode);
 
@@ -1202,9 +1243,9 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
 
     sb = _sb_from_dentry(old_dentry);
 
-    RENAME_DATA(data)->device = __get_device_from_dentry(old_dentry);
+    RENAME_DATA(data)->device = __get_device_from_sb(sb);
     RENAME_DATA(data)->old_inode = __get_inode_from_dentry(old_dentry);
-    RENAME_DATA(data)->fs_magic = sb ? sb->s_magic : 0;
+    RENAME_DATA(data)->fs_magic = __get_magic_from_sb(sb);
 
     __file_tracking_delete(0, RENAME_DATA(data)->device, RENAME_DATA(data)->old_inode);
 
@@ -1256,7 +1297,10 @@ int on_wake_up_new_task(struct pt_regs *ctx, struct task_struct *task)
 #endif
 
 	if (!(task->flags & PF_KTHREAD) && task->mm && task->mm->exe_file) {
-		data.device = __get_device_from_file(task->mm->exe_file);
+		struct super_block *sb = _sb_from_file(task->mm->exe_file);
+
+		data.fs_magic = __get_magic_from_sb(sb);
+		data.device = __get_device_from_sb(sb);
 		data.inode = __get_inode_from_file(task->mm->exe_file);
 	}
 

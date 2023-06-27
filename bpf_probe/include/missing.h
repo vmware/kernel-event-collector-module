@@ -11,6 +11,15 @@
 #define AF_INET     2       /* internetwork: UDP, TCP, etc. */
 #define AF_INET6    10      /* IPv6 */
 
+// Ignore compat syscalls for now
+#if defined(bpf_target_arm64)
+#define __NR_execve 221
+#define __NR_execveat 281
+#elif defined(bpf_target_x86)
+#define __NR_execve 59
+#define __NR_execveat 322
+#endif
+
 // magic
 #define DEBUGFS_MAGIC           0x64626720
 #define SELINUX_MAGIC           0xf97cff8c
