@@ -4,5 +4,5 @@ file-replacements:
     KERNEL_OVERRIDE_LIST:
 builders:
     override:
-        - gcc73-relwithdebinfo
+        - gcc112-relwithdebinfo
 
