@@ -133,7 +133,7 @@ bool BpfApi::Init_libbpf()
 
     // TODO: Log if using ringbuf or perf buffer here
 
-    m_ProgInstanceType = BpfApi::ProgInstanceType::LibbpfAutoAttached;
+    m_ProgInstanceType = BpfApi::ProgInstanceType::Libbpf;
 
     return true;
 }
@@ -277,7 +277,7 @@ bool BpfApi::IsLRUCapable() const
 // syscall for ARM architecture. So, handling the same for ARM here.
 void BpfApi::LookupSyscallName(const char * name, std::string & syscall_name)
 {
-    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::Libbpf)
     {
         return;
     }
@@ -315,7 +315,7 @@ bool BpfApi::AttachProbe(const char * name,
                          ProbeType    type)
 {
     // Just return true even though if we don't care
-    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+    if (m_ProgInstanceType == BpfApi::ProgInstanceType::Libbpf)
     {
         return true;
     }
@@ -379,26 +379,80 @@ bool BpfApi::AttachProbe(const char * name,
     return result.ok();
 }
 
-bool BpfApi::AutoAttach()
+bool BpfApi::IsEL9Aarch64()
 {
-    if (m_ProgInstanceType == BpfApi::ProgInstanceType::LibbpfAutoAttached)
+#if defined(__aarch64__)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool BpfApi::AttachLibbpf(const struct libbpf_kprobe &kprobe)
+{
+    struct bpf_program *prog = NULL;
+
+    if (!m_skel || !kprobe.bpf_prog || !kprobe.target_func)
     {
-        if (!m_skel)
+        return false;
+    }
+
+    prog = bpf_object__find_program_by_name(m_skel->obj, kprobe.bpf_prog);
+    if (prog)
+    {
+        struct bpf_link *link = NULL;
+        int err = 0;
+
+        link = bpf_program__attach_kprobe(prog,
+                                          kprobe.is_retprobe,
+                                          kprobe.target_func);
+        err = libbpf_get_error(link);
+
+        if (err)
         {
-            m_ErrorMessage = std::string("Cannot Auto Attach null bpf skeleton");
+            m_ErrorMessage = "Failed to attach: " + std::string(kprobe.bpf_prog);
             return false;
         }
 
-        if (sensor_bpf__attach(m_skel))
+        return true;
+    }
+    else
+    {
+        m_ErrorMessage = "Failed to find: " + std::string(kprobe.bpf_prog);
+        return false;
+    }
+}
+
+bool BpfApi::AttachLibbpf(const struct libbpf_tracepoint &tp)
+{
+    struct bpf_program *prog = NULL;
+
+    if (!m_skel || !tp.bpf_prog || !tp.tp_category || !tp.tp_name)
+    {
+        return false;
+    }
+
+    prog = bpf_object__find_program_by_name(m_skel->obj, tp.bpf_prog);
+    if (prog)
+    {
+        struct bpf_link *link = NULL;
+        int err = 0;
+
+        link = bpf_program__attach_tracepoint(prog, tp.tp_category, tp.tp_name);
+        err = libbpf_get_error(link);
+
+        if (err)
         {
-            m_ErrorMessage = std::string("sensor_bpf__attach failed");
+            m_ErrorMessage = "Failed to attach: " + std::string(tp.bpf_prog);
             return false;
         }
         return true;
     }
-
-    m_ErrorMessage = std::string("Cannot Auto Attach With InstanceType");
-    return false;
+    else
+    {
+        m_ErrorMessage = "Failed to find: " + std::string(tp.bpf_prog);
+        return false;
+    }
 }
 
 bool BpfApi::RegisterEventCallback(EventCallbackFn callback,

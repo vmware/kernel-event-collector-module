@@ -50,7 +50,7 @@ struct file_data_cache {
     u64 pid;
     u64 device;
     u64 inode;
-    // TODO: Store fs_magic
+    u64 fs_magic;
 };
 
 struct ip_key {
@@ -87,6 +87,8 @@ volatile const unsigned int USE_RINGBUF = 0;
 //  will however serve to de-dup some events.  (Ie.. If a program does frequent open/write/close.)
 // TODO: On kernels with CONFIG_SECURITY_PATH support handle security_path_mknod
 // for when files are really created before being opened.
+
+// TODO: Delete Map. Unused.
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, struct file_data_cache);
@@ -294,6 +296,16 @@ static __always_inline u32 __get_device_from_dentry(struct dentry *dentry)
 static __always_inline u32 __get_device_from_file(struct file *file)
 {
     return __get_device_from_sb(_sb_from_file(file));
+}
+
+static __always_inline u64 __get_magic_from_sb(struct super_block *sb)
+{
+    u64 fs_magic = 0;
+
+    if (sb) {
+        bpf_core_read(&fs_magic, sizeof(fs_magic), &sb->s_magic);
+    }
+    return fs_magic;
 }
 
 static __always_inline u64 __get_inode_from_pinode(struct inode *pinode)
@@ -809,7 +821,7 @@ static void submit_exec_arg_event(void *ctx, const char **argv)
 
 // Tracepoint of exec entry
 SEC("tracepoint/syscalls/sys_enter_execve")
-int sys_enter_execve(struct syscall_trace_enter *ctx)
+int tracepoint__syscalls__sys_enter_execve(struct syscall_trace_enter *ctx)
 {
     const char **argv = NULL;
     unsigned long argv_l = 0;
@@ -828,6 +840,16 @@ SEC("tracepoint/syscalls/sys_exit_execve")
 int tracepoint__syscalls__sys_exit_execve(struct syscall_trace_exit *ctx)
 {
     struct exec_data data = {};
+
+#if defined(bpf_target_arm64)
+    // PSCLNX-12211
+    // Some aarch64 kernels don't report successful exec. So we
+    // will use this for the failed cases and leverage sched/sched_process_exec
+    // for the successful case.
+    if (BPF_CORE_READ(ctx, ret) == 0) {
+        return 0;
+    }
+#endif
 
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
 
@@ -861,6 +883,16 @@ int tracepoint__syscalls__sys_exit_execveat(struct syscall_trace_exit *ctx)
 {
     struct exec_data data = {};
 
+#if defined(bpf_target_arm64)
+    // PSCLNX-12211
+    // Some aarch64 kernels don't report successful exec. So we
+    // will use this for the failed cases and leverage sched/sched_process_exec
+    // for the successful case.
+    if (BPF_CORE_READ(ctx, ret) == 0) {
+        return 0;
+    }
+#endif
+
     __init_header(EVENT_PROCESS_EXEC_RESULT, PP_NO_EXTRA_DATA, &data.header);
 
     // Implicit cast
@@ -870,6 +902,72 @@ int tracepoint__syscalls__sys_exit_execveat(struct syscall_trace_exit *ctx)
 
     return 0;
 }
+
+#if defined(USE_RAW_SYSCALLS_TP)
+// Not used explicitly but safer to keep this around just in case.
+SEC("tracepoint/raw_syscalls/sys_exit")
+int raw_syscalls__sys_exit(struct trace_event_raw_sys_exit *ctx)
+{
+    long id = BPF_CORE_READ(ctx, id);
+
+    if (id == __NR_execve || id == __NR_execveat)
+    {
+        struct exec_data data = {};
+
+        __init_header(EVENT_PROCESS_EXEC_RESULT, PP_ENTRY_POINT, &data.header);
+
+        data.retval = BPF_CORE_READ(ctx, ret);
+
+        send_event(ctx, &data, offsetof(typeof(data), extra));
+    }
+
+    return 0;
+}
+#endif /* USE_RAW_SYSCALLS_TP */
+
+#if defined(bpf_target_arm64)
+static int kret_exec_result(void *ctx, long ret, u8 state)
+{
+    struct exec_data data = {};
+
+    __init_header(EVENT_PROCESS_EXEC_RESULT, state, &data.header);
+    data.retval = (int)ret;
+    send_event(ctx, &data, offsetof(typeof(data), extra));
+    return 0;
+}
+
+// On aarch64 this is the preferred tracepoint coupled with the
+// syscalls/sys_exit_execv* tracepoints. If we make it here, we
+// may assume a successful EXEC_RESULT event.
+SEC("tracepoint/sched/sched_process_exec")
+int tp__sched_process_exec(struct trace_event_raw_sched_process_exec *ctx)
+{
+    return kret_exec_result(ctx, 0, PP_NO_EXTRA_DATA);
+}
+
+// Works on RHEL 9.1 Aarch64
+SEC("kretprobe/do_execveat_common")
+int BPF_KPROBE(kret_do_execveat_common)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+
+    return kret_exec_result(ctx, ret, PP_ENTRY_POINT);
+}
+
+SEC("kretprobe/__arm64_sys_execve")
+int BPF_KRETPROBE(kret_syscall__execve)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+    return kret_exec_result(ctx, ret, PP_FINALIZED);
+}
+
+SEC("kretprobe/__arm64_sys_execveat")
+int BPF_KRETPROBE(kret_syscall__execveat)
+{
+    long ret = PT_REGS_RC_CORE(ctx);
+    return kret_exec_result(ctx, ret, PP_FINALIZED);
+}
+#endif
 
 static __always_inline void __file_tracking_delete(u64 pid, u64 device, u64 inode)
 {
@@ -903,7 +1001,8 @@ static __always_inline void __track_write_entry(
         struct file_data_cache cache_data = {
                 .pid = data->header.pid,
                 .device = data->device,
-                .inode = data->inode
+                .inode = data->inode,
+                .fs_magic = data->fs_magic,
         };
         bpf_map_update_elem(&file_write_cache, &file_cache_key, &cache_data, BPF_NOEXIST);
     }
@@ -938,6 +1037,7 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
     blob_pos = data_x->blob;
     __init_header_dynamic(EVENT_FILE_CLOSE, PP_ENTRY_POINT, &data_x->header);
 
+    data_x->fs_magic = cachep->fs_magic;
     data_x->device = cachep->device;
     data_x->inode = cachep->inode;
     data_x->flags = BPF_CORE_READ(file, f_flags);
@@ -1020,11 +1120,11 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     __init_header_dynamic(EVENT_FILE_MMAP, PP_ENTRY_POINT, &data_x->header);
 
     // event specific data
-    data_x->device = __get_device_from_file(file);
+    data_x->device = __get_device_from_sb(sb);
     data_x->inode = __get_inode_from_file(file);
     data_x->flags = flags;
     data_x->prot = prot;
-    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     // submit file path event data
     blob_size = __do_file_path_x(BPF_CORE_READ(file, f_path.dentry),
@@ -1110,11 +1210,11 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
     blob_pos = data_x->blob;
     __init_header_dynamic(type, PP_ENTRY_POINT, &data_x->header);
 
-    data_x->device = __get_device_from_file(file);
+    data_x->device = __get_device_from_sb(sb);
     data_x->inode = __get_inode_from_file(file);
     data_x->flags = BPF_CORE_READ(file, f_flags);
     data_x->prot = BPF_CORE_READ(file, f_mode);
-    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
     {
@@ -1169,7 +1269,7 @@ int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentr
 
     data_x->device = __get_device_from_sb(sb);
     data_x->inode = __get_inode_from_dentry(dentry);
-    data_x->fs_magic = BPF_CORE_READ(sb, s_magic);
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     __file_tracking_delete(0, data_x->device, data_x->inode);
 
@@ -1213,9 +1313,9 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
     __init_header_dynamic(EVENT_FILE_RENAME, PP_ENTRY_POINT, &data_x->header);
     data_x->header.report_flags |= REPORT_FLAGS_DENTRY;
 
-    data_x->device = __get_device_from_dentry(old_dentry);
+    data_x->device = __get_device_from_sb(sb);
     data_x->old_inode = __get_inode_from_dentry(old_dentry);
-    data_x->fs_magic = sb ? BPF_CORE_READ(sb, s_magic) : 0;
+    data_x->fs_magic = __get_magic_from_sb(sb);
 
     __file_tracking_delete(0, data_x->device, data_x->old_inode);
 
@@ -1270,9 +1370,17 @@ int BPF_KPROBE(on_wake_up_new_task, struct task_struct *task)
                             REPORT_FLAGS_DYNAMIC, &data_x->header, task);
 
     data_x->header.uid = BPF_CORE_READ(task, real_parent, cred, uid.val);
-    if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm) && BPF_CORE_READ(task, mm, exe_file)) {
-        data_x->device = __get_device_from_file(BPF_CORE_READ(task, mm, exe_file));
-        data_x->inode = __get_inode_from_file(BPF_CORE_READ(task, mm, exe_file));
+
+    if (!(BPF_CORE_READ(task, flags) & PF_KTHREAD) && BPF_CORE_READ(task,mm)) {
+        struct file *exe_file = BPF_CORE_READ(task, mm, exe_file);
+
+        if (exe_file) {
+            struct super_block *sb = _sb_from_file(exe_file);
+
+            data_x->device = __get_device_from_sb(sb);
+            data_x->inode = __get_inode_from_file(exe_file);
+            data_x->fs_magic = __get_magic_from_sb(sb);
+        }
     }
 
     blob_size = __blobify_cgroup_path(task, blob_pos);
