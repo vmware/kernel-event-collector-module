@@ -220,6 +220,92 @@ bool BpfApi::Init(const std::string & bpf_program, bool try_bcc_first)
         result = Init_bcc(bpf_program);
     }
 
+    if (result)
+    {
+        // This would set high watermark mode on default.
+        // result = SetEventFilterMask(HIGH_WATERMARK_MASK);
+
+        // Clear out the event filter mask
+        result = SetEventFilterMask(0);
+    }
+
+    return result;
+}
+
+
+bool BpfApi::SetEventFilterMask(unsigned int mask)
+{
+    bool result = false;
+
+    // Check if we are trying to set an invalid event bit.
+    // Zero is a valid mask as it clears it all.
+    if (mask != 0 && (mask & EVENT_BITMASK_ALL()) != mask)
+    {
+        return false;
+    }
+
+    if (m_skel && m_skel->bss)
+    {
+        m_skel->bss->event_filter_mask = mask;
+
+        result = true;
+    }
+    else if (m_BPF)
+    {
+        int index = 0;
+        unsigned int value = mask;
+
+        try
+        {
+            auto high_watermark_tbl = m_BPF->get_array_table<unsigned int>("event_filter_mask");
+
+            auto status = high_watermark_tbl.update_value(index, value);
+
+            result = status.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+
+        }
+    }
+
+    return result;
+}
+
+bool BpfApi::GetEventFilterMask(unsigned int &mask)
+{
+    bool result = false;
+
+    if (m_skel && m_skel->bss)
+    {
+        mask = m_skel->bss->event_filter_mask;
+
+        result = true;
+    }
+    else if (m_BPF)
+    {
+        int index = 0;
+        unsigned int value = 0;
+
+        try
+        {
+            auto high_watermark_tbl = m_BPF->get_array_table<unsigned int>("event_filter_mask");
+
+            auto status = high_watermark_tbl.get_value(index, value);
+
+            result = status.ok();
+        }
+        catch (std::invalid_argument &ia)
+        {
+
+        }
+
+        if (result)
+        {
+            mask = value;
+        }
+    }
+
     return result;
 }
 
