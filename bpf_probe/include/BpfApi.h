@@ -118,6 +118,9 @@ namespace bpf_probe {
         virtual bool RegisterEventCallback(EventCallbackFn callback,
                                            DroppedCallbackFn dropCallback) = 0;
 
+        virtual bool SetEventFilterMask(unsigned int mask) = 0;
+        virtual bool GetEventFilterMask(unsigned int &mask) = 0;
+
         virtual int PollEvents() = 0;
 
         virtual libbpf_print_fn_t SetLibBpfLogCallback(libbpf_print_fn_t log_fn) = 0;
@@ -228,6 +231,9 @@ namespace bpf_probe {
                                    DroppedCallbackFn dropCallback) override;
 
         int PollEvents() override;
+
+        bool SetEventFilterMask(unsigned int mask) override;
+        bool GetEventFilterMask(unsigned int &mask) override;
 
         const std::string &GetErrorMessage() const
         {

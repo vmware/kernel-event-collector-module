@@ -76,6 +76,20 @@ namespace tdd_mock {
                     .andReturnValue(result);
         }
 
+        void setup_SetEventFilterMask(unsigned int mask, bool result)
+        {
+            ::mock(BPF_API_SCOPE)
+                    .expectOneCall(__MOCKED_FUNCTION__)
+                    .andReturnValue(result);
+        }
+
+        void setup_GetEventFilterMask(unsigned int &mask, bool result)
+        {
+            ::mock(BPF_API_SCOPE)
+                    .expectOneCall(__MOCKED_FUNCTION__)
+                    .andReturnValue(result);
+        }
+
         void setup_PollEvents(int result)
         {
             ::mock(BPF_API_SCOPE)
@@ -134,6 +148,20 @@ namespace tdd_mock {
 
         bool RegisterEventCallback(EventCallbackFn callback,
                                    DroppedCallbackFn dropCallback) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool SetEventFilterMask(unsigned int mask) override
+        {
+            ::mock(BPF_API_SCOPE)
+                .actualCall(__FUNCTION__);
+            return ::mock(BPF_API_SCOPE).boolReturnValue();
+        }
+
+        bool GetEventFilterMask(unsigned int &mask) override
         {
             ::mock(BPF_API_SCOPE)
                 .actualCall(__FUNCTION__);

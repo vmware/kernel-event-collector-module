@@ -22,6 +22,9 @@ char LICENSE[] SEC("license") = "GPL";
 
 static const char ellipsis[] = "...";
 
+// Reserve this area for more globals, like an eventual per event counters.
+volatile unsigned int event_filter_mask = 0;
+
 extern int LINUX_KERNEL_VERSION __kconfig;
 
 // Detect the presence of SUSE version that requires special handling of mmap flags
@@ -174,6 +177,11 @@ static __always_inline void *__current_blob(void)
 
     return (void *)event_data;
 }
+
+// Checking the global mask for zero before AND bets that we will
+// most likely not have any bits set. Helpful when bits are
+// repeatedly checked.
+#define should_filter_event(event) (event_filter_mask && (event_filter_mask & EVENT_MASK(event)))
 
 static __always_inline void send_event(void *ctx, void *data, size_t data_size)
 {
@@ -1020,6 +1028,10 @@ int BPF_KPROBE(on_security_file_free, struct file *file)
     char *blob_pos = NULL;
     u16 blob_size;
 
+    if (should_filter_event(EVENT_FILE_CLOSE)) {
+        goto out;
+    }
+
     if (!file || __has_fmode_nonotify(file)) {
         goto out;
     }
@@ -1076,6 +1088,9 @@ int BPF_KPROBE(on_security_mmap_file, struct file *file, unsigned long prot, uns
     char *blob_pos = NULL;
     u16 blob_size;
 
+    if (should_filter_event(EVENT_FILE_MMAP)) {
+        goto out;
+    }
     if (!file) {
         goto out;
     }
@@ -1204,6 +1219,10 @@ int BPF_KPROBE(on_security_file_open, struct file *file)
         type = EVENT_FILE_READ;
     }
 
+    if (should_filter_event(type)) {
+        goto out;
+    }
+
     data_x = __current_blob();
     if (!data_x) goto out;
 
@@ -1253,6 +1272,10 @@ int BPF_KPROBE(on_security_inode_unlink, struct inode *dir, struct dentry *dentr
     char *blob_pos = NULL;
     u16 blob_size;
 
+    if (should_filter_event(EVENT_FILE_DELETE)) {
+        return 0;
+    }
+
     sb = _sb_from_dentry(dentry);
     if (!sb || __is_special_filesystem(sb)) {
         return 0;
@@ -1298,6 +1321,10 @@ int BPF_KPROBE(on_security_inode_rename, struct inode *old_dir,
     uint32_t payload = offsetof(typeof(*data_x), blob);
     char *blob_pos = NULL;
     u16 blob_size;
+
+    if (should_filter_event(EVENT_FILE_RENAME)) {
+        goto out;
+    }
 
     sb = _sb_from_dentry(old_dentry);
     if (!sb || __is_special_filesystem(sb)) {
@@ -1496,6 +1523,10 @@ out:
 
 static __always_inline int trace_connect_entry(struct sock *sk)
 {
+    if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+        return 0;
+    }
+
     u64 id = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&currsock, &id, &sk, BPF_ANY);
     return 0;
@@ -1528,6 +1559,11 @@ static __always_inline int trace_connect_return(struct pt_regs *ctx)
     size_t blob_size;
 
     if (!data) {
+        return 0;
+    }
+
+    if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+        bpf_map_delete_elem(&currsock, &id);
         return 0;
     }
 
@@ -1594,6 +1630,10 @@ int BPF_KRETPROBE(trace_connect_v6_return)
 SEC("kretprobe/__skb_recv_udp")
 int BPF_KRETPROBE(trace_skb_recv_udp)
 {
+    if (should_filter_event(EVENT_NET_CONNECT_ACCEPT)) {
+        return 0;
+    }
+
     struct net_data_x *data = __current_blob();
     uint32_t payload = offsetof(typeof(*data), blob);
     char *blob_pos = NULL;
@@ -1724,6 +1764,10 @@ static __always_inline uint16_t _ntohs(uint16_t netshort)
 SEC("kretprobe/inet_csk_accept")
 int BPF_KRETPROBE(trace_accept_return)
 {
+    if (should_filter_event(EVENT_NET_CONNECT_ACCEPT)) {
+        return 0;
+    }
+
     struct net_data_x *data = __current_blob();
     uint32_t payload = offsetof(typeof(*data), blob);
     char *blob_pos = NULL;
@@ -1783,6 +1827,10 @@ int BPF_KPROBE(trace_udp_recvmsg, struct sock *sk, struct msghdr *msg, size_t le
 {
     u64 pid;
 
+    if (should_filter_event(EVENT_NET_CONNECT_DNS_RESPONSE)) {
+        return 0;
+    }
+
     pid = bpf_get_current_pid_tgid();
     if (flags != MSG_PEEK) {
         bpf_map_update_elem(&currsock2, &pid, &msg, BPF_ANY);
@@ -1803,6 +1851,10 @@ int BPF_KRETPROBE(trace_udp_recvmsg_return)
     msgpp = bpf_map_lookup_elem(&currsock2, &id);
     if (msgpp == 0) {
         return 0; // missed entry
+    }
+
+    if (should_filter_event(EVENT_NET_CONNECT_DNS_RESPONSE)) {
+        goto out;
     }
 
     if (ret <= 0) {
@@ -1887,6 +1939,10 @@ static int trace_udp_sendmsg(struct sock *sk, struct msghdr *msg)
 {
     u64 id;
 
+    if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+        return 0;
+    }
+
     id = bpf_get_current_pid_tgid();
     bpf_map_update_elem(&currsock3, &id, &sk, BPF_ANY);
     bpf_map_update_elem(&currsock2, &id, &msg, BPF_ANY);
@@ -1916,13 +1972,15 @@ static int trace_udp_sendmsg_return(struct pt_regs *ctx)
         return 0;
     }
 
+    if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+        goto out;
+    }
+
     struct msghdr **msgpp;
     msgpp = bpf_map_lookup_elem(&currsock2, &id);
 
     if (ret <= 0) {
-        bpf_map_delete_elem(&currsock3, &id);
-        bpf_map_delete_elem(&currsock2, &id);
-        return 0;
+        goto out;
     }
 
     struct net_data_x *data = __current_blob();

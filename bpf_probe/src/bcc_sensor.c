@@ -160,6 +160,22 @@ BPF_HASH(last_parent, u32, u32, 8192);
 BPF_HASH(root_fs, u32, void *, 3); // stores last known root fs
 #endif
 
+BPF_ARRAY(event_filter_mask, unsigned int, 1);
+
+static inline unsigned int get_event_filter()
+{
+	int index = 0;
+	unsigned int *mask = event_filter_mask.lookup(&index);
+	
+	if (mask) {
+		return *mask;
+	}
+	return 0;
+}
+
+#define should_filter_event(event) (get_event_filter() & EVENT_MASK(event))
+
+
 BPF_PERF_OUTPUT(events);
 
 static void send_event(
@@ -505,22 +521,35 @@ static void __send_final_event(void *ctx, struct data *data,
     if (task) {
         init_extra_task_data(&data->extra);
         u8 cgroup_len = cgroup_name_from_task(data->extra.cgroup_name, task);
-        if (cgroup_len) {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+        // we might be able to check of the first character is '\0'
+        if (data->extra.cgroup_name[0]) {
             data->extra.cgroup_size = cgroup_len;
             data->header.report_flags |= REPORT_FLAGS_TASK_DATA;
             send_event(ctx, data, sizeof(*data));
             data->header.report_flags &= ~(REPORT_FLAGS_TASK_DATA);
             return;
         }
+#else
+        if (cgroup_len > 1) {
+            data->extra.cgroup_size = cgroup_len;
+            data->header.report_flags |= REPORT_FLAGS_TASK_DATA;
+            send_event(ctx, data, sizeof_without_extra(*data) + cgroup_len);
+            data->header.report_flags &= ~(REPORT_FLAGS_TASK_DATA);
+            return;
+        }
+#endif
     }
     send_event(ctx, data, sizeof_without_extra(*data));
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 18, 0)
+// Older verifier is not fond of variable sized perf_submit.
 #define __send_single_event(ctx, var, hdr, task_var) do { \
 	if ((task_var)) { \
 		init_extra_task_data(&(var)->extra); \
 		u8 cgroup_len = cgroup_name_from_task((var)->extra.cgroup_name, (task_var)); \
-		if (cgroup_len) { \
+		if ((var)->extra.cgroup_name[0]) { \
 			(hdr)->report_flags |= REPORT_FLAGS_TASK_DATA; \
 			(var)->extra.cgroup_size = cgroup_len; \
 			send_event(ctx, (var), sizeof(*(var))); \
@@ -529,7 +558,23 @@ static void __send_final_event(void *ctx, struct data *data,
 	} \
 	send_event(ctx, (var), sizeof_without_extra(*(var))); \
 } while (0)
-
+#else
+// Sends the minimal amount of bytes for cgroup data.
+// Keeps perf ring buffer minimal as possible.
+#define __send_single_event(ctx, var, hdr, task_var) do { \
+	if ((task_var)) { \
+		init_extra_task_data(&(var)->extra); \
+		u8 cgroup_len = cgroup_name_from_task((var)->extra.cgroup_name, (task_var)); \
+		if (cgroup_len > 1) { \
+			(hdr)->report_flags |= REPORT_FLAGS_TASK_DATA; \
+			(var)->extra.cgroup_size = cgroup_len; \
+			send_event(ctx, (var), sizeof_without_extra(*(var)) + cgroup_len); \
+			break; \
+		} \
+	} \
+	send_event(ctx, (var), sizeof_without_extra(*(var))); \
+} while (0)
+#endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 #define send_single_event(ctx, var) \
@@ -1022,6 +1067,9 @@ static inline void __track_write_entry(
 // Only need this hook for kernels without lru_hash
 int on_security_file_free(struct pt_regs *ctx, struct file *file)
 {
+	if (should_filter_event(EVENT_FILE_CLOSE)) {
+		return 0;
+	}
 	if (!file || __has_fmode_nonotify(file)) {
 		return 0;
 	}
@@ -1060,6 +1108,9 @@ int on_security_mmap_file(struct pt_regs *ctx, struct file *file,
 	unsigned long exec_flags;
 	struct super_block *sb = NULL;
 
+	if (should_filter_event(EVENT_FILE_MMAP)) {
+		goto out;
+	}
 	if (!file) {
 		goto out;
 	}
@@ -1123,9 +1174,13 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 {
 	struct super_block *sb = NULL;
 	struct inode *inode = NULL;
-	int mode;
+	unsigned int mode = 0;
 
-	if (!file || __has_fmode_nonotify(file)) {
+	if (!file) {
+		goto out;
+	}
+
+	if (__has_fmode_nonotify(file)) {
 		goto out;
 	}
 
@@ -1143,35 +1198,41 @@ int on_security_file_open(struct pt_regs *ctx, struct file *file)
 		goto out;
 	}
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0)
-	bpf_probe_read(&mode, sizeof(mode), &(inode->i_mode));
+	bpf_probe_read(&mode, sizeof(inode->i_mode), &inode->i_mode);
 	if (!S_ISREG(mode)) {
 		goto out;
 	}
 #endif
 
-	u8 type;
-	if (file->f_flags & FMODE_EXEC) {
-		type = EVENT_PROCESS_EXEC_PATH;
-	} else if ((file->f_mode & FMODE_CREATED)) {
-		type = EVENT_FILE_CREATE;
-	} else if (file->f_flags & (O_RDWR | O_WRONLY)) {
-		type = EVENT_FILE_WRITE;
-	} else {
-		type = EVENT_FILE_READ;
-	}
-
 	DECLARE_FILE_EVENT(data);
 	if (!data) goto out;
 	struct file_data *file_data = FILE_DATA(data);
 
-	__init_header(type, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
+	__init_header(EVENT_FILE_READ, PP_ENTRY_POINT, &GENERIC_DATA(data)->header);
 	file_data->device = __get_device_from_sb(sb);
-	file_data->inode = __get_inode_from_file(file);
+	file_data->inode = __get_inode_from_pinode(inode);
 	file_data->flags = file->f_flags;
 	file_data->prot = file->f_mode;
 	file_data->fs_magic = __get_magic_from_sb(sb);
 
-	if (type == EVENT_FILE_WRITE || type == EVENT_FILE_CREATE)
+	if (file_data->flags & FMODE_EXEC) {
+		file_data->header.type = EVENT_PROCESS_EXEC_PATH;
+	}
+	// NOTE: Not the real "prot" but we're reusing event field data
+	// to keep the stack smaller.
+	else if ((file_data->prot & FMODE_CREATED)) {
+		file_data->header.type = EVENT_FILE_CREATE;
+	} else if (file_data->flags & (O_RDWR | O_WRONLY)) {
+		file_data->header.type = EVENT_FILE_WRITE;
+	} else {
+		file_data->header.type = EVENT_FILE_READ;
+	}
+
+	if (should_filter_event(file_data->header.type)) {
+		goto out;
+	}
+
+	if (file_data->header.type == EVENT_FILE_WRITE || file_data->header.type == EVENT_FILE_CREATE)
 	{
 		// This allows us to send the last-write event on file close
 		__track_write_entry(file, FILE_DATA(data));
@@ -1233,6 +1294,10 @@ int on_security_inode_rename(struct pt_regs *ctx, struct inode *old_dir,
     DECLARE_FILE_EVENT(data);
     if (!data) goto out;
     struct super_block *sb = NULL;
+
+    if (should_filter_event(EVENT_FILE_RENAME)) {
+        goto out;
+    }
 
     // send event for delete of source file
     if (!__send_dentry_delete(ctx, data, old_dentry)) {
@@ -1485,6 +1550,10 @@ BPF_LRU(currsock3, u64, struct sock *);
 
 int trace_connect_v4_entry(struct pt_regs *ctx, struct sock *sk)
 {
+	if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+		return 0;
+	}
+
 	u64 id = bpf_get_current_pid_tgid();
 	currsock.update(&id, &sk);
 	return 0;
@@ -1492,6 +1561,10 @@ int trace_connect_v4_entry(struct pt_regs *ctx, struct sock *sk)
 
 int trace_connect_v6_entry(struct pt_regs *ctx, struct sock *sk)
 {
+	if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+		return 0;
+	}
+
 	u64 id = bpf_get_current_pid_tgid();
 	currsock.update(&id, &sk);
 	return 0;
@@ -1509,6 +1582,11 @@ static int trace_connect_return(struct pt_regs *ctx)
 	u32 pid = id >> 32;
 	int ret = PT_REGS_RC(ctx);
 	if (ret != 0) {
+		currsock.delete(&id);
+		return 0;
+	}
+
+	if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
 		currsock.delete(&id);
 		return 0;
 	}
@@ -1567,6 +1645,10 @@ int trace_connect_v6_return(struct pt_regs *ctx)
 
 int trace_skb_recv_udp(struct pt_regs *ctx)
 {
+	if (should_filter_event(EVENT_NET_CONNECT_ACCEPT)) {
+		return 0;
+	}
+
 	u64 id = bpf_get_current_pid_tgid();
 	u32 pid = id >> 32;
 
@@ -1666,6 +1748,10 @@ int trace_skb_recv_udp(struct pt_regs *ctx)
 
 int trace_accept_return(struct pt_regs *ctx)
 {
+	if (should_filter_event(EVENT_NET_CONNECT_ACCEPT)) {
+		return 0;
+	}
+
 	u64 id = bpf_get_current_pid_tgid();
 	u32 pid = id >> 32;
 
@@ -1714,6 +1800,10 @@ int trace_udp_recvmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg,
 {
 	u64 pid;
 
+	if (should_filter_event(EVENT_NET_CONNECT_DNS_RESPONSE)) {
+		return 0;
+	}
+
 	pid = bpf_get_current_pid_tgid();
 	if (flags != MSG_PEEK) {
 		currsock2.update(&pid, &msg);
@@ -1735,6 +1825,12 @@ int trace_udp_recvmsg_return(struct pt_regs *ctx, struct sock *sk,
 	msgpp = currsock2.lookup(&id);
 	if (msgpp == 0) {
 		return 0; // missed entry
+	}
+
+	if (should_filter_event(EVENT_NET_CONNECT_DNS_RESPONSE)) {
+		currsock2.delete(&id);
+		currsock3.delete(&id);
+		return 0;
 	}
 
 	if (ret <= 0) {
@@ -1793,6 +1889,10 @@ int trace_udp_sendmsg(struct pt_regs *ctx, struct sock *sk, struct msghdr *msg)
 {
     u64 id;
 
+    if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+        return 0;
+    }
+
     id = bpf_get_current_pid_tgid();
     currsock3.update(&id, &sk);
     currsock2.update(&id, &msg);
@@ -1804,6 +1904,10 @@ int trace_udp_sendmsg_return(struct pt_regs *ctx, struct sock *sk,
 {
     int ret = PT_REGS_RC(ctx);
     u64 id  = bpf_get_current_pid_tgid();
+
+    if (should_filter_event(EVENT_NET_CONNECT_PRE)) {
+        goto out;
+    }
 
     struct sock **skpp;
     skpp = currsock3.lookup(&id);

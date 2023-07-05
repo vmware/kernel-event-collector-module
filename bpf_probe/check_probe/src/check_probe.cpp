@@ -22,7 +22,8 @@ using namespace cb_endpoint::bpf_probe;
 static void PrintUsage();
 static void ParseArgs(int argc, char** argv);
 static void ReadProbeSource(const std::string &probe_source);
-static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program);
+static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program,
+                      unsigned int event_filter_mask);
 static void ProbeEventCallback(Data data);
 static void DroppedCallback(uint64_t drop_count);
 static std::string EventToBlobStrings(const data *event);
@@ -35,6 +36,7 @@ static std::string s_bpf_program;
 static bool read_events = false;
 static bool try_bcc_first = false;
 static unsigned int verbosity = 0;
+static unsigned int g_event_filter = 0;
 
 static int libbpf_print_fn(enum libbpf_print_level level,
                            const char *format, va_list args)
@@ -70,7 +72,8 @@ int main(int argc, char *argv[])
 
     bpf_api->SetLibBpfLogCallback(libbpf_print_fn);
 
-    if (!LoadProbe(*bpf_api, (!s_bpf_program.empty() ? s_bpf_program : BpfProgram::DEFAULT_PROGRAM)))
+    if (!LoadProbe(*bpf_api, (!s_bpf_program.empty() ? s_bpf_program : BpfProgram::DEFAULT_PROGRAM),
+                   g_event_filter))
     {
         printf("Load probe failed\n");
         return 1;
@@ -111,6 +114,13 @@ static void PrintUsage()
     printf(" -L - try loading libbpf first\n");
     printf(" -B - try loading BCC first\n");
     printf(" -v - Add verbosity\n");
+    printf(" -f <event nr> - Event to filter within BPF\n");
+    printf("\nList of Event Numerics:\n");
+
+    for (int i = 0; i < __EVENT_MAX; i++)
+    {
+        printf(" %s -> %d\n", BpfApi::TypeToString(i), i);
+    }
 }
 
 static void ParseArgs(int argc, char** argv)
@@ -123,15 +133,32 @@ static void ParseArgs(int argc, char** argv)
         {"try-bcc-first",       no_argument,       nullptr, 'B'},
         {"try-libbpf-first",    no_argument,       nullptr, 'L'},
         {"verbose",             no_argument,       nullptr, 'v'},
+        {"filter-event",        required_argument, nullptr, 'f'},
         {nullptr, 0,       nullptr, 0}};
 
     while(true)
     {
-        int opt = getopt_long(argc, argv, "hp:rLBv", long_options, &option_index);
+        int opt = getopt_long(argc, argv, "hp:rLBvf:", long_options, &option_index);
         if(-1 == opt) break;
 
         switch(opt)
         {
+            case 'f': {
+                if (optarg && *optarg)
+                {
+                    enum event_type event_val = (typeof(event_val))strtoul(optarg, NULL, 0);
+
+                    if (event_val >= __EVENT_MAX)
+                    {
+                        printf("Invalid event to filter out\n");
+                        break;
+                    }
+                    g_event_filter |= EVENT_MASK(event_val);
+                    fprintf(stderr, "Adding %s to event filter:%#x\n",
+                            BpfApi::TypeToString(event_val), g_event_filter);
+                }
+                break;
+            }
             case 'v':
                 verbosity += 1;
                 break;
@@ -186,7 +213,8 @@ static void ReadProbeSource(const std::string &probe_source)
     }
 }
 
-static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
+static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program,
+                      unsigned int event_filter_mask)
 {
     if (bpf_program.empty())
     {
@@ -209,6 +237,14 @@ static bool LoadProbe(BpfApi & bpf_api, const std::string &bpf_program)
         printf("Failed to init BPF program: %s\n",
                bpf_api.GetErrorMessage().c_str());
         return false;
+    }
+
+    if (event_filter_mask)
+    {
+        if (!bpf_api.SetEventFilterMask(event_filter_mask))
+        {
+            printf("Unable to set EventFilterMask:%#x\n", event_filter_mask);
+        }
     }
 
     BpfApi::ProgInstanceType instance_type = bpf_api.GetProgInstanceType();
