@@ -148,8 +148,24 @@ struct syscalls_sys_exit_args {
 #define DNS_SEGMENT_FLAGS_START 0x01
 #define DNS_SEGMENT_FLAGS_END 0x02
 
+// Hard to know which exact kernel's verifier easily
+// allows for a per-CPU scratchpad.
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
+BPF_PERCPU_ARRAY(xpad, struct _file_event, 1);
+static inline void *__current_blob(void)
+{
+    u32 index = 0;
+    struct _file_event *buf = xpad.lookup(&index);
 
+    if (buf) {
+           __builtin_memset(buf, 0, sizeof(*buf) - sizeof(struct extra_task_data));
+    }
+    return (void *)buf;
+}
+#define DECLARE_FILE_EVENT(DATA) struct _file_event *DATA = __current_blob()
+#else
 #define DECLARE_FILE_EVENT(DATA) struct _file_event __##DATA = {}; struct _file_event *DATA = &__##DATA
+#endif
 #define GENERIC_DATA(DATA)  ((struct data*)&((struct _file_event*)(DATA))->_data)
 #define FILE_DATA(DATA)  ((struct file_data*)&((struct _file_event*)(DATA))->_file_data)
 #define PATH_DATA(DATA)  ((struct path_data*)&((struct _file_event*)(DATA))->_path_data)
