@@ -169,6 +169,7 @@ static void ParseArgs(int argc, char** argv)
                 try_bcc_first = true;
                 break;
             case 'p':
+                fprintf(stderr, "Warning: May require including transport.h contents into file\n");
                 ReadProbeSource(optarg);
                 break;
             case 'r':
