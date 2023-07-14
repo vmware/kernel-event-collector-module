@@ -25,7 +25,6 @@ int init_basic(int argc, const char *argv[])
 
     for (int i = 1; i < argc; i++)
     {
-    fprintf(stderr, "%s:%d\n", __func__, __LINE__);
         if (argv[i] && argv[i]) {
             int ret = file_notify__ban_filepath(skel, argv[i]);
 
@@ -39,9 +38,14 @@ int init_basic(int argc, const char *argv[])
         }
     }
 
-    // if (skel) {
-    //     file_notify_bpf__destroy(skel);
-    // }
+    // Where we'd poll for events from perf or ring buffer
+    while (true) {
+        sleep(1000);
+    }
+
+    if (skel) {
+        file_notify_bpf__destroy(skel);
+    }
     return ret;
 }
 
@@ -60,9 +64,6 @@ int main(int argc, const char *argv[])
     }
 
     init_basic(argc, argv);
-    while (true) {
-        sleep(1000);
-    }
 
     return 0;
 }
