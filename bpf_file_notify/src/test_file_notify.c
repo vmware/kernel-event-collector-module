@@ -5,15 +5,26 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include "file_notify.h"
+#include "file_notify_transport.h"
 #include "file_notify.skel.h"
 
+
+static void perf_print_data(void *ctx, int cpu, void *data, __u32 data_sz)
+{
+    struct file_notify_msg *msg = data;
+
+    printf("%lu payload:%u %s[%u]\n", msg->hdr.ts, msg->hdr.payload,
+           msg->task_ctx.comm, msg->task_ctx.pid);
+}
 
 int init_basic(int argc, const char *argv[])
 {
     int ret = 0;
     struct file_notify_bpf *skel = NULL;
+    struct perf_buffer *pb = NULL;
 
     skel = file_notify_bpf__open_and_load();
     if (!skel) {
@@ -25,6 +36,11 @@ int init_basic(int argc, const char *argv[])
     if (ret) {
         printf("Unable to attach bpf: %d\n", ret);
     }
+
+    pb = perf_buffer__new(bpf_map__fd(skel->maps.events), 512,
+                          perf_print_data, NULL,
+                          NULL, NULL);
+
 
     for (int i = 1; i < argc; i++)
     {
@@ -42,8 +58,12 @@ int init_basic(int argc, const char *argv[])
     }
 
     // Where we'd poll for events from perf or ring buffer
-    while (true) {
-        sleep(1000);
+    while (true)
+    {
+        ret = perf_buffer__poll(pb, -1);
+        if (ret < 0 && ret != -EINTR) {
+            break;
+        }
     }
 
     if (skel) {

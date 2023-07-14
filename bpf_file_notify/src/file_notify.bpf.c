@@ -29,6 +29,40 @@ struct {
     __type(value, struct inode_cache_entry);
 } inode_storage_map SEC(".maps");
 
+// struct {
+//     __uint(type, BPF_MAP_TYPE_TASK_STORAGE);
+//     __uint(map_flags, BPF_F_NO_PREALLOC);
+//     __type(key, int);
+//     __type(value, struct task_cache_entry);
+// } task_storage_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, 1);
+    __type(key, u32);
+    __type(value, struct file_notify_msg);
+} xpad SEC(".maps");
+
+
+static const struct file_notify_msg empty_dummy = {};
+
+static __always_inline void *current_blob(void)
+{
+    u32 index = 0;
+
+    (void)bpf_map_update_elem(&xpad, &index, &empty_dummy, BPF_ANY);
+
+    return bpf_map_lookup_elem(&xpad, &index);
+}
+
+// Sleepable scratchpad
+// struct {
+//     __uint(type, BPF_MAP_TYPE_HASH);
+//     __uint(max_entries, 256);
+//     __type(key, u32);
+//     __type(value, struct file_notify_msg);
+// } xpad_s SEC(".maps");
+
 // SEC("?lsm.s/file_open")
 // int BPF_PROG(lsm_file_open_s, struct file *file)
 // {
@@ -39,6 +73,7 @@ struct {
 SEC("lsm/file_open")
 int BPF_PROG(lsm_file_open, struct file *file)
 {
+    bool notify = false;
     int ret = 0;
     struct inode_cache_entry *entry = NULL;
 
@@ -65,9 +100,20 @@ int BPF_PROG(lsm_file_open, struct file *file)
         if (entry->type_flags & INODE_TYPE_LABEL_BANNED)
         {
             ret = -EPERM;
+            __sync_add_and_fetch(&entry->total_deny, 1);
 
-            // Log to userspace here ...
+            notify = true;
         }
+    }
+
+    if (entry->type_flags & INODE_TYPE_LABEL_INTERESTING)
+    {
+        notify = true;
+    }
+
+    if (entry->type_flags & INODE_TYPE_LABEL_IGNORE)
+    {
+        notify = false;
     }
 
     // Potentially do some reputation magic score here:
@@ -76,5 +122,38 @@ int BPF_PROG(lsm_file_open, struct file *file)
     //
 
 out:
+
+    if (notify)
+    {
+        struct task_struct *task = (typeof(task))bpf_get_current_task();
+        struct file_notify_msg *msg = current_blob();
+
+        if (msg)
+        {
+            u32 payload = offsetof(typeof(*msg), blob);
+
+            msg->hdr.ts = bpf_ktime_get_ns();
+
+            if (entry) {
+                msg->inode_entry = *entry;
+            }
+
+            // Fill in task info like exe, task cred data etc
+            BPF_CORE_READ_INTO(&msg->task_ctx.tid, task, pid);
+            BPF_CORE_READ_INTO(&msg->task_ctx.pid, task, tgid);
+            BPF_CORE_READ_INTO(&msg->task_ctx.comm, task, comm);
+
+            // Fill in file info as well like fs_magic, inode, device
+            // uid, gid, parent directory info too.
+
+            msg->hdr.payload = payload;
+            barrier_var(payload);
+            if (payload <= sizeof(*msg)) {
+                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU,
+                                      msg, payload);
+            }
+        }
+    }
+
     return ret;
 }
