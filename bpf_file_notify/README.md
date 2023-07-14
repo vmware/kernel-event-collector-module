@@ -1,7 +1,18 @@
 # BPF File Notify
 
 This project is meant to fulfill a few things in the CBC Event Pipeline,
-and to not be part of the bpf event collector.
+and to not be part of the bpf event collector. Atleast not at first.
+
+This could be used for doing really interesting filtering within BPF or
+supplement ILB or reduce the need for ILB.
+
+If we detected interpreters are real-time, on exec of an interpreter,
+we could drastically reduce file open events. Or mark/label in BPF
+known scripts. This could allow for eventually truly distributed and
+dynamic event filtering of a process tree at real-time.
+
+Those are some of the basic but interesting things you can do with BPF
+LSM inode and task storage.
 
 ## BPF Based Static File Banning
 This cab be used to ban files within BPF without requiring fanotify.
@@ -25,10 +36,4 @@ lookups etc. Even as a tool to design creating new security access controls.
  - Eventually add self protections
  - Extend to embed file reputation into kernel objects!
  - Could eventually be used to help filter out more events in sensor.bpf.c
-
-
-## Reasons To Not Use
- - You don't like accurate file caching
- - You don't like fast and efficient file banning
- - You don't care about performance
 
