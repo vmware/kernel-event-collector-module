@@ -16,8 +16,9 @@ static void perf_print_data(void *ctx, int cpu, void *data, __u32 data_sz)
 {
     struct file_notify_msg *msg = data;
 
-    printf("%lu payload:%u %s[%u]\n", msg->hdr.ts, msg->hdr.payload,
-           msg->task_ctx.comm, msg->task_ctx.pid);
+    printf("%lu payload:%u %s[%u] total_deny:%lu\n", msg->hdr.ts, msg->hdr.payload,
+           msg->task_ctx.comm, msg->task_ctx.pid,
+           msg->inode_entry.total_deny);
 }
 
 int init_basic(int argc, const char *argv[])
