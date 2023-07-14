@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright (c) 2019-2020 VMware, Inc. All rights reserved.
-# Copyright (c) 2016-2019 Carbon Black, Inc. All rights reserved.
+# Copyright (c) 2023 VMware, Inc. All rights reserved.
 
 from conans import python_requires, CMake, tools, AutoToolsBuildEnvironment
 import os
@@ -15,12 +14,15 @@ class SHORT_NAME(CbConanFile):
     generators = "cmake"
     requires = (
         "ELFUTILS_VERSION",
-        "BOOST_VERSION",
-        "BPFTOOL_VERSION",
         "LIBBPF_VERSION",
     )
 
-    build_requires = "CPPUTEST_VERSION", "LLVM_VERSION"
+    build_requires = (
+        "CPPUTEST_VERSION",
+        "LLVM_VERSION",
+        "BPFTOOL_VERSION",
+    )
+
     default_options = (
         "elfutils:shared=False",
         "llvm:shared=False",

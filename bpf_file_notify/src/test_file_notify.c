@@ -1,4 +1,7 @@
-
+/*
+ * Copyright 2023 VMware, Inc.
+ * SPDX-License-Identifier: GPL-2.0
+ */
 
 #include <stdio.h>
 #include <unistd.h>

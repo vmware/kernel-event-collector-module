@@ -1,22 +1,14 @@
-# Copyright 2021 VMware Inc.  All rights reserved.
+# Copyright 2023 VMware Inc.  All rights reserved.
 # SPDX-License-Identifier: GPL-2.0
 cmake_minimum_required(VERSION 2.8.7)
 
-project(bpf_probe)
+project(bpf_file_notify)
 
-if(NOT DEFINED LOCAL_BUILD)
-    set(LOCAL_BUILD no)
-endif()
 
-if (NOT ${LOCAL_BUILD})
-    message("Project will be built using CB build utility")
-    FIND_PACKAGE(CbUtil REQUIRED)
-    cb_configure_flags()
-    cb_conan_setup(TARGETS)
-else()
-    message("Project will be built using local system libraries")
-    add_definitions(-DLOCAL_BUILD)
-endif()
+message("Project will be built using CB build utility")
+FIND_PACKAGE(CbUtil REQUIRED)
+cb_configure_flags()
+cb_conan_setup(TARGETS)
 
 set(CMAKE_CXX_STANDARD 11)
 
@@ -26,12 +18,6 @@ set(CMAKE_BUILD_TYPE RelWithDebInfo)
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
 
 include_directories(${PROJECT_SOURCE_DIR}/../include)
-
-
-# target_link_libraries(bpf-probe z rt dl pthread m)
-# add_dependencies(bpf-probe bpf_skel)
-# target_include_directories(bpf-probe PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-#target_include_directories(check_probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
 
 
 set(BPF_C_FILE ${PROJECT_SOURCE_DIR}/file_notify.bpf.c)
@@ -87,6 +73,5 @@ add_executable(test_file_notify test_file_notify.c)
 target_include_directories(test_file_notify PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(test_file_notify file-notify)
 
-# install(TARGETS check_probe PERMISSIONS OWNER_WRITE OWNER_READ OWNER_EXECUTE DESTINATION .)
 install(FILES ${BPF_SKEL_FILE} DESTINATION include/bpf_file_notify)
 install(FILES ${BPF_ELF_FILE} ${BPF_ELF_FILE_UNSTRIP} DESTINATION lib)
