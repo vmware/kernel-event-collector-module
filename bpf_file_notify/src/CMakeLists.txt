@@ -60,7 +60,7 @@ add_custom_target(bpf_skel ALL DEPENDS ${BPF_ELF_FILE} ${BPF_SKEL_FILE})
 add_library(file-notify STATIC
             file_notify.c
 )
-set_property(TARGET file-notify PROPERTY POSITION_INDEPENDENT_CODE 1)
+# set_property(TARGET file-notify PROPERTY POSITION_INDEPENDENT_CODE 1)
 target_include_directories(file-notify PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 add_dependencies(file-notify bpf_skel)
 target_link_libraries(file-notify

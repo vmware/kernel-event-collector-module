@@ -12,13 +12,56 @@
 #include "file_notify.skel.h"
 
 
+static void print_blob(const void *base, const struct file_notify__blob_ctx *blob)
+{
+    if (blob && blob->size && blob->offset)
+    {
+        const char *type = "UNKNOWN";
+
+        const char *loc = (typeof(loc))base + blob->offset;
+
+        switch (blob->type)
+        {
+        case BLOB_TYPE_DENTRY_PATH:
+            type = "DENTRY_PATH";
+        case BLOB_TYPE_FULL_PATH:
+            type = "FULL_PATH";
+        case BLOB_TYPE_DPATH:
+            type = "DPATH";
+
+            printf("%s: {sz:%u off:%u flags:%#x strlen:%lu %s}", type,
+                   blob->size, blob->offset, blob->flags, strlen(loc), loc);
+            break;
+
+        case BLOB_TYPE_NUL_TERMINATE_STRING:
+            type = "NUL_TERMINATE_STRING";
+            printf("%s: {sz:%u off:%u flags:%#x}", type,
+                   blob->size, blob->offset, blob->flags);
+            break;
+
+        case BLOB_TYPE_RAW:
+            type = "RAW";
+            printf("%s: {sz:%u off:%u flags:%#x}", type,
+                   blob->size, blob->offset, blob->flags);
+            break;
+
+        default:
+            printf("%s[%u]: {sz:%u off:%u flags:%#x}", type, blob->type,
+                   blob->size, blob->offset, blob->flags);
+            break;
+        }
+    }
+}
+
 static void perf_print_data(void *ctx, int cpu, void *data, __u32 data_sz)
 {
     struct file_notify_msg *msg = data;
 
-    printf("%lu payload:%u %s[%u] total_deny:%lu\n", msg->hdr.ts, msg->hdr.payload,
+    printf("%lu payload:%u %s[%u] total_deny:%lu ", msg->hdr.ts, msg->hdr.payload,
            msg->task_ctx.comm, msg->task_ctx.pid,
            msg->inode_entry.total_deny);
+    print_blob(msg, &msg->path);
+    printf("\n");
 }
 
 int init_basic(int argc, const char *argv[])

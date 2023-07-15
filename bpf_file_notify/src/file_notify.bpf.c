@@ -130,7 +130,9 @@ out:
 
         if (msg)
         {
+            u16 blob_size = 0;
             u32 payload = offsetof(typeof(*msg), blob);
+            char *blob_pos = msg->blob;
 
             msg->hdr.ts = bpf_ktime_get_ns();
 
@@ -145,6 +147,42 @@ out:
 
             // Fill in file info as well like fs_magic, inode, device
             // uid, gid, parent directory info too.
+
+            // If bpf_d_path doesn't work at this context for older
+            // RHEL 8 kernels, create a legacy version of this LSM
+            // hook and use the sensor.bpf.c blobify file path function.
+            // However don't worry about truncation too much, that's
+            // a silly, endless never ending problem.
+
+            int ret = bpf_d_path(&file->f_path, &msg->blob, 4096);
+            barrier_var(ret);
+            if (ret <= 4096) {
+                msg->path.type = BLOB_TYPE_DPATH;
+
+                if (ret >= 0) {
+                    blob_size = (u16)ret;
+                }
+                // When the path is too long send the whole buffer
+                // to allow userspace to "find" the start of the
+                // truncated path. Blob buffer area is all zeroed out,
+                // so userspace can find it like our other kernel modules do.
+                else if (ret == -ENAMETOOLONG) {
+                    msg->path.flags |= BLOB_TYPE_FLAG__TRUNCATED;
+                    blob_size = 4096;
+                }
+                else {
+                    blob_size = 0;
+                }
+            }
+
+            barrier_var(blob_size);
+            if (blob_size <= 4096) {
+                msg->path.type = BLOB_TYPE_DPATH;
+                msg->path.size = blob_size;
+                msg->path.offset = payload;
+
+                payload += blob_size;
+            }
 
             msg->hdr.payload = payload;
             barrier_var(payload);

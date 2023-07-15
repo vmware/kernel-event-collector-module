@@ -41,6 +41,43 @@ struct file_notify_task_ctx {
     char comm[16];
 };
 
+enum file_notify__blob_type {
+    BLOB_TYPE_RAW,
+    BLOB_TYPE_NUL_TERMINATE_STRING,
+    BLOB_TYPE_DENTRY_PATH,
+    BLOB_TYPE_FULL_PATH,
+    BLOB_TYPE_DPATH,
+
+    // Keep last
+    BLOB_TYPE_MAX,
+};
+
+#define BLOB_TYPE_FLAG__TRUNCATED         0x01
+#define BLOB_TYPE_FLAG__LIKELY_TRUNCATED  0x02
+// handle case when file was likely deleted and
+// we called bpf_d_path. Just requires removing "(deleted)"
+// from blob in userspace. This is safer than always
+// checking for "(deleted)" in the paths to prevent
+// data racing based circumvention.
+#define BLOB_TYPE_FLAG__UNLINKED          0x04
+
+
+struct file_notify__blob_ctx {
+    uint8_t type;       // file_notify__blob_type
+    uint8_t flags;      // blob type flags/hints
+    uint16_t reserved;  // BTF_KIND Info would be cool
+
+    uint16_t size;
+    uint16_t offset;
+};
+
+// Return the decisions made and place into a bitmap
+// and whatever other computations we want to help
+// userspace understand our decision.
+struct file_notify__decision_vector {
+    uint64_t reserved[8];
+};
+
 struct file_notify_msg {
     struct file_notify_hdr hdr;
 
@@ -50,8 +87,7 @@ struct file_notify_msg {
     // File Context
     struct inode_cache_entry inode_entry;
 
-    uint16_t path_size;
-    uint16_t path_offset;
+    struct file_notify__blob_ctx path;
 
     char blob[8192];
 };
