@@ -16,6 +16,12 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+const unsigned int USE_RINGBUF = 1;
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+} ringbuf SEC(".maps");
+
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
     __uint(key_size, sizeof(u32));
@@ -46,7 +52,8 @@ struct {
 
 static const struct file_notify_msg empty_dummy = {};
 
-static __always_inline void *current_blob(void)
+static __always_inline
+void *current_blob(void)
 {
     u32 index = 0;
 
@@ -54,6 +61,18 @@ static __always_inline void *current_blob(void)
 
     return bpf_map_lookup_elem(&xpad, &index);
 }
+
+static __always_inline
+int data_output(void *ctx, void *data, size_t size, u64 flags)
+{
+    if (USE_RINGBUF)
+    {
+        return bpf_ringbuf_output(&ringbuf, data, size, flags);
+    }
+
+    return bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, data, size);
+}
+
 
 // Sleepable scratchpad
 // struct {
@@ -69,8 +88,31 @@ static __always_inline void *current_blob(void)
 
 // }
 
+// Ideally turn this into a macro if we can
+static __always_inline
+char *compute_blob_ctx(u16 blob_size, struct file_notify__blob_ctx *blob_ctx,
+                       u32 *payload, char *blob_pos)
+{
+    if (blob_ctx && payload) {
+        blob_ctx->size = blob_size;
+        if (blob_size) {
+            blob_ctx->offset = (u16)*payload;
+        } else {
+            blob_ctx->offset = 0;
+        }
+        *payload += blob_size;
 
-SEC("lsm/file_open")
+        if (blob_pos) {
+            return blob_pos + blob_size;
+        }
+    }
+    return blob_pos;
+}
+
+// Sleepable hook, so must always use ringbuf.
+// Perf buffers can only work on non-sleepable prog/probe types
+// since perf buffers are per-CPU by default.
+SEC("lsm.s/file_open")
 int BPF_PROG(lsm_file_open, struct file *file)
 {
     bool notify = false;
@@ -86,10 +128,16 @@ int BPF_PROG(lsm_file_open, struct file *file)
     // or be careful when using CORE functions when using storage maps.
     // LSM and fentry/fexit hooks have special ways to auto-map the fields.
     entry = bpf_inode_storage_get(&inode_storage_map, file->f_inode, 0, 0);
-    // Assumes we don't care about tracking files dynamically from BPF
     if (!entry)
     {
-        goto out;
+        entry = bpf_inode_storage_get(&inode_storage_map, file->f_inode, 0,
+                                      BPF_LOCAL_STORAGE_GET_F_CREATE);
+        if (!entry)
+        {
+            goto out;
+        }
+
+        notify = true;
     }
 
     // Check if file is banned
@@ -111,6 +159,8 @@ int BPF_PROG(lsm_file_open, struct file *file)
         notify = true;
     }
 
+    // We explicitly set this bit to not notify, so follow that
+    // unless we were in some debug mode.
     if (entry->type_flags & INODE_TYPE_LABEL_IGNORE)
     {
         notify = false;
@@ -125,6 +175,9 @@ out:
 
     if (notify)
     {
+        // bpf_get_current_task_btf would be better to use,
+        // especially when we want to start labeling processes
+        //
         struct task_struct *task = (typeof(task))bpf_get_current_task();
         struct file_notify_msg *msg = current_blob();
 
@@ -154,7 +207,7 @@ out:
             // However don't worry about truncation too much, that's
             // a silly, endless never ending problem.
 
-            int ret = bpf_d_path(&file->f_path, &msg->blob, 4096);
+            int ret = bpf_d_path(&file->f_path, blob_pos, 4096);
             barrier_var(ret);
             if (ret <= 4096) {
                 msg->path.type = BLOB_TYPE_DPATH;
@@ -177,18 +230,14 @@ out:
 
             barrier_var(blob_size);
             if (blob_size <= 4096) {
-                msg->path.type = BLOB_TYPE_DPATH;
-                msg->path.size = blob_size;
-                msg->path.offset = payload;
-
-                payload += blob_size;
+                blob_pos = compute_blob_ctx(blob_size, &msg->path,
+                                            &payload, blob_pos);
             }
 
             msg->hdr.payload = payload;
             barrier_var(payload);
             if (payload <= sizeof(*msg)) {
-                bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU,
-                                      msg, payload);
+                data_output(ctx, msg, payload, BPF_RB_FORCE_WAKEUP);
             }
         }
     }
