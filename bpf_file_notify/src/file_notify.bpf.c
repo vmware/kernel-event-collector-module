@@ -112,7 +112,7 @@ char *compute_blob_ctx(u16 blob_size, struct file_notify__blob_ctx *blob_ctx,
 // Sleepable hook, so must always use ringbuf.
 // Perf buffers can only work on non-sleepable prog/probe types
 // since perf buffers are per-CPU by default.
-SEC("lsm.s/file_open")
+SEC("lsm/file_open")
 int BPF_PROG(lsm_file_open, struct file *file)
 {
     bool notify = false;
@@ -130,14 +130,16 @@ int BPF_PROG(lsm_file_open, struct file *file)
     entry = bpf_inode_storage_get(&inode_storage_map, file->f_inode, 0, 0);
     if (!entry)
     {
-        entry = bpf_inode_storage_get(&inode_storage_map, file->f_inode, 0,
-                                      BPF_LOCAL_STORAGE_GET_F_CREATE);
-        if (!entry)
-        {
-            goto out;
-        }
+        // Allows you to allocate an inode entry from BPF not userspace :)
 
-        notify = true;
+        // entry = bpf_inode_storage_get(&inode_storage_map, file->f_inode, 0,
+        //                               BPF_LOCAL_STORAGE_GET_F_CREATE);
+        // if (!entry)
+        // {
+        //     goto out;
+        // }
+
+        goto out;
     }
 
     // Check if file is banned

@@ -17,7 +17,6 @@ static void print_blob(const void *base, const struct file_notify__blob_ctx *blo
     if (blob && blob->size && blob->offset)
     {
         const char *type = "UNKNOWN";
-
         const char *loc = (typeof(loc))base + blob->offset;
 
         switch (blob->type)
@@ -100,6 +99,7 @@ int init_basic(int argc, const char *argv[])
     } else {
         skel->rodata->USE_RINGBUF = 1;
         bpf_map__set_autocreate(skel->maps.events, false);
+        // ring buf size should something like getpagesize() * pagecount * ncpus.
         bpf_map__set_max_entries(skel->maps.ringbuf, 4096 * 512);
     }
 
@@ -113,9 +113,11 @@ int init_basic(int argc, const char *argv[])
         pb = perf_buffer__new(bpf_map__fd(skel->maps.events), 512,
                               perf_print_data, NULL,
                               NULL, NULL);
+        if (!pb) {
             printf("Unable to create perf_buffer\n");
             ret = 1;
             goto out;
+        }
     } else {
         ringbuf = ring_buffer__new(bpf_map__fd(skel->maps.ringbuf),
                                    ringbuf_print_data, NULL, NULL);
