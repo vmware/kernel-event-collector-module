@@ -23,11 +23,16 @@ static void print_blob(const void *base, const struct file_notify__blob_ctx *blo
         {
         case BLOB_TYPE_DENTRY_PATH:
             type = "DENTRY_PATH";
+            printf("%s:{sz:%u off:%u flags:%#x strlen:%lu %s}", type,
+                   blob->size, blob->offset, blob->flags, strlen(loc), loc);
+            break;
         case BLOB_TYPE_FULL_PATH:
             type = "FULL_PATH";
+            printf("%s:{sz:%u off:%u flags:%#x strlen:%lu %s}", type,
+                   blob->size, blob->offset, blob->flags, strlen(loc), loc);
+            break;
         case BLOB_TYPE_DPATH:
             type = "DPATH";
-
             printf("%s:{sz:%u off:%u flags:%#x strlen:%lu %s}", type,
                    blob->size, blob->offset, blob->flags, strlen(loc), loc);
             break;
