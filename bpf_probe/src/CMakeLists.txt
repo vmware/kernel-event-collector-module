@@ -56,7 +56,7 @@ target_include_directories(bpf-probe PUBLIC ${CONAN_INCLUDE_DIRS_LIBBPF})
 if (NOT ${LOCAL_BUILD})
     target_link_libraries(bpf-probe
             CONAN_PKG::bcc
-
+            CONAN_PKG::libbpf
             -Wl,--whole-archive
             CONAN_PKG::llvm
             CONAN_LIB::elfutils_elf

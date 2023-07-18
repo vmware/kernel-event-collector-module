@@ -14,6 +14,7 @@
 
 // real libbpf from conan package
 #include <bpf/libbpf.h>
+#include <bpf/libbpf_legacy.h>
 
 #include <climits>
 #include <stdlib.h>
