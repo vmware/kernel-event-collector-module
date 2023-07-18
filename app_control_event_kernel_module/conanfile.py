@@ -37,6 +37,7 @@ class DynSec(CbConanFile):
         "KERNEL_RHEL_8_5_VERSION",
         "KERNEL_RHEL_8_6_VERSION",
         "KERNEL_RHEL_8_7_VERSION",
+        "KERNEL_RHEL_8_8_VERSION",
         "KERNEL_RHEL_9_0_VERSION",
         "KERNEL_RHEL_9_1_VERSION",
     ]
