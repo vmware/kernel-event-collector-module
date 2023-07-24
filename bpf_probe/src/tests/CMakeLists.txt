@@ -7,6 +7,5 @@ if (NOT ${LOCAL_BUILD})
                                BpfApi_tests.cpp
                  LIBRARIES     CONAN_PKG::CppUTest
                                bpf-probe
-                 DEPENDENCIES  check_probe
-                 UNIT)
+                 DEPENDENCIES  check_probe)
 endif()
