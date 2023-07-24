@@ -9,7 +9,7 @@ include: 'https://gitlab.bit9.local/cbsensor/cb-build-util/raw/master/gitlab-ci-
 
 # Gitlab CI configuration script for event-collector-app.
 variables:
-  ARTIFACTORY_PATH: https://${ARTIFACTORY_URL}/artifactory
+  ARTIFACTORY_PUB_PATH: https://${ARTIFACTORY_PUB_HOST}/artifactory
   BUILD_VERSION: ${CI_PIPELINE_ID} # Anything that starts with CI_ comes from gitlab}
 
 stages:
@@ -58,8 +58,6 @@ makefile_test:
   stage: deploy
   when: on_success
   allow_failure: false
-  tags:
-    - docker-socket
 
 .deploy_check_probe_pkg: &deploy_check_probe_pkg |
   get_ci_variables
@@ -68,15 +66,15 @@ makefile_test:
       for arch in "x86_64" "aarch64"
       do
           ARTIFACTORY_PROBE_PATH=carbonblack-pub/psc/tests/check_probe/linux/${arch}/${CI_COMMIT_REF_NAME}
-          echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+          echo "Deploying build $ARTIFACTORY_PUB_PATH/$ARTIFACTORY_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
           filename=workspace/bpf_probe/build/install-packages/${arch}/check-probe-${BUILD_VERSION}.tar.gz
           echo $filename
 
-          curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
+          curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PUB_PATH/$ARTIFACTORY_PROBE_PATH/" -T  $filename >/dev/null
 
           if [ "${arch}" == "x86_64" ]; then
-              echo "Deploying build $ARTIFACTORY_PATH/$ARTIFACTORY_BASE_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
-              curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PATH/$ARTIFACTORY_BASE_PROBE_PATH/" -T  $filename >/dev/null
+              echo "Deploying build $ARTIFACTORY_PUB_PATH/$ARTIFACTORY_BASE_PROBE_PATH/check-probe-${BUILD_VERSION}.tar.gz"
+              curl -s -S -H "X-JFrog-Art-Api:$SVC_GITLAB_ART_PUB_API_KEY" -X PUT "$ARTIFACTORY_PUB_PATH/$ARTIFACTORY_BASE_PROBE_PATH/" -T  $filename >/dev/null
           fi
       done
   else
@@ -86,8 +84,6 @@ makefile_test:
 .deploy:
   script: *deploy_check_probe_pkg
   stage: deploy
-  tags:
-    - artifactory-pub
   variables:
     GIT_STRATEGY: none
 
@@ -109,8 +105,6 @@ deploy_branch:
 
 publish_to_github:
   stage: publish
-  tags:
-    - web-access
   before_script:
     - echo "Overriding global build script" > /dev/null
   allow_failure: true
