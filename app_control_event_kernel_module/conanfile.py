@@ -10,7 +10,7 @@ from conan_util.CbConanFile import CbConanFile
 
 class DynSec(CbConanFile):
     name     = "DynSec"
-    version  = "PROJECT_VERSION"
+    version  = "1.0.20000"
     settings = "os", "arch"
     generators = "cmake"
     options = {
