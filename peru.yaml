@@ -7,4 +7,4 @@ imports:
 
 git module build-util:
     url:  git@gitlab.bit9.local:cbsensor/cb-build-util.git
-    rev:  release-psc-lnx-2.16.0
+    rev:  release-psc-lnx-kubernetes-2.15.0
